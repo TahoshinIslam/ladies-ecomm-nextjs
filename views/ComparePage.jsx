@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
-import { X, ShoppingBag, Scale, ArrowLeft } from "lucide-react";
+import { Home, X, ShoppingBag, Scale } from "lucide-react";
 import { toast } from "sonner";
 
 import Button from "../components/ui/Button.jsx";
@@ -12,28 +12,31 @@ import Rating from "../components/ui/Rating.jsx";
 import Badge from "../components/ui/Badge.jsx";
 import Skeleton from "../components/ui/Skeleton.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
+import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 
 import { useGetCompareProductsQuery } from "../store/productApi.js";
 import { selectCurrentUser } from "../store/authSlice.js";
 import { useCart } from "../hooks/useCart.js";
 import { removeFromCompare, clearCompare } from "../store/uiSlice.js";
-import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
+import { cn, resolveImage } from "../lib/utils.js";
+import { useSettings } from "../context/SettingsContext.jsx";
 
-// `variants` is the modest-fashion schema; `sizes` is the legacy
-// mock-catalog shape — normalize to one shape everywhere in this page.
-const getSizeOptions = (product) =>
-  product.variants?.length
-    ? product.variants.map((v) => ({ size: v.attributes?.size || v.variantName, stock: v.stock }))
-    : product.sizes || [];
+// `variants` is the real modest-fashion schema — `product.sizes` (the
+// legacy mock-catalog shape) is dead against real data and dropped here.
+const getVariants = (product) => product.variants ?? [];
 
 export default function ComparePage() {
+  const settings = useSettings();
   const compareList = useSelector((s) => s.ui.compareList);
   const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const router = useRouter();
   const cart = useCart();
   const [pendingId, setPendingId] = useState(null);
-  const [sizeBy, setSizeBy] = useState({});
+  // Which variant is picked per compared product — a variant id, not a bare
+  // size string, so two variants sharing a size (e.g. Black/M and Navy/M)
+  // stay distinguishable (see Phase 4 audit).
+  const [variantBy, setVariantBy] = useState({});
 
   const { data, isLoading, isFetching } = useGetCompareProductsQuery(
     compareList,
@@ -41,19 +44,20 @@ export default function ComparePage() {
   );
   const products = data?.products || [];
 
-  const pickSize = (productId, size) =>
-    setSizeBy((prev) => ({ ...prev, [productId]: size }));
+  const pickVariant = (productId, variantId) =>
+    setVariantBy((prev) => ({ ...prev, [productId]: variantId }));
 
   const handleAddToCart = async (product) => {
-    const inStockSizes = getSizeOptions(product).filter((s) => s.stock > 0);
-    if (inStockSizes.length === 0) {
+    const inStockVariants = getVariants(product).filter((v) => (v.stock ?? 0) > 0);
+    if (inStockVariants.length === 0) {
       toast.error("Out of stock");
       return;
     }
-    const size = sizeBy[product._id] || inStockSizes[0].size;
+    const pickedId = variantBy[product._id];
+    const variant = (pickedId && inStockVariants.find((v) => v._id === pickedId)) || inStockVariants[0];
     try {
       setPendingId(product._id);
-      await cart.addItem({ product, size, quantity: 1 });
+      await cart.addItem({ product, variant, quantity: 1 });
       toast.success(`Added ${product.name}`);
     } catch (e) {
       toast.error(e?.data?.message || "Could not add to cart");
@@ -66,6 +70,12 @@ export default function ComparePage() {
   if (compareList.length === 0) {
     return (
       <div className="container-x py-12">
+        <Breadcrumb
+          items={[
+            { label: "Home", href: "/", icon: Home },
+            { label: "Compare", icon: Scale },
+          ]}
+        />
         <EmptyState
           icon={Scale}
           title="No products to compare"
@@ -106,15 +116,15 @@ export default function ComparePage() {
         return hasDiscount ? (
           <span className="flex flex-col items-start">
             <span className="text-lg font-bold text-foreground">
-              {formatCurrency(p.discountPrice)}
+              {settings.formatPrice(p.discountPrice)}
             </span>
             <span className="text-xs text-muted-foreground line-through">
-              {formatCurrency(p.basePrice)}
+              {settings.formatPrice(p.basePrice)}
             </span>
           </span>
         ) : (
           <span className="text-lg font-bold text-foreground">
-            {formatCurrency(p.basePrice)}
+            {settings.formatPrice(p.basePrice)}
           </span>
         );
       },
@@ -134,14 +144,22 @@ export default function ComparePage() {
           <span className="text-xs text-muted-foreground">No reviews yet</span>
         ),
     },
-    { key: "gender", label: "Gender", get: (p) => <span className="capitalize">{p.gender || p.ageGroup || "—"}</span> },
-    { key: "color", label: "Color", get: (p) => p.color || "—" },
-    { key: "material", label: "Material", get: (p) => p.material || "—" },
+    { key: "ageGroup", label: "Age group", get: (p) => <span className="capitalize">{p.ageGroup || "—"}</span> },
+    {
+      key: "color",
+      label: "Color",
+      get: (p) => p.attributes?.find((a) => a.key === "color")?.values?.join(", ") || "—",
+    },
+    {
+      key: "fabric",
+      label: "Fabric",
+      get: (p) => p.attributes?.find((a) => a.key === "fabric")?.values?.join(", ") || "—",
+    },
     {
       key: "stock",
       label: "Total stock",
       get: (p) => {
-        const total = getSizeOptions(p).reduce((s, v) => s + (v.stock || 0), 0);
+        const total = getVariants(p).reduce((s, v) => s + (v.stock || 0), 0);
         if (total === 0) return <Badge variant="danger">Out of stock</Badge>;
         if (total <= 10) return <Badge variant="warning">Low: {total}</Badge>;
         return <span className="text-sm font-semibold">{total}</span>;
@@ -167,14 +185,15 @@ export default function ComparePage() {
 
   return (
     <div className="container-x py-8">
+      <Breadcrumb
+        items={[
+          { label: "Home", href: "/", icon: Home },
+          { label: "Shop", href: "/shop", icon: ShoppingBag },
+          { label: "Compare", icon: Scale },
+        ]}
+      />
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <Link
-            href="/shop"
-            className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to shop
-          </Link>
           <h1 className="font-heading text-3xl font-black sm:text-4xl">
             Compare products
           </h1>
@@ -246,8 +265,8 @@ export default function ComparePage() {
                 >
                   <SizeAndAddToCart
                     product={p}
-                    selectedSize={sizeBy[p._id]}
-                    onPickSize={(s) => pickSize(p._id, s)}
+                    selectedVariantId={variantBy[p._id]}
+                    onPickVariant={(id) => pickVariant(p._id, id)}
                     onAdd={() => handleAddToCart(p)}
                     loading={pendingId === p._id}
                   />
@@ -313,9 +332,9 @@ function ProductColumnHeader({ product, onRemove }) {
   );
 }
 
-function SizeAndAddToCart({ product, selectedSize, onPickSize, onAdd, loading }) {
-  const inStockSizes = getSizeOptions(product).filter((s) => s.stock > 0);
-  const allOut = inStockSizes.length === 0;
+function SizeAndAddToCart({ product, selectedVariantId, onPickVariant, onAdd, loading }) {
+  const inStockVariants = getVariants(product).filter((v) => (v.stock ?? 0) > 0);
+  const allOut = inStockVariants.length === 0;
 
   return (
     <div className="space-y-2">
@@ -323,12 +342,14 @@ function SizeAndAddToCart({ product, selectedSize, onPickSize, onAdd, loading })
         <Badge variant="danger">Out of stock</Badge>
       ) : (
         <div className="flex flex-wrap gap-1">
-          {inStockSizes.slice(0, 8).map((s) => {
-            const active = selectedSize === s.size;
+          {inStockVariants.slice(0, 8).map((v) => {
+            const active = selectedVariantId === v._id;
+            const label = [v.attributes?.color, v.attributes?.size].filter(Boolean).join(" / ") || v.variantName;
             return (
               <button
-                key={s.size}
-                onClick={() => onPickSize(s.size)}
+                key={v._id}
+                onClick={() => onPickVariant(v._id)}
+                title={v.variantName}
                 className={cn(
                   "rounded border px-2 py-1 text-xs font-medium transition-colors",
                   active
@@ -336,7 +357,7 @@ function SizeAndAddToCart({ product, selectedSize, onPickSize, onAdd, loading })
                     : "border-border bg-background hover:border-accent",
                 )}
               >
-                {s.size}
+                {label}
               </button>
             );
           })}

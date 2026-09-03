@@ -9,7 +9,7 @@ import { AlertCircle, Clock, Search, X } from "lucide-react";
 import { setSearchOpen } from "../../store/uiSlice.js";
 import { useGetProductsQuery } from "../../store/productApi.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
-import { storage } from "../../lib/utils.js";
+import { storage, resolveImage } from "../../lib/utils.js";
 
 const POPULAR = ["Abaya", "Hijab", "Burqa", "Eid"];
 const RECENT_KEY = "ss:recentSearches";
@@ -280,7 +280,17 @@ export default function SearchModal() {
                         className="flex items-center gap-4 rounded-[10px] px-2.5 py-3 text-left transition-colors hover:bg-wash focus-ring"
                       >
                         <span className="relative h-[62px] w-[62px] flex-none overflow-hidden rounded-[10px] bg-media">
-                          <span aria-hidden="true" className="absolute inset-0 hatch" />
+                          {p.images?.[0] ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={resolveImage(p.images[0], 124)}
+                              alt=""
+                              loading="lazy"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span aria-hidden="true" className="absolute inset-0 hatch" />
+                          )}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block text-base font-semibold tracking-[-0.015em]">

@@ -1,24 +1,21 @@
 import { NextResponse } from "next/server";
 
-/**
- * Not implemented yet.
- *
- * The logic already exists in controllers/reviewController.js, but it is written against
- * Express (req/res/next) and cannot run inside a Route Handler unchanged.
- * Adapting it is the backend phase; until then this answers explicitly
- * instead of failing as an unhandled 500.
- */
-const pending = () =>
-  NextResponse.json(
-    {
-      message:
-        "This endpoint is not implemented yet — controllers/reviewController.js still needs to be adapted to a Next.js Route Handler.",
-    },
-    { status: 501 },
-  );
+import { requirePermission } from "../../../lib/auth.js";
+import { PERMISSIONS } from "../../../lib/permissions.js";
+import { listAllReviews } from "../../../services/reviewService.js";
+import { withRoute } from "../../../lib/http.js";
 
-export const GET = pending;
-export const POST = pending;
-export const PUT = pending;
-export const PATCH = pending;
-export const DELETE = pending;
+export const GET = withRoute(async (request) => {
+  await requirePermission(request, PERMISSIONS.REVIEWS_MANAGE);
+  const { searchParams } = new URL(request.url);
+  const result = await listAllReviews({
+    page: searchParams.get("page") || undefined,
+    limit: searchParams.get("limit") || undefined,
+    rating: searchParams.get("rating") || undefined,
+    productId: searchParams.get("productId") || undefined,
+    search: searchParams.get("search") || undefined,
+    sortBy: searchParams.get("sortBy") || undefined,
+    sortOrder: searchParams.get("sortOrder") || undefined,
+  });
+  return NextResponse.json({ success: true, ...result });
+});

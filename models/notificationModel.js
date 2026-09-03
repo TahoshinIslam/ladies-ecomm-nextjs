@@ -28,5 +28,7 @@ const notificationSchema = new mongoose.Schema(
 // Fast queries for unread counts and paginated lists
 notificationSchema.index({ recipient: 1, readAt: 1, createdAt: -1 });
 
-const notificationModel = mongoose.model("notifications", notificationSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const notificationModel = mongoose.models.notifications || mongoose.model("notifications", notificationSchema);
 export default notificationModel;

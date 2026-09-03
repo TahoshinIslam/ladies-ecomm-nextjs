@@ -1,16 +1,29 @@
 import { NextResponse } from "next/server";
 
-import { requireAdmin } from "../../../lib/auth.js";
+import { getSessionUser, requirePermission } from "../../../lib/auth.js";
+import { PERMISSIONS } from "../../../lib/permissions.js";
 import { listCategories, createCategory } from "../../../services/categoryService.js";
 import { withRoute } from "../../../lib/http.js";
+import { getServerLocale } from "../../../lib/i18n/server.js";
+import { localizeCategoryList } from "../../../lib/i18n/localize.js";
 
-export const GET = withRoute(async () => {
-  const categories = await listCategories();
-  return NextResponse.json({ categories });
+// Shared by the storefront (department nav, filter chips) and the admin
+// Categories/Products pages. Admin requests always get raw English +
+// Bangla side by side, never locale-resolved — see the matching comment in
+// app/api/products/route.js for why (an admin's own browser can easily
+// have the Bangla cookie set, and localizing here would let them re-save
+// nameBn over the real English name).
+export const GET = withRoute(async (request) => {
+  const user = await getSessionUser(request).catch(() => null);
+  const isAdmin = user?.role === "admin";
+  const [categories, locale] = await Promise.all([listCategories(), getServerLocale()]);
+  return NextResponse.json({
+    categories: isAdmin ? categories : localizeCategoryList(categories, locale),
+  });
 });
 
 export const POST = withRoute(async (request) => {
-  await requireAdmin(request);
+  await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
   const body = await request.json();
   const category = await createCategory(body);
   return NextResponse.json({ success: true, category }, { status: 201 });

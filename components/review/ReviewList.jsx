@@ -18,10 +18,12 @@ import {
   useDeleteReviewMutation,
 } from "../../store/shopApi.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
-import { formatDate } from "../../lib/utils.js";
+import { useLocale } from "../../context/LocaleProvider.jsx";
+import { formatDhakaDate } from "../../lib/date.js";
 
 export default function ReviewList({ productId }) {
   const user = useSelector(selectCurrentUser);
+  const { t } = useLocale();
   const { data, isLoading, isError } = useGetProductReviewsQuery({
     productId,
     page: 1,
@@ -40,7 +42,7 @@ export default function ReviewList({ productId }) {
 
   if (isError) {
     return (
-      <p className="text-sm text-muted-foreground">Couldn't load reviews.</p>
+      <p className="text-sm text-muted-foreground">{t("reviews.loadError")}</p>
     );
   }
 
@@ -48,8 +50,8 @@ export default function ReviewList({ productId }) {
   if (!reviews.length) {
     return (
       <EmptyState
-        title="No reviews yet"
-        message="Be the first to share your experience after your order is delivered."
+        title={t("reviews.emptyTitle")}
+        message={t("reviews.emptyMessage")}
       />
     );
   }
@@ -68,6 +70,7 @@ export default function ReviewList({ productId }) {
 }
 
 function ReviewItem({ review, isOwn }) {
+  const { t, locale } = useLocale();
   const [editing, setEditing] = useState(false);
   const [rating, setRating] = useState(review.rating);
   const [comment, setComment] = useState(review.comment);
@@ -80,13 +83,13 @@ function ReviewItem({ review, isOwn }) {
     try {
       await markHelpful(review._id).unwrap();
     } catch (e) {
-      toast.error(e?.data?.message || "Sign in to mark helpful");
+      toast.error(e?.data?.message || t("reviews.signInToMarkHelpful"));
     }
   };
 
   const handleSave = async () => {
     if (!comment.trim()) {
-      toast.error("Comment is required");
+      toast.error(t("reviews.commentRequired"));
       return;
     }
     try {
@@ -96,20 +99,20 @@ function ReviewItem({ review, isOwn }) {
         title: title.trim() || undefined,
         comment: comment.trim(),
       }).unwrap();
-      toast.success("Review updated");
+      toast.success(t("reviews.updated"));
       setEditing(false);
     } catch (e) {
-      toast.error(e?.data?.message || "Could not update");
+      toast.error(e?.data?.message || t("reviews.updateFailed"));
     }
   };
 
   const handleDelete = async () => {
-    if (!window.confirm("Delete your review?")) return;
+    if (!window.confirm(t("reviews.deleteConfirm"))) return;
     try {
       await deleteReview(review._id).unwrap();
-      toast.success("Review deleted");
+      toast.success(t("reviews.deleted"));
     } catch (e) {
-      toast.error(e?.data?.message || "Could not delete");
+      toast.error(e?.data?.message || t("reviews.deleteFailed"));
     }
   };
 
@@ -129,15 +132,15 @@ function ReviewItem({ review, isOwn }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <p className="text-sm font-semibold">{review.user?.name || "Customer"}</p>
+            <p className="text-sm font-semibold">{review.user?.name || t("reviews.customerFallback")}</p>
             {review.isVerifiedPurchase && (
               <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-semibold text-success">
                 <BadgeCheck className="h-3 w-3" />
-                Verified
+                {t("reviews.verified")}
               </span>
             )}
             <span className="text-xs text-muted-foreground">
-              {formatDate(review.createdAt)}
+              {formatDhakaDate(review.createdAt, locale)}
             </span>
           </div>
 
@@ -171,7 +174,7 @@ function ReviewItem({ review, isOwn }) {
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Title (optional)"
+                placeholder={t("reviews.titlePlaceholder")}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-ring"
               />
               <Textarea
@@ -181,14 +184,14 @@ function ReviewItem({ review, isOwn }) {
               />
               <div className="flex gap-2">
                 <Button size="sm" onClick={handleSave} loading={saving}>
-                  <Check className="h-4 w-4" /> Save
+                  <Check className="h-4 w-4" /> {t("common.save")}
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => setEditing(false)}
                 >
-                  <X className="h-4 w-4" /> Cancel
+                  <X className="h-4 w-4" /> {t("common.cancel")}
                 </Button>
               </div>
             </div>
@@ -198,7 +201,7 @@ function ReviewItem({ review, isOwn }) {
           {review.adminReply?.text && !editing && (
             <div className="mt-3 rounded-md border-l-4 border-accent bg-accent/5 p-3">
               <p className="text-xs font-semibold text-accent">
-                Reply from store
+                {t("reviews.replyFromStore")}
                 {review.adminReply.repliedBy?.name &&
                   ` · ${review.adminReply.repliedBy.name}`}
               </p>
@@ -217,7 +220,7 @@ function ReviewItem({ review, isOwn }) {
                 className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
               >
                 <ThumbsUp className="h-3.5 w-3.5" />
-                Helpful{" "}
+                {t("reviews.helpful")}{" "}
                 {review.helpfulCount > 0 && `(${review.helpfulCount})`}
               </button>
               {isOwn && (
@@ -226,14 +229,14 @@ function ReviewItem({ review, isOwn }) {
                     onClick={() => setEditing(true)}
                     className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    <Pencil className="h-3.5 w-3.5" /> Edit
+                    <Pencil className="h-3.5 w-3.5" /> {t("common.edit")}
                   </button>
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
                     className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-danger disabled:opacity-50"
                   >
-                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                    <Trash2 className="h-3.5 w-3.5" /> {t("common.remove")}
                   </button>
                 </>
               )}

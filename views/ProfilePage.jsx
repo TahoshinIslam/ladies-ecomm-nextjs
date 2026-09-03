@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion } from "framer-motion";
-import { User as UserIcon, MapPin, Lock, Trash2, Edit2 } from "lucide-react";
+import { Home, User as UserIcon, MapPin, Lock, Trash2, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 
 import Input from "../components/ui/Input.jsx";
@@ -17,6 +17,7 @@ import Badge from "../components/ui/Badge.jsx";
 import Modal from "../components/ui/Modal.jsx";
 import ConfirmDialog from "../components/ui/ConfirmDialog.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
+import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 
 import { useUpdateMeMutation } from "../store/userApi.js";
 import { setCredentials, selectCurrentUser } from "../store/authSlice.js";
@@ -41,6 +42,12 @@ export default function ProfilePage() {
 
   return (
     <div className="container-x py-10">
+      <Breadcrumb
+        items={[
+          { label: "Home", href: "/", icon: Home },
+          { label: "Account", icon: UserIcon },
+        ]}
+      />
       <h1 className="font-heading text-3xl font-black">Account</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Manage your profile, addresses and security.

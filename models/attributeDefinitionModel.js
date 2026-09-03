@@ -4,6 +4,10 @@ const optionSchema = new mongoose.Schema(
   {
     value: { type: String, required: true },
     label: { type: String, required: true },
+    // Optional Bangla mirror of `label` (e.g. value "nida" -> label "Nida",
+    // labelBn "নিদা"). `value` itself never translates — see
+    // attributeService.js's localizeAttributeDefinition().
+    labelBn: { type: String, default: "" },
     swatchHex: { type: String, default: "" },
   },
   { _id: false },
@@ -17,6 +21,7 @@ const labelOverrideSchema = new mongoose.Schema(
       required: true,
     },
     label: { type: String, required: true },
+    labelBn: { type: String, default: "" },
   },
   { _id: false },
 );
@@ -39,6 +44,12 @@ const attributeDefinitionSchema = new mongoose.Schema(
     label: {
       type: String,
       required: [true, "Attribute label is required"],
+    },
+    // Optional Bangla mirror of `label` — same fallback rule as
+    // Product.nameBn.
+    labelBn: {
+      type: String,
+      default: "",
     },
     // Per-top-level-category display label override, e.g. "size" reads as
     // "Length" for Burqa/Khimar but stays "Size" everywhere else.

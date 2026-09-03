@@ -3,7 +3,9 @@
 import { useMemo, useCallback, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { formatCurrency, cn } from "../../lib/utils.js";
+import { cn } from "../../lib/utils.js";
+import { useSettings } from "../../context/SettingsContext.jsx";
+import { useLocale } from "../../context/LocaleProvider.jsx";
 
 // Histogram-backed dual-thumb price range filter.
 //
@@ -15,9 +17,10 @@ export default function PriceHistogramSlider({
   products = [],
   value,
   onChange,
-  currency = "USD",
   bins = 28,
 }) {
+  const settings = useSettings();
+  const { t } = useLocale();
   const [open, setOpen] = useState(true);
 
   // Catalog bounds come from products; bar heights are purely decorative —
@@ -88,9 +91,7 @@ export default function PriceHistogramSlider({
         onClick={() => setOpen((v) => !v)}
         className="mb-3 flex w-full items-center justify-between text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span>
-          Price <span className="opacity-40">·</span> {currency}
-        </span>
+        <span>{t("filters.priceRange")}</span>
         <ChevronDown
           className={cn(
             "h-4 w-4 transition-transform",
@@ -144,7 +145,7 @@ export default function PriceHistogramSlider({
               onMouseUp={() => commit(lo, hi)}
               onTouchEnd={() => commit(lo, hi)}
               onKeyUp={() => commit(lo, hi)}
-              aria-label="Minimum price"
+              aria-label={t("filters.minPrice")}
               className="price-range-input absolute left-0 top-0 w-full focus:outline-none"
             />
             <input
@@ -157,26 +158,33 @@ export default function PriceHistogramSlider({
               onMouseUp={() => commit(lo, hi)}
               onTouchEnd={() => commit(lo, hi)}
               onKeyUp={() => commit(lo, hi)}
-              aria-label="Maximum price"
+              aria-label={t("filters.maxPrice")}
               className="price-range-input absolute left-0 top-0 w-full focus:outline-none"
             />
           </div>
 
           <div className="mt-3 flex items-baseline justify-between">
             <span className="text-sm">
-              <span className="font-bold text-foreground">
-                {formatCurrency(lo, currency)}
+              {/* suppressHydrationWarning: digit script (৳০ vs ৳0) is
+                  locale-dependent, and `locale` is seeded from the
+                  `tahos_locale` cookie (see LocaleProvider) — the same
+                  cookie-personalization category app/layout.js already
+                  marks `suppressHydrationWarning` for on <html lang>. The
+                  number itself never differs, only its script, and it's
+                  correct again the instant React patches it in. */}
+              <span className="font-bold text-foreground" suppressHydrationWarning>
+                {settings.formatPrice(lo)}
               </span>{" "}
               <span className="text-xs font-medium text-muted-foreground">
-                min
+                {t("filters.min")}
               </span>
             </span>
             <span className="text-sm">
-              <span className="font-bold text-foreground">
-                {formatCurrency(hi, currency)}
+              <span className="font-bold text-foreground" suppressHydrationWarning>
+                {settings.formatPrice(hi)}
               </span>{" "}
               <span className="text-xs font-medium text-muted-foreground">
-                max
+                {t("filters.max")}
               </span>
             </span>
           </div>

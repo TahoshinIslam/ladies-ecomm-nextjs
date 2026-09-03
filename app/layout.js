@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { Instrument_Sans, Instrument_Serif } from "next/font/google";
 
 import AppProviders from "@/context/ThemeProvider.jsx";
+import { DEFAULT_LOCALE, LOCALE_COOKIE, isValidLocale } from "@/lib/i18n/config.js";
+import { getT } from "@/lib/i18n/server.js";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({
@@ -20,14 +22,16 @@ const instrumentSerif = Instrument_Serif({
   display: "swap",
 });
 
-export const metadata = {
-  title: {
-    default: "TAHOS. — Find the pair that moves like you",
-    template: "%s · TAHOS.",
-  },
-  description:
-    "Everyday icons, rare colorways, and all-day favorites—curated for wherever the day decides to go.",
-};
+export async function generateMetadata() {
+  const t = await getT();
+  return {
+    title: {
+      default: t("seo.defaultTitle"),
+      template: "%s · TAHOS.",
+    },
+    description: t("seo.defaultDescription"),
+  };
+}
 
 export const viewport = {
   themeColor: [
@@ -37,14 +41,17 @@ export const viewport = {
 };
 
 export default async function RootLayout({ children }) {
-  // Read the persisted theme on the server so the first paint is already
-  // correct — no flash of the wrong palette on load.
+  // Read the persisted theme and language on the server so the first paint
+  // is already correct — no flash of the wrong palette or language on load.
   const store = await cookies();
   const theme = store.get("tahos-theme")?.value === "dark" ? "dark" : "light";
+  const localeCookie = store.get(LOCALE_COOKIE)?.value;
+  const locale = isValidLocale(localeCookie) ? localeCookie : DEFAULT_LOCALE;
+  const t = await getT();
 
   return (
     <html
-      lang="en"
+      lang={locale}
       data-theme={theme}
       className={`${instrumentSans.variable} ${instrumentSerif.variable} h-full`}
       suppressHydrationWarning
@@ -54,9 +61,11 @@ export default async function RootLayout({ children }) {
           href="#main"
           className="absolute -left-[9999px] top-2 z-[999] rounded-lg bg-verm px-[18px] py-3 text-sm font-semibold text-white focus:left-4"
         >
-          Skip to content
+          {t("a11y.skipToContent")}
         </a>
-        <AppProviders initialTheme={theme}>{children}</AppProviders>
+        <AppProviders initialTheme={theme} initialLocale={locale}>
+          {children}
+        </AppProviders>
       </body>
     </html>
   );

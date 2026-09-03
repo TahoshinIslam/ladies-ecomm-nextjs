@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Bell, Check, CheckCheck, Loader2 } from "lucide-react";
 
 import { cn } from "../../lib/utils.js";
+import AdminErrorState from "./AdminErrorState.jsx";
 import {
   useGetNotificationsQuery,
   useMarkNotificationReadMutation,
@@ -32,10 +33,18 @@ export default function NotificationsDropdown() {
   const ref = useRef(null);
   const router = useRouter();
 
-  // Poll every 30s so the bell badge stays roughly current without a socket.
-  const { data, isLoading } = useGetNotificationsQuery(
+  // Real-time delivery is useAdminEventStream (mounted once in
+  // AdminLayout), which invalidates this query's cache tag the moment
+  // something happens. This poll is just the fallback for a dropped SSE
+  // connection — relaxed from 30s since it's no longer the primary path.
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+  } = useGetNotificationsQuery(
     { page: 1, limit: 10 },
-    { pollingInterval: 30000 },
+    { pollingInterval: 60000 },
   );
   const [markRead] = useMarkNotificationReadMutation();
   const [markAll, { isLoading: marking }] = useMarkAllNotificationsReadMutation();
@@ -115,6 +124,8 @@ export default function NotificationsDropdown() {
                 <div className="flex items-center justify-center py-8 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                 </div>
+              ) : isError ? (
+                <AdminErrorState compact title="Couldn't load notifications" onRetry={refetch} />
               ) : notifications.length === 0 ? (
                 <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                   No notifications yet

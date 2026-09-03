@@ -53,15 +53,16 @@ const addressSchema = new mongoose.Schema(
 );
 
 // Ensure only one default address per user
-addressSchema.pre("save", async function (next) {
+addressSchema.pre("save", async function () {
   if (this.isDefault) {
     await this.constructor.updateMany(
       { user: this.user, _id: { $ne: this._id } },
       { isDefault: false },
     );
   }
-  next();
 });
 
-const addressModel = mongoose.model("addresses", addressSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const addressModel = mongoose.models.addresses || mongoose.model("addresses", addressSchema);
 export default addressModel;

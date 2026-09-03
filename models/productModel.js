@@ -63,6 +63,16 @@ const productSchema = new mongoose.Schema(
       required: [true, "Product name is required"],
       trim: true,
     },
+    // Optional Bangla mirror of `name` — see productService.js's
+    // localizeProduct(). Never required, never auto-populated from `name`;
+    // admins fill it in via the product form. Absent/empty means the
+    // storefront falls back to the English `name` rather than showing a
+    // blank title, even with Bangla active.
+    nameBn: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     slug: {
       type: String,
       unique: true,
@@ -72,6 +82,12 @@ const productSchema = new mongoose.Schema(
     description: {
       type: String,
       required: [true, "Product description is required"],
+    },
+    // Optional Bangla mirror of `description` — same fallback rule as
+    // nameBn.
+    descriptionBn: {
+      type: String,
+      default: "",
     },
     // The specific leaf/subcategory (e.g. "Open-front Abaya").
     category: {
@@ -91,9 +107,12 @@ const productSchema = new mongoose.Schema(
       ref: "brands",
       default: null,
     },
+    // Burqa/Hijab-appropriate age classification — not a sneaker-style
+    // "gender" field. "girls" was added alongside the existing "adult"/
+    // "kids" values (kept as-is so existing product data stays valid).
     ageGroup: {
       type: String,
-      enum: ["adult", "kids"],
+      enum: ["adult", "kids", "girls"],
       default: "adult",
     },
     basePrice: {

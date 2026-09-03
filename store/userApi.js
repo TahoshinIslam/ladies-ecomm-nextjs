@@ -1,4 +1,5 @@
 import { apiSlice } from "./apiSlice.js";
+import { buildQueryString } from "../lib/utils.js";
 
 export const userApi = apiSlice.injectEndpoints({
   endpoints: (b) => ({
@@ -36,7 +37,10 @@ export const userApi = apiSlice.injectEndpoints({
       query: (token) => `/users/verify-email/${token}`,
     }),
     // admin
-    listUsers: b.query({ query: () => "/users", providesTags: ["User"] }),
+    listUsers: b.query({
+      query: (params = {}) => `/users?${buildQueryString(params)}`,
+      providesTags: ["User"],
+    }),
     updateUser: b.mutation({
       query: ({ id, ...body }) => ({ url: `/users/${id}`, method: "PUT", body }),
       invalidatesTags: ["User"],

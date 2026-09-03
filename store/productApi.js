@@ -1,26 +1,10 @@
 import { apiSlice } from "./apiSlice.js";
-
-// Convert params object to a URLSearchParams-friendly object, handling nested
-// price[gte]/price[lte] bracket syntax
-const buildQuery = (params = {}) => {
-  const q = new URLSearchParams();
-  for (const [key, val] of Object.entries(params)) {
-    if (val === undefined || val === null || val === "") continue;
-    if (typeof val === "object" && !Array.isArray(val)) {
-      for (const [op, v] of Object.entries(val)) {
-        if (v !== undefined && v !== "") q.append(`${key}[${op}]`, v);
-      }
-    } else {
-      q.append(key, val);
-    }
-  }
-  return q.toString();
-};
+import { buildQueryString } from "../lib/utils.js";
 
 export const productApi = apiSlice.injectEndpoints({
   endpoints: (b) => ({
     getProducts: b.query({
-      query: (params = {}) => `/products?${buildQuery(params)}`,
+      query: (params = {}) => `/products?${buildQueryString(params)}`,
       providesTags: (result) =>
         result?.products
           ? [
@@ -37,7 +21,7 @@ export const productApi = apiSlice.injectEndpoints({
     // { category: topCategoryId }) with live product counts. Was
     // "getProductModels" — sneaker-era model-name filter, replaced.
     getProductGroupings: b.query({
-      query: (params = {}) => `/products/models?${buildQuery(params)}`,
+      query: (params = {}) => `/products/models?${buildQueryString(params)}`,
       providesTags: [{ type: "Product", id: "GROUPINGS" }],
     }),
     getProduct: b.query({
@@ -45,7 +29,23 @@ export const productApi = apiSlice.injectEndpoints({
       providesTags: (result, err, arg) => [{ type: "Product", id: arg }],
     }),
     getRelatedProducts: b.query({
-      query: (id) => `/products/${id}/related`,
+      query: (arg) => {
+        const { id, limit } = typeof arg === "object" && arg !== null ? arg : { id: arg };
+        return `/products/${id}/related${limit ? `?limit=${limit}` : ""}`;
+      },
+      providesTags: (result) =>
+        result?.products ? result.products.map(({ _id }) => ({ type: "Product", id: _id })) : [],
+    }),
+    // Recently Viewed: one request for the whole stored id list instead of
+    // one per card. Same shape as getCompareProducts's ids handling.
+    getProductsByIds: b.query({
+      query: (ids = []) => {
+        const list = Array.isArray(ids) ? ids : String(ids).split(",");
+        const clean = list.filter(Boolean).join(",");
+        return `/products/batch?ids=${encodeURIComponent(clean)}`;
+      },
+      providesTags: (result) =>
+        result?.products ? result.products.map(({ _id }) => ({ type: "Product", id: _id })) : [],
     }),
     getCompareProducts: b.query({
       query: (ids = []) => {
@@ -89,6 +89,7 @@ export const {
   useGetProductGroupingsQuery,
   useGetProductQuery,
   useGetRelatedProductsQuery,
+  useGetProductsByIdsQuery,
   useGetCompareProductsQuery,
   useCreateProductMutation,
   useUpdateProductMutation,

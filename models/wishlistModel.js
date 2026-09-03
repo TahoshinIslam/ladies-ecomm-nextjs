@@ -18,5 +18,7 @@ const wishlistSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-const wishlistModel = mongoose.model("wishlists", wishlistSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const wishlistModel = mongoose.models.wishlists || mongoose.model("wishlists", wishlistSchema);
 export default wishlistModel;

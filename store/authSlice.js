@@ -12,6 +12,12 @@ const TOKEN_KEY = "ss:token";
 const initialState = {
   user: null,
   token: null,
+  // False until hydrateAuth has run once on the client. A guard like
+  // AdminLayout can't tell "genuinely logged out" from "haven't checked
+  // localStorage yet" without this — both look like `user: null` otherwise,
+  // and redirecting on the latter would kick out an already-logged-in admin
+  // on every hard refresh.
+  hydrated: false,
 };
 
 const authSlice = createSlice({
@@ -21,6 +27,7 @@ const authSlice = createSlice({
     hydrateAuth: (state) => {
       state.user = storage.getJSON(USER_KEY, null);
       state.token = storage.get(TOKEN_KEY);
+      state.hydrated = true;
     },
     // Accepts either { user, token } (login/register) or a bare user object
     // (refresh from /me, profile update — token unchanged).
@@ -50,6 +57,7 @@ export const { hydrateAuth, setCredentials, clearCredentials } = authSlice.actio
 export default authSlice.reducer;
 
 // Selectors
+export const selectAuthHydrated = (state) => state.auth.hydrated;
 export const selectCurrentUser = (state) => state.auth.user;
 export const selectAuthToken = (state) => state.auth.token;
 export const selectIsAuthenticated = (state) => !!state.auth.user;

@@ -1,4 +1,5 @@
 import { apiSlice } from "./apiSlice.js";
+import { buildQueryString } from "../lib/utils.js";
 
 // ====== Cart ======
 const cartEndpoints = (b) => ({
@@ -12,8 +13,8 @@ const cartEndpoints = (b) => ({
     invalidatesTags: ["Cart"],
   }),
   removeFromCart: b.mutation({
-    query: ({ productId, size }) => ({
-      url: `/cart/${productId}/${encodeURIComponent(size)}`,
+    query: ({ productId, variantId }) => ({
+      url: `/cart/${productId}/${encodeURIComponent(variantId)}`,
       method: "DELETE",
     }),
     invalidatesTags: ["Cart"],
@@ -60,10 +61,7 @@ const orderEndpoints = (b) => ({
   }),
   // Admin
   getAllOrders: b.query({
-    query: (params = {}) => {
-      const q = new URLSearchParams(params).toString();
-      return `/orders?${q}`;
-    },
+    query: (params = {}) => `/orders?${buildQueryString(params)}`,
     providesTags: ["Order"],
   }),
   updateOrderStatus: b.mutation({
@@ -112,12 +110,7 @@ const reviewEndpoints = (b) => ({
   }),
   // Admin
   listAllReviews: b.query({
-    query: (params = {}) => {
-      const q = new URLSearchParams(
-        Object.entries(params).filter(([, v]) => v !== "" && v != null),
-      ).toString();
-      return `/reviews${q ? `?${q}` : ""}`;
-    },
+    query: (params = {}) => `/reviews?${buildQueryString(params)}`,
     providesTags: ["Review"],
   }),
   replyToReview: b.mutation({
@@ -135,7 +128,10 @@ const couponEndpoints = (b) => ({
   validateCoupon: b.mutation({
     query: (body) => ({ url: "/coupons/validate", method: "POST", body }),
   }),
-  listCoupons: b.query({ query: () => "/coupons", providesTags: ["Coupon"] }),
+  listCoupons: b.query({
+    query: (params = {}) => `/coupons?${buildQueryString(params)}`,
+    providesTags: ["Coupon"],
+  }),
   createCoupon: b.mutation({
     query: (body) => ({ url: "/coupons", method: "POST", body }),
     invalidatesTags: ["Coupon"],

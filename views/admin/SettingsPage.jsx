@@ -287,6 +287,7 @@ export default function SettingsPage() {
           promotions: settings.promotions,
           taxRules: settings.taxRules,
           shippingZones: settings.shippingZones,
+          exchangePolicy: settings.exchangePolicy,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -413,6 +414,26 @@ export default function SettingsPage() {
           label="Free shipping on first order"
           help="When a customer places their very first order, shipping is automatically waived. Once used, the benefit cannot be reclaimed (even by cancelling and reordering)."
         />
+      </Section>
+
+      <Section title="Exchange policy">
+        <Field
+          label="Exchange window (days)"
+          help="Shown across the storefront (header, homepage, product pages) as '<N>-day exchange'."
+        >
+          <Input
+            type="number"
+            min="0"
+            value={settings.exchangePolicy?.windowDays ?? 14}
+            onChange={(e) => update("exchangePolicy.windowDays", Number(e.target.value) || 0)}
+          />
+        </Field>
+        <Field label="Short description" help='e.g. "Easy exchanges" or "Size or color swap, free"'>
+          <Input
+            value={settings.exchangePolicy?.description ?? ""}
+            onChange={(e) => update("exchangePolicy.description", e.target.value)}
+          />
+        </Field>
       </Section>
 
       <Section title="Tax rules">

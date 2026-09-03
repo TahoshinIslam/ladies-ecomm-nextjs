@@ -31,6 +31,7 @@ import {
 
 import Skeleton from "../../components/ui/Skeleton.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
+import AdminErrorState from "../../components/admin/AdminErrorState.jsx";
 import {
   useGetOverviewQuery,
   useGetSalesSeriesQuery,
@@ -51,13 +52,43 @@ const PIE_COLORS = [
 ];
 
 export default function AdminOverviewPage() {
-  const { data: overview, isLoading: loadingOverview } = useGetOverviewQuery();
-  const { data: series, isLoading: loadingSeries } = useGetSalesSeriesQuery(30);
-  const { data: top, isLoading: loadingTop } = useGetTopProductsQuery(5);
-  const { data: status } = useGetStatusBreakdownQuery();
-  const { data: byMethod } = useGetRevenueByMethodQuery();
+  const {
+    data: overview,
+    isLoading: loadingOverview,
+    isError: overviewError,
+    error: overviewErrorDetail,
+    refetch: refetchOverview,
+  } = useGetOverviewQuery();
+  const { data: series, isLoading: loadingSeries, isError: seriesError, refetch: refetchSeries } = useGetSalesSeriesQuery(30);
+  const { data: top, isLoading: loadingTop, isError: topError, refetch: refetchTop } = useGetTopProductsQuery(5);
+  const { data: status, isError: statusError, refetch: refetchStatus } = useGetStatusBreakdownQuery();
+  const { data: byMethod, isError: methodError, refetch: refetchMethod } = useGetRevenueByMethodQuery();
 
   const o = overview?.overview;
+
+  // All five queries share the same admin auth boundary — in practice a
+  // bad/expired session fails them together, so one full-page error state
+  // (rather than five separate inline ones) is what actually happened here.
+  if (overviewError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="font-heading text-3xl font-black">Overview</h1>
+        </div>
+        <AdminErrorState
+          title="Couldn't load dashboard data"
+          message={overviewErrorDetail?.data?.message || "Your session may have expired. Try again."}
+          onRetry={() => {
+            refetchOverview();
+            refetchSeries();
+            refetchTop();
+            refetchStatus();
+            refetchMethod();
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -129,6 +160,8 @@ export default function AdminOverviewPage() {
       <Card title="Revenue (last 30 days)">
         {loadingSeries ? (
           <Skeleton className="h-64 w-full" />
+        ) : seriesError ? (
+          <AdminErrorState compact title="Couldn't load revenue" onRetry={refetchSeries} />
         ) : !series?.series?.length ? (
           <EmptyState icon={TrendingUp} title="No sales yet" message="Revenue will appear here." />
         ) : (
@@ -178,6 +211,8 @@ export default function AdminOverviewPage() {
         <Card title="Top selling products">
           {loadingTop ? (
             <Skeleton className="h-64 w-full" />
+          ) : topError ? (
+            <AdminErrorState compact title="Couldn't load top products" onRetry={refetchTop} />
           ) : !top?.products?.length ? (
             <EmptyState icon={Package} title="No sales yet" />
           ) : (
@@ -206,7 +241,9 @@ export default function AdminOverviewPage() {
 
         {/* Order status pie */}
         <Card title="Order status breakdown">
-          {!status?.data?.length ? (
+          {statusError ? (
+            <AdminErrorState compact title="Couldn't load order status" onRetry={refetchStatus} />
+          ) : !status?.data?.length ? (
             <EmptyState icon={ShoppingCart} title="No orders yet" />
           ) : (
             <div className="h-64">
@@ -245,7 +282,9 @@ export default function AdminOverviewPage() {
 
       {/* Revenue by payment method */}
       <Card title="Revenue by payment method">
-        {!byMethod?.data?.length ? (
+        {methodError ? (
+          <AdminErrorState compact title="Couldn't load payment data" onRetry={refetchMethod} />
+        ) : !byMethod?.data?.length ? (
           <EmptyState icon={DollarSign} title="No payments yet" />
         ) : (
           <div className="h-64">

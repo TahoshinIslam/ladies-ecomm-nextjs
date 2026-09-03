@@ -23,9 +23,10 @@ import Button from "../../components/ui/Button.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
-import Skeleton from "../../components/ui/Skeleton.jsx";
-import EmptyState from "../../components/ui/EmptyState.jsx";
 import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
+import DataTable from "../../components/admin/DataTable.jsx";
+import TableToolbar from "../../components/admin/TableToolbar.jsx";
+import DropdownMenu, { DropdownMenuItem } from "../../components/ui/DropdownMenu.jsx";
 
 import {
   useGetProductsQuery,
@@ -38,7 +39,11 @@ import {
   useGetCategoriesQuery,
   useGetAttributesQuery,
 } from "../../store/shopApi.js";
-import { formatCurrency, cn } from "../../lib/utils.js";
+import { cn, resolveImage } from "../../lib/utils.js";
+import { useSettings } from "../../context/SettingsContext.jsx";
+import { useTableQueryState } from "../../hooks/useTableQueryState.js";
+import { usePermission } from "../../hooks/usePermission.js";
+import { PERMISSIONS } from "../../lib/permissions.js";
 
 const STEPS = ["Basic info", "Attributes", "Variants"];
 
@@ -56,11 +61,16 @@ const variantSchema = z.object({
 
 const productSchema = z.object({
   name: z.string().min(2, "Required"),
+  // Optional Bangla mirror — see models/productModel.js's nameBn/
+  // descriptionBn and lib/i18n/localize.js. Left blank, the storefront
+  // just falls back to the English name/description; never required here.
+  nameBn: z.string().optional(),
   description: z.string().min(10, "At least 10 characters"),
+  descriptionBn: z.string().optional(),
   department: z.string().min(1, "Select a department"),
   category: z.string().min(1, "Select a subcategory"),
   brand: z.string().optional(),
-  ageGroup: z.enum(["adult", "kids"]),
+  ageGroup: z.enum(["adult", "kids", "girls"]),
   basePrice: z.coerce.number().positive("Must be > 0"),
   discountPrice: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
   availability: z.enum(["readyStock", "preOrder", "madeToOrder"]),
@@ -83,130 +93,252 @@ const STEP_FIELDS = [
 ];
 
 export default function AdminProductsPage() {
-  const [searchQuery, setSearchQuery] = useState("");
+  const settings = useSettings();
+  const can = usePermission();
+  const canManage = can(PERMISSIONS.PRODUCTS_MANAGE);
   const [editing, setEditing] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [selected, setSelected] = useState(new Set());
 
-  const { data, isLoading } = useGetProductsQuery({
-    limit: 50,
-    ...(searchQuery ? { search: searchQuery } : {}),
+  const {
+    page, limit, search, sortBy, sortOrder, filters, activeFilterCount,
+    setPage, setLimit, setSearch, setSort, setFilter, clearFilters,
+  } = useTableQueryState({
+    defaultLimit: 20,
+    defaultSortBy: "createdAt",
+    defaultSortOrder: "desc",
+    filterKeys: ["department", "status"],
   });
+
   const { data: catsData } = useGetCategoriesQuery();
-  const [deleteProduct, { isLoading: deleting }] = useDeleteProductMutation();
-  const products = data?.products ?? [];
+  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
   const categoryName = (id) => catsData?.categories?.find((c) => c._id === id)?.name || "—";
+
+  const { data, isLoading, isFetching, isError, error, refetch } = useGetProductsQuery({
+    page,
+    limit,
+    search: search || undefined,
+    sort: sortBy ? `${sortOrder === "desc" ? "-" : ""}${sortBy}` : undefined,
+    topCategory: filters.department || undefined,
+    isActive: filters.status || undefined,
+  });
+  const products = data?.products ?? [];
+
+  const [deleteProduct, { isLoading: deleting }] = useDeleteProductMutation();
+
+  const returnToValidPageIfEmptied = (removedCount) => {
+    if (products.length - removedCount <= 0 && page > 1) setPage(page - 1);
+  };
 
   const handleDelete = async () => {
     try {
       await deleteProduct(confirmDelete._id).unwrap();
       toast.success("Product deactivated");
+      returnToValidPageIfEmptied(1);
       setConfirmDelete(null);
     } catch (e) {
       toast.error(e?.data?.message || "Could not delete");
     }
   };
 
+  const handleBulkDeactivate = async () => {
+    const ids = [...selected];
+    try {
+      await Promise.all(ids.map((id) => deleteProduct(id).unwrap()));
+      toast.success(`${ids.length} product${ids.length === 1 ? "" : "s"} deactivated`);
+      returnToValidPageIfEmptied(ids.length);
+      setSelected(new Set());
+      setBulkConfirm(false);
+    } catch (e) {
+      toast.error(e?.data?.message || "Some products couldn't be updated");
+    }
+  };
+
+  const toggleRow = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAll = (ids, checked) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (checked ? next.add(id) : next.delete(id)));
+      return next;
+    });
+
+  const columns = [
+    {
+      key: "name",
+      header: "Product",
+      sortable: true,
+      width: 260,
+      render: (p) => (
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+            {p.images?.[0] && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={resolveImage(p.images[0], 80)} alt="" loading="lazy" className="h-full w-full object-cover" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="line-clamp-1 font-semibold" title={p.name}>{p.name}</p>
+            <p className="text-xs text-muted-foreground capitalize">{p.ageGroup}</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "category",
+      header: "Category",
+      hideBelow: "md",
+      render: (p) => p.category?.name || categoryName(p.category),
+    },
+    {
+      key: "variants",
+      header: "Variants",
+      hideBelow: "md",
+      render: (p) => p.variants?.length || 0,
+    },
+    {
+      key: "basePrice",
+      header: "Price",
+      align: "right",
+      sortable: true,
+      render: (p) => <span data-tabular className="font-bold">{settings.formatPrice(p.basePrice)}</span>,
+    },
+    {
+      key: "stock",
+      header: "Stock",
+      align: "center",
+      hideBelow: "sm",
+      render: (p) => {
+        const totalStock = (p.variants || []).reduce((s, v) => s + (v.stock || 0), 0);
+        const tone = totalStock <= 4 ? "text-danger" : totalStock <= 10 ? "text-warning" : "text-foreground";
+        return <span data-tabular className={cn("font-semibold", tone)}>{totalStock}</span>;
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "center",
+      render: (p) => (
+        <>
+          {p.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
+          {p.isFeatured && <Badge variant="accent" className="ml-1">Featured</Badge>}
+        </>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      width: 60,
+      render: (p) =>
+        canManage && (
+          <DropdownMenu triggerLabel={`Actions for ${p.name}`}>
+            <DropdownMenuItem icon={Edit2} onClick={() => setEditing(p)}>
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem icon={Trash2} danger onClick={() => setConfirmDelete(p)}>
+              Deactivate
+            </DropdownMenuItem>
+          </DropdownMenu>
+        ),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl font-black">Products</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{data?.total || 0} products total</p>
+          <p className="mt-1 text-sm text-muted-foreground">{data?.total ?? 0} products total</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add product
-        </Button>
+        {canManage && (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Add product
+          </Button>
+        )}
       </div>
 
-      <Input
-        icon={Search}
-        placeholder="Search products..."
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        className="max-w-sm"
+      <TableToolbar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search products…"
+        activeFilterCount={activeFilterCount}
+        onClearFilters={clearFilters}
+        filters={
+          <>
+            <Select
+              value={filters.department || ""}
+              onChange={(e) => setFilter("department", e.target.value)}
+              className="max-w-[180px]"
+              aria-label="Filter by department"
+            >
+              <option value="">All departments</option>
+              {departments.map((d) => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </Select>
+            <Select
+              value={filters.status || ""}
+              onChange={(e) => setFilter("status", e.target.value)}
+              className="max-w-[150px]"
+              aria-label="Filter by status"
+            >
+              <option value="">All statuses</option>
+              <option value="true">Active</option>
+              <option value="false">Inactive</option>
+            </Select>
+          </>
+        }
+        right={
+          canManage &&
+          selected.size > 0 && (
+            <>
+              <span className="text-sm text-muted-foreground">{selected.size} selected</span>
+              <Button size="sm" variant="outline" onClick={() => setBulkConfirm(true)}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Deactivate selected
+              </Button>
+            </>
+          )
+        }
       />
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
-      ) : products.length === 0 ? (
-        <EmptyState icon={Package} title="No products" message="Create your first product." />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-background">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-muted/30 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="p-3 text-left">Product</th>
-                <th className="hidden p-3 text-left md:table-cell">Category</th>
-                <th className="hidden p-3 text-left md:table-cell">Variants</th>
-                <th className="p-3 text-right">Price</th>
-                <th className="hidden p-3 text-center sm:table-cell">Stock</th>
-                <th className="p-3 text-center">Status</th>
-                <th className="p-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {products.map((p) => {
-                const totalStock = (p.variants || []).reduce((s, v) => s + (v.stock || 0), 0);
-                const stockTone =
-                  totalStock <= 4
-                    ? "bg-danger/10 hover:bg-danger/15"
-                    : totalStock <= 10
-                    ? "bg-warning/10 hover:bg-warning/15"
-                    : "hover:bg-muted/20";
-                const stockTextTone =
-                  totalStock <= 4 ? "text-danger" : totalStock <= 10 ? "text-warning" : "text-foreground";
-                return (
-                  <tr key={p._id} className={cn("transition-colors", stockTone)}>
-                    <td className="p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
-                          {p.images?.[0] && (
-                            <img src={p.images[0]} alt={p.name} className="h-full w-full object-cover" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="line-clamp-1 font-semibold">{p.name}</p>
-                          <p className="text-xs text-muted-foreground capitalize">{p.ageGroup}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="hidden p-3 text-muted-foreground md:table-cell">
-                      {p.category?.name || categoryName(p.category)}
-                    </td>
-                    <td className="hidden p-3 text-muted-foreground md:table-cell">
-                      {p.variants?.length || 0}
-                    </td>
-                    <td className="p-3 text-right font-bold">{formatCurrency(p.basePrice)}</td>
-                    <td className="hidden p-3 text-center sm:table-cell">
-                      <span className={cn("text-sm font-semibold", stockTextTone)}>{totalStock}</span>
-                    </td>
-                    <td className="p-3 text-center">
-                      {p.isActive ? <Badge variant="success">Active</Badge> : <Badge variant="danger">Inactive</Badge>}
-                      {p.isFeatured && <Badge variant="accent" className="ml-1">Featured</Badge>}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="inline-flex gap-1">
-                        <button onClick={() => setEditing(p)} className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Edit">
-                          <Edit2 className="h-4 w-4" />
-                        </button>
-                        <button onClick={() => setConfirmDelete(p)} className="rounded p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger" aria-label="Delete">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columns}
+        data={products}
+        isLoading={isLoading}
+        isFetching={isFetching}
+        isError={isError}
+        error={error}
+        onRetry={refetch}
+        sortBy={sortBy}
+        sortOrder={sortOrder}
+        onSortChange={setSort}
+        selectable={canManage}
+        selectedIds={selected}
+        onToggleRow={toggleRow}
+        onToggleAll={toggleAll}
+        empty={
+          search || activeFilterCount > 0
+            ? { icon: Search, title: "No matching products", message: "Try a different search or clear filters." }
+            : { icon: Package, title: "No products", message: "Create your first product." }
+        }
+        pagination={{
+          page,
+          pages: data?.pages ?? 1,
+          total: data?.total ?? 0,
+          limit,
+          onPageChange: setPage,
+          onLimitChange: setLimit,
+        }}
+      />
 
       {(createOpen || editing) && (
         <ProductFormModal
@@ -224,6 +356,15 @@ export default function AdminProductsPage() {
         onConfirm={handleDelete}
         title={`Deactivate "${confirmDelete?.name}"?`}
         description="The product will be hidden from the store. You can reactivate it later by editing."
+        loading={deleting}
+      />
+
+      <ConfirmDialog
+        open={bulkConfirm}
+        onClose={() => setBulkConfirm(false)}
+        onConfirm={handleBulkDeactivate}
+        title={`Deactivate ${selected.size} product${selected.size === 1 ? "" : "s"}?`}
+        description="They'll be hidden from the store. You can reactivate each one later by editing it."
         loading={deleting}
       />
     </div>
@@ -251,7 +392,9 @@ function ProductFormModal({ product, onClose }) {
   const defaults = product
     ? {
         name: product.name,
+        nameBn: product.nameBn || "",
         description: product.description,
+        descriptionBn: product.descriptionBn || "",
         department: editLeafCategory?.parent || "",
         category: product.category?._id || product.category,
         brand: product.brand?._id || product.brand || "",
@@ -281,7 +424,9 @@ function ProductFormModal({ product, onClose }) {
       }
     : {
         name: "",
+        nameBn: "",
         description: "",
+        descriptionBn: "",
         department: "",
         category: "",
         brand: "",
@@ -439,7 +584,22 @@ function ProductFormModal({ product, onClose }) {
         {step === 0 && (
           <>
             <Input label="Name" error={errors.name?.message} {...register("name")} />
+            <Input
+              label="Name (Bangla)"
+              placeholder="বাংলা নাম (ঐচ্ছিক)"
+              hint="Shown on the storefront when Bangla is active. Leave blank to fall back to the English name."
+              error={errors.nameBn?.message}
+              {...register("nameBn")}
+            />
             <Textarea label="Description" rows={3} error={errors.description?.message} {...register("description")} />
+            <Textarea
+              label="Description (Bangla)"
+              rows={3}
+              placeholder="বাংলা বিবরণ (ঐচ্ছিক)"
+              hint="Shown on the storefront when Bangla is active. Leave blank to fall back to the English description."
+              error={errors.descriptionBn?.message}
+              {...register("descriptionBn")}
+            />
             <div className="grid gap-3 sm:grid-cols-2">
               <Select
                 label="Department"
@@ -469,6 +629,7 @@ function ProductFormModal({ product, onClose }) {
               </Select>
               <Select label="Age group" error={errors.ageGroup?.message} {...register("ageGroup")}>
                 <option value="adult">Adult</option>
+                <option value="girls">Girls</option>
                 <option value="kids">Kids</option>
               </Select>
               <Select label="Availability" {...register("availability")}>

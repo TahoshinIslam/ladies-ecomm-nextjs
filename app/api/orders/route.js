@@ -1,24 +1,28 @@
 import { NextResponse } from "next/server";
 
-/**
- * Not implemented yet.
- *
- * The logic already exists in controllers/orderController.js, but it is written against
- * Express (req/res/next) and cannot run inside a Route Handler unchanged.
- * Adapting it is the backend phase; until then this answers explicitly
- * instead of failing as an unhandled 500.
- */
-const pending = () =>
-  NextResponse.json(
-    {
-      message:
-        "This endpoint is not implemented yet — controllers/orderController.js still needs to be adapted to a Next.js Route Handler.",
-    },
-    { status: 501 },
-  );
+import { requireUser, requirePermission } from "../../../lib/auth.js";
+import { PERMISSIONS } from "../../../lib/permissions.js";
+import { createOrder, getAllOrders } from "../../../services/orderService.js";
+import { withRoute } from "../../../lib/http.js";
 
-export const GET = pending;
-export const POST = pending;
-export const PUT = pending;
-export const PATCH = pending;
-export const DELETE = pending;
+// Admin list — GET /api/orders?status=&search=&sortBy=&sortOrder=&page=&limit=
+export const GET = withRoute(async (request) => {
+  await requirePermission(request, PERMISSIONS.ORDERS_VIEW);
+  const { searchParams } = new URL(request.url);
+  const result = await getAllOrders({
+    status: searchParams.get("status") || undefined,
+    search: searchParams.get("search") || undefined,
+    sortBy: searchParams.get("sortBy") || undefined,
+    sortOrder: searchParams.get("sortOrder") || undefined,
+    page: searchParams.get("page") || 1,
+    limit: searchParams.get("limit") || 20,
+  });
+  return NextResponse.json({ success: true, ...result });
+});
+
+export const POST = withRoute(async (request) => {
+  const user = await requireUser(request);
+  const body = await request.json();
+  const order = await createOrder(user._id, body);
+  return NextResponse.json({ success: true, order }, { status: 201 });
+});

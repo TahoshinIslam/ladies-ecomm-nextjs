@@ -15,8 +15,8 @@ const transporter = nodemailer.createTransport({
  * @param {object} opts - { to, subject, html, text }
  */
 export const sendEmail = async ({ to, subject, html, text }) => {
-  const from = `"${process.env.FROM_NAME || "ShoeStore"}" <${
-    process.env.FROM_EMAIL || "noreply@shoestore.com"
+  const from = `"${process.env.FROM_NAME || "TAHOS."}" <${
+    process.env.FROM_EMAIL || "noreply@tahos.store"
   }>`;
 
   const info = await transporter.sendMail({
@@ -35,7 +35,7 @@ export const sendEmail = async ({ to, subject, html, text }) => {
 
 // Pre-built email templates
 export const buildVerificationEmail = (name, link) => ({
-  subject: "Verify your ShoeStore account",
+  subject: "Verify your TAHOS. account",
   html: `
     <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
       <h2>Welcome, ${name}</h2>
@@ -47,7 +47,7 @@ export const buildVerificationEmail = (name, link) => ({
 });
 
 export const buildPasswordResetEmail = (name, link) => ({
-  subject: "Reset your ShoeStore password",
+  subject: "Reset your TAHOS. password",
   html: `
     <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
       <h2>Hi ${name}</h2>

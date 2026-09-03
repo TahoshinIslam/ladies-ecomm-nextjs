@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
@@ -17,13 +17,10 @@ import { useLoginMutation } from "../store/userApi.js";
 import { setCredentials, selectCurrentUser } from "../store/authSlice.js";
 import { useAddToCartMutation } from "../store/shopApi.js";
 import { mergeGuestCartAfterLogin } from "../hooks/useCart.js";
-
-const schema = z.object({
-  email: z.string().email("Enter a valid email"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
+import { useLocale } from "../context/LocaleProvider.jsx";
 
 export default function LoginPage() {
+  const { t } = useLocale();
   const dispatch = useDispatch();
   const router = useRouter();
   const sp = useSearchParams();
@@ -38,6 +35,15 @@ export default function LoginPage() {
     if (user) router.replace(redirectParam || "/");
   }, [user, redirectParam, router]);
 
+  const schema = useMemo(
+    () =>
+      z.object({
+        email: z.string().email(t("auth.validEmail")),
+        password: z.string().min(6, t("auth.passwordMinLength")),
+      }),
+    [t],
+  );
+
   const {
     register,
     handleSubmit,
@@ -49,12 +55,12 @@ export default function LoginPage() {
       const res = await login(data).unwrap();
       dispatch(setCredentials({ user: res.user, token: res.token }));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
-      toast.success(`Welcome back, ${res.user.name.split(" ")[0]}`);
+      toast.success(t("auth.welcomeBackName", { name: res.user.name.split(" ")[0] }));
       const isAdmin = res.user?.role === "admin";
       const target = redirectParam || (isAdmin ? "/admin" : "/");
       router.push(target);
     } catch (err) {
-      toast.error(err?.data?.message || "Login failed");
+      toast.error(err?.data?.message || t("auth.loginFailed"));
     }
   };
 
@@ -70,22 +76,22 @@ export default function LoginPage() {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md rounded-lg border border-border bg-background p-8 shadow-card"
       >
-        <h1 className="font-heading text-2xl font-black">Welcome back</h1>
+        <h1 className="font-heading text-2xl font-black">{t("auth.welcomeBack")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Sign in to continue shopping.
+          {t("auth.signInToContinueShopping")}
         </p>
 
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
           <Input
-            label="Email"
+            label={t("auth.emailAddress")}
             type="email"
             icon={Mail}
-            placeholder="you@example.com"
+            placeholder={t("auth.emailPlaceholder")}
             error={errors.email?.message}
             {...register("email")}
           />
           <Input
-            label="Password"
+            label={t("auth.passwordLabel")}
             type="password"
             icon={Lock}
             placeholder="••••••••"
@@ -97,28 +103,28 @@ export default function LoginPage() {
               href="/forgot-password"
               className="text-xs font-medium text-accent hover:underline"
             >
-              Forgot password?
+              {t("auth.forgotPassword2")}
             </Link>
           </div>
           <Button type="submit" loading={isLoading} size="lg" className="w-full">
             <LogIn className="h-4 w-4" />
-            Sign in
+            {t("auth.signIn")}
           </Button>
         </form>
 
         <div className="my-6 flex items-center gap-3">
           <div className="h-px flex-1 bg-border" />
-          <span className="text-xs text-muted-foreground">or</span>
+          <span className="text-xs text-muted-foreground">{t("auth.or")}</span>
           <div className="h-px flex-1 bg-border" />
         </div>
 
         <p className="text-center text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          {t("auth.dontHaveAccount2")}{" "}
           <Link
             href={redirectParam ? `/register?redirect=${encodeURIComponent(redirectParam)}` : "/register"}
             className="font-semibold text-accent hover:underline"
           >
-            Create one
+            {t("auth.createOne")}
           </Link>
         </p>
       </motion.div>

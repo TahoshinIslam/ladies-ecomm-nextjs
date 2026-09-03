@@ -11,9 +11,12 @@ import Textarea from "../../components/ui/Textarea.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import Skeleton from "../../components/ui/Skeleton.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
+import AdminErrorState from "../../components/admin/AdminErrorState.jsx";
 import Rating from "../../components/ui/Rating.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
+import Pagination from "../../components/ui/Pagination.jsx";
+import TableToolbar from "../../components/admin/TableToolbar.jsx";
 
 import {
   useListAllReviewsQuery,
@@ -22,20 +25,25 @@ import {
   useUpdateReviewMutation,
 } from "../../store/shopApi.js";
 import { formatDateTime } from "../../lib/utils.js";
+import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 
+// Reviews stay a card list rather than a <table> — a comment/reply is
+// long-form free text that needs to wrap and breathe, not sit constrained
+// in a table cell — but gets the same URL-synced pagination, debounced
+// search, and filter toolbar as every other admin list.
 export default function AdminReviewsPage() {
-  const [search, setSearch] = useState("");
-  const [rating, setRating] = useState("");
-  const [page, setPage] = useState(1);
+  const { page, limit, search, filters, activeFilterCount, setPage, setLimit, setSearch, setFilter, clearFilters } =
+    useTableQueryState({ defaultLimit: 20, filterKeys: ["rating"] });
+
   const [replying, setReplying] = useState(null);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  const { data, isLoading, isFetching } = useListAllReviewsQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useListAllReviewsQuery({
     page,
-    limit: 20,
-    ...(search ? { search } : {}),
-    ...(rating ? { rating } : {}),
+    limit,
+    search: search || undefined,
+    rating: filters.rating || undefined,
   });
   const reviews = data?.reviews ?? [];
 
@@ -45,48 +53,47 @@ export default function AdminReviewsPage() {
     try {
       await deleteReview(confirmDelete._id).unwrap();
       toast.success("Review deleted");
+      if (reviews.length <= 1 && page > 1) setPage(page - 1);
       setConfirmDelete(null);
     } catch (e) {
       toast.error(e?.data?.message || "Could not delete");
     }
   };
 
+  const emptyState =
+    search || activeFilterCount > 0 ? (
+      <EmptyState icon={Search} title="No matching reviews" message="Try a different search or clear filters." />
+    ) : (
+      <EmptyState icon={MessageSquare} title="No reviews" message="Customer reviews will appear here once posted." />
+    );
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-heading text-3xl font-black">Reviews</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {data?.total || 0} reviews total
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{data?.total ?? 0} reviews total</p>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <Input
-          icon={Search}
-          placeholder="Search comment or title..."
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-          className="max-w-sm"
-        />
-        <Select
-          value={rating}
-          onChange={(e) => {
-            setRating(e.target.value);
-            setPage(1);
-          }}
-          className="max-w-[180px]"
-        >
-          <option value="">All ratings</option>
-          {[5, 4, 3, 2, 1].map((r) => (
-            <option key={r} value={r}>
-              {r} stars
-            </option>
-          ))}
-        </Select>
-      </div>
+      <TableToolbar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search comment or title…"
+        activeFilterCount={activeFilterCount}
+        onClearFilters={clearFilters}
+        filters={
+          <Select
+            value={filters.rating || ""}
+            onChange={(e) => setFilter("rating", e.target.value)}
+            className="max-w-[180px]"
+            aria-label="Filter by rating"
+          >
+            <option value="">All ratings</option>
+            {[5, 4, 3, 2, 1].map((r) => (
+              <option key={r} value={r}>{r} stars</option>
+            ))}
+          </Select>
+        }
+      />
 
       {isLoading ? (
         <div className="space-y-2">
@@ -94,12 +101,14 @@ export default function AdminReviewsPage() {
             <Skeleton key={i} className="h-32 w-full" />
           ))}
         </div>
-      ) : reviews.length === 0 ? (
-        <EmptyState
-          icon={MessageSquare}
-          title="No reviews"
-          message="Customer reviews will appear here once posted."
+      ) : isError ? (
+        <AdminErrorState
+          title="Couldn't load reviews"
+          message={error?.data?.message || "Your session may have expired. Try again."}
+          onRetry={refetch}
         />
+      ) : reviews.length === 0 ? (
+        emptyState
       ) : (
         <ul className={`space-y-3 ${isFetching ? "opacity-60" : ""}`}>
           {reviews.map((r) => (
@@ -189,29 +198,15 @@ export default function AdminReviewsPage() {
         </ul>
       )}
 
-      {/* Pagination */}
-      {data && data.pages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Prev
-          </Button>
-          <span className="px-4 text-sm">
-            Page {page} of {data.pages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= data.pages}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </Button>
-        </div>
+      {!isLoading && !isError && (data?.total > 0 || page > 1) && (
+        <Pagination
+          page={page}
+          pages={data?.pages ?? 1}
+          total={data?.total ?? 0}
+          limit={limit}
+          onPageChange={setPage}
+          onLimitChange={setLimit}
+        />
       )}
 
       {replying && (

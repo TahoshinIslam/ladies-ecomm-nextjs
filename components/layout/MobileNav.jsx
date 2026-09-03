@@ -8,6 +8,7 @@ import { Heart, Home, Search, ShoppingBag, User } from "lucide-react";
 import { toggleSearch } from "../../store/uiSlice.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { useGetWishlistQuery } from "../../store/shopApi.js";
+import { useLocale } from "../../context/LocaleProvider.jsx";
 import { cn } from "../../lib/utils.js";
 
 /**
@@ -20,6 +21,7 @@ import { cn } from "../../lib/utils.js";
 export default function MobileNav() {
   const pathname = usePathname();
   const dispatch = useDispatch();
+  const { t } = useLocale();
   const user = useSelector(selectCurrentUser);
   // Wishlist has no guest/localStorage fallback (unlike cart) — same as Header.
   const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
@@ -30,34 +32,34 @@ export default function MobileNav() {
 
   return (
     <nav
-      aria-label="Primary"
+      aria-label={t("navigation.home")}
       className="fixed inset-x-0 bottom-0 z-[80] flex border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] shadow-sheet md:hidden"
     >
-      <NavTab href="/" label="Home" icon={Home} active={isActive("/")} />
-      <NavTab href="/shop" label="Shop" icon={ShoppingBag} active={isActive("/shop")} />
+      <NavTab href="/" label={t("navigation.home")} icon={Home} active={isActive("/")} />
+      <NavTab href="/shop" label={t("navigation.shop")} icon={ShoppingBag} active={isActive("/shop")} />
 
       <button
         type="button"
         onClick={() => dispatch(toggleSearch())}
-        aria-label="Search"
+        aria-label={t("navigation.search")}
         className="flex flex-1 flex-col items-center justify-start gap-1.5 pt-0.5 text-stone transition-transform active:scale-95"
       >
         <span className="grid h-[38px] w-[46px] place-items-center rounded-xl bg-verm text-white shadow-[0_6px_16px_-8px_rgba(255,61,33,0.9)]">
           <Search className="h-[21px] w-[21px]" strokeWidth={2} />
         </span>
-        <span className="text-[10.5px] font-medium">Search</span>
+        <span className="text-[10.5px] font-medium">{t("navigation.search")}</span>
       </button>
 
       <NavTab
         href="/wishlist"
-        label="Saved"
+        label={t("navigation.saved")}
         icon={Heart}
         active={isActive("/wishlist")}
         badge={wlCount}
       />
       <NavTab
         href={user ? "/profile" : "/login"}
-        label="Profile"
+        label={t("navigation.profile")}
         icon={User}
         active={isActive("/profile") || isActive("/login")}
       />

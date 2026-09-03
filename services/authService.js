@@ -17,7 +17,29 @@ const publicUser = (user) => ({
   role: user.role,
   avatar: user.avatar,
   isVerified: user.isVerified,
+  // Without this, an employee's session never carries what they were
+  // actually granted — the sidebar filter and every permission check on the
+  // frontend silently fall back to "no permissions" regardless of what's
+  // stored on their account. Empty for customers/admins (admins bypass
+  // permission checks entirely via role in lib/permissions.js).
+  permissions: user.permissions || [],
 });
+
+export async function register({ name, email, password }) {
+  if (!name || !email || !password) {
+    throw new HttpError(400, "Name, email, and password are required");
+  }
+
+  const existing = await User.findOne({ email: email.toLowerCase().trim() });
+  if (existing) {
+    throw new HttpError(400, "An account with this email already exists");
+  }
+
+  const user = await User.create({ name, email, password });
+  const token = generateToken(user._id);
+
+  return { token, user: publicUser(user) };
+}
 
 export async function login({ email, password }) {
   const user = await User.findOne({ email }).select("+password +loginAttempts +lockUntil");

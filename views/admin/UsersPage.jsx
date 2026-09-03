@@ -8,6 +8,8 @@ import {
   User as UserIcon,
   Briefcase,
   Trash2,
+  Edit2,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,8 +18,9 @@ import Button from "../../components/ui/Button.jsx";
 import Select from "../../components/ui/Select.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
-import Skeleton from "../../components/ui/Skeleton.jsx";
-import EmptyState from "../../components/ui/EmptyState.jsx";
+import DataTable from "../../components/admin/DataTable.jsx";
+import TableToolbar from "../../components/admin/TableToolbar.jsx";
+import DropdownMenu, { DropdownMenuItem } from "../../components/ui/DropdownMenu.jsx";
 
 import {
   useListUsersQuery,
@@ -26,45 +29,48 @@ import {
 } from "../../store/userApi.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { formatDate } from "../../lib/utils.js";
+import { useTableQueryState } from "../../hooks/useTableQueryState.js";
+import { PERMISSIONS } from "../../lib/permissions.js";
 
-// Must mirror VALID_PERMISSIONS in backend/controllers/userController.js
+// Mirrors lib/permissions.js exactly — that file is the one place these
+// strings are defined; nothing here should ever drift from what the route
+// guards and usePermission() actually check.
 const PERMISSION_GROUPS = [
+  {
+    label: "Dashboard",
+    perms: [{ value: PERMISSIONS.DASHBOARD_VIEW, label: "View dashboard" }],
+  },
+  {
+    label: "Products",
+    perms: [
+      { value: PERMISSIONS.PRODUCTS_VIEW, label: "View products" },
+      { value: PERMISSIONS.PRODUCTS_MANAGE, label: "Create, edit, delete products" },
+    ],
+  },
+  {
+    label: "Categories",
+    perms: [{ value: PERMISSIONS.CATEGORIES_MANAGE, label: "Manage categories & attributes" }],
+  },
   {
     label: "Orders",
     perms: [
-      { value: "readOrders", label: "View orders" },
-      { value: "manageOrders", label: "Update order status" },
-    ],
-  },
-  {
-    label: "Reviews",
-    perms: [
-      { value: "readReviews", label: "View reviews" },
-      { value: "manageReviews", label: "Reply to reviews" },
-    ],
-  },
-  {
-    label: "Catalog",
-    perms: [
-      { value: "manageProducts", label: "Manage products" },
-      { value: "manageCategories", label: "Manage categories" },
-      { value: "manageBrands", label: "Manage brands" },
-      { value: "manageUploads", label: "Delete uploads" },
+      { value: PERMISSIONS.ORDERS_VIEW, label: "View orders" },
+      { value: PERMISSIONS.ORDERS_MANAGE, label: "Update order status" },
     ],
   },
   {
     label: "Marketing",
     perms: [
-      { value: "manageCoupons", label: "Manage coupons" },
-      { value: "manageThemes", label: "Manage themes" },
-      { value: "manageSettings", label: "Manage settings" },
+      { value: PERMISSIONS.COUPONS_MANAGE, label: "Manage coupons" },
+      { value: PERMISSIONS.THEMES_MANAGE, label: "Manage themes" },
     ],
   },
   {
-    label: "Insights",
+    label: "Other",
     perms: [
-      { value: "readAnalytics", label: "View analytics" },
-      { value: "readNotifications", label: "Receive notifications" },
+      { value: PERMISSIONS.REVIEWS_MANAGE, label: "Moderate reviews" },
+      { value: PERMISSIONS.SETTINGS_MANAGE, label: "Manage store settings" },
+      { value: PERMISSIONS.USERS_MANAGE, label: "Manage users & permissions" },
     ],
   },
 ];
@@ -96,94 +102,216 @@ const roleBadge = (role) => {
 
 export default function AdminUsersPage() {
   const me = useSelector(selectCurrentUser);
-  const { data, isLoading } = useListUsersQuery();
-  const users = data?.users ?? [];
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+
+  const {
+    page, limit, search, sortBy, sortOrder, filters, activeFilterCount,
+    setPage, setLimit, setSearch, setSort, setFilter, clearFilters,
+  } = useTableQueryState({
+    defaultLimit: 20,
+    defaultSortBy: "createdAt",
+    defaultSortOrder: "desc",
+    filterKeys: ["role"],
+  });
+
+  const { data, isLoading, isFetching, isError, error, refetch } = useListUsersQuery({
+    page,
+    limit,
+    search: search || undefined,
+    sortBy,
+    sortOrder,
+    role: filters.role || undefined,
+  });
+  const users = data?.users ?? [];
   const [deleteUser, { isLoading: deleting }] = useDeleteUserMutation();
+
+  const isEligible = (u) => u.role !== "admin" && u._id !== me?._id;
+
+  const returnToValidPageIfEmptied = (removedCount) => {
+    if (users.length - removedCount <= 0 && page > 1) setPage(page - 1);
+  };
 
   const handleDelete = async () => {
     try {
       await deleteUser(confirmDelete._id).unwrap();
       toast.success("User deleted");
+      returnToValidPageIfEmptied(1);
       setConfirmDelete(null);
     } catch (e) {
       toast.error(e?.data?.message || "Could not delete");
     }
   };
 
+  const handleBulkDelete = async () => {
+    const ids = [...selected];
+    try {
+      await Promise.all(ids.map((id) => deleteUser(id).unwrap()));
+      toast.success(`${ids.length} user${ids.length === 1 ? "" : "s"} deleted`);
+      returnToValidPageIfEmptied(ids.length);
+      setSelected(new Set());
+      setBulkConfirm(false);
+    } catch (e) {
+      toast.error(e?.data?.message || "Some users couldn't be deleted");
+    }
+  };
+
+  const toggleRow = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAll = (ids, checked) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (checked ? next.add(id) : next.delete(id)));
+      return next;
+    });
+
+  const columns = [
+    {
+      key: "name",
+      header: "User",
+      sortable: true,
+      width: 240,
+      render: (u) => {
+        const isSelf = u._id === me?._id;
+        return (
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-bold">
+              {u.avatar ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={u.avatar} alt="" className="h-full w-full object-cover" />
+              ) : (
+                u.name?.[0]?.toUpperCase()
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate font-semibold">
+                {u.name}
+                {isSelf && <span className="ml-2 text-xs font-normal text-muted-foreground">(you)</span>}
+              </p>
+              <p className="truncate text-xs text-muted-foreground" title={u.email}>{u.email}</p>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "role",
+      header: "Role",
+      hideBelow: "sm",
+      render: (u) => roleBadge(u.role),
+    },
+    {
+      key: "createdAt",
+      header: "Joined",
+      hideBelow: "md",
+      sortable: true,
+      render: (u) => formatDate(u.createdAt),
+    },
+    {
+      key: "verified",
+      header: "Verified",
+      align: "center",
+      hideBelow: "md",
+      render: (u) => (u.isVerified ? <Badge variant="success">✓</Badge> : <Badge variant="warning">no</Badge>),
+    },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      width: 60,
+      render: (u) => {
+        const isSelf = u._id === me?._id;
+        return (
+          <DropdownMenu triggerLabel={`Actions for ${u.name}`}>
+            <DropdownMenuItem icon={Edit2} onClick={() => setEditing(u)}>
+              Edit
+            </DropdownMenuItem>
+            {u.role !== "admin" && !isSelf && (
+              <DropdownMenuItem icon={Trash2} danger onClick={() => setConfirmDelete(u)}>
+                Delete
+              </DropdownMenuItem>
+            )}
+          </DropdownMenu>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-heading text-3xl font-black">Users</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{users.length} users</p>
+        <p className="mt-1 text-sm text-muted-foreground">{data?.total ?? 0} users</p>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
-        </div>
-      ) : users.length === 0 ? (
-        <EmptyState icon={Users} title="No users" />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-background">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-muted/30 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="p-3 text-left">User</th>
-                <th className="hidden p-3 text-left sm:table-cell">Role</th>
-                <th className="hidden p-3 text-left md:table-cell">Joined</th>
-                <th className="hidden p-3 text-center md:table-cell">Verified</th>
-                <th className="p-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {users.map((u) => {
-                const isSelf = u._id === me?._id;
-                return (
-                  <tr key={u._id} className="hover:bg-muted/20">
-                    <td className="p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-bold">
-                          {u.avatar ? (
-                            <img src={u.avatar} alt={u.name} className="h-full w-full rounded-full object-cover" />
-                          ) : (
-                            u.name?.[0]?.toUpperCase()
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-semibold">
-                            {u.name}
-                            {isSelf && (
-                              <span className="ml-2 text-xs font-normal text-muted-foreground">(you)</span>
-                            )}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{u.email}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="hidden p-3 sm:table-cell">{roleBadge(u.role)}</td>
-                    <td className="hidden p-3 text-muted-foreground md:table-cell">{formatDate(u.createdAt)}</td>
-                    <td className="hidden p-3 text-center md:table-cell">
-                      {u.isVerified ? <Badge variant="success">✓</Badge> : <Badge variant="warning">no</Badge>}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="inline-flex gap-1">
-                        <Button size="sm" variant="outline" onClick={() => setEditing(u)}>Edit</Button>
-                        {u.role !== "admin" && !isSelf && (
-                          <button onClick={() => setConfirmDelete(u)} className="rounded p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger" aria-label="Delete">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <TableToolbar
+        search={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search name or email…"
+        activeFilterCount={activeFilterCount}
+        onClearFilters={clearFilters}
+        filters={
+          <Select
+            value={filters.role || ""}
+            onChange={(e) => setFilter("role", e.target.value)}
+            className="max-w-[160px]"
+            aria-label="Filter by role"
+          >
+            <option value="">All roles</option>
+            <option value="customer">Customer</option>
+            <option value="employee">Employee</option>
+            <option value="admin">Admin</option>
+          </Select>
+        }
+        right={
+          selected.size > 0 && (
+            <>
+              <span className="text-sm text-muted-foreground">{selected.size} selected</span>
+              <Button size="sm" variant="outline" onClick={() => setBulkConfirm(true)}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete selected
+              </Button>
+            </>
+          )
+        }
+      />
+
+      <DataTable
+        columns={columns}
+        data={users}
+        isLoading={isLoading}
+        isFetching={isFetching}
+        isError={isError}
+        error={error}
+        onRetry={refetch}
+        sortBy={sortBy}
+        sortOrder={sortOrder}
+        onSortChange={setSort}
+        selectable
+        isRowSelectable={isEligible}
+        selectedIds={selected}
+        onToggleRow={toggleRow}
+        onToggleAll={toggleAll}
+        empty={
+          search || activeFilterCount > 0
+            ? { icon: Search, title: "No matching users", message: "Try a different search or clear filters." }
+            : { icon: Users, title: "No users" }
+        }
+        pagination={{
+          page,
+          pages: data?.pages ?? 1,
+          total: data?.total ?? 0,
+          limit,
+          onPageChange: setPage,
+          onLimitChange: setLimit,
+        }}
+      />
 
       {editing && (
         <EditUserModal
@@ -198,6 +326,14 @@ export default function AdminUsersPage() {
         onConfirm={handleDelete}
         title={`Delete ${confirmDelete?.name}?`}
         description="Their account and cart will be removed. Orders remain in history."
+        loading={deleting}
+      />
+      <ConfirmDialog
+        open={bulkConfirm}
+        onClose={() => setBulkConfirm(false)}
+        onConfirm={handleBulkDelete}
+        title={`Delete ${selected.size} user${selected.size === 1 ? "" : "s"}?`}
+        description="Their accounts and carts will be removed. Orders remain in history."
         loading={deleting}
       />
     </div>

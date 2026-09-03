@@ -71,5 +71,7 @@ couponSchema.methods.isValid = function () {
   return { valid: true };
 };
 
-const couponModel = mongoose.model("coupons", couponSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const couponModel = mongoose.models.coupons || mongoose.model("coupons", couponSchema);
 export default couponModel;

@@ -1,197 +1,167 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  LayoutDashboard,
-  Package,
-  ShoppingCart,
-  Users,
-  Tag,
-  Palette,
-  Settings,
-  Menu,
-  X,
-  Home,
-  ChevronRight,
-  Star,
-  Folder,
-} from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 
-import { cn } from "../../lib/utils.js";
-import { selectCurrentUser } from "../../store/authSlice.js";
-import NotificationsDropdown from "./NotificationsDropdown.jsx";
+import { selectAuthHydrated, selectCanAccessAdmin, selectCurrentUser } from "../../store/authSlice.js";
+import { hasPermission } from "../../lib/permissions.js";
+import { storage } from "../../lib/utils.js";
+import { useAdminEventStream } from "../../hooks/useAdminEventStream.js";
+import { filterAdminNav, findRequiredPermission } from "./adminNav.js";
+import AdminSidebar from "./AdminSidebar.jsx";
+import MobileSidebar from "./MobileSidebar.jsx";
+import AdminTopbar from "./AdminTopbar.jsx";
+import AdminFooter from "./AdminFooter.jsx";
+import AdminErrorState from "./AdminErrorState.jsx";
 
-// Each item declares the permission it requires. `adminOnly: true` means
-// only the admin role can see it (employees with no equivalent permission).
-const NAV = [
-  { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true, perm: "readAnalytics" },
-  { to: "/admin/products", label: "Products", icon: Package, perm: "manageProducts" },
-  { to: "/admin/orders", label: "Orders", icon: ShoppingCart, perm: "readOrders" },
-  { to: "/admin/users", label: "Users", icon: Users, adminOnly: true },
-  { to: "/admin/categories", label: "Categories", icon: Folder, perm: "manageCategories" },
-  { to: "/admin/coupons", label: "Coupons", icon: Tag, perm: "manageCoupons" },
-  { to: "/admin/reviews", label: "Reviews", icon: Star, perm: "readReviews" },
-  { to: "/admin/themes", label: "Themes", icon: Palette, highlight: true, perm: "manageThemes" },
-  { to: "/admin/settings", label: "Settings", icon: Settings, perm: "manageSettings" },
-];
+const COLLAPSE_KEY = "tahos:adminSidebarCollapsed";
 
-const filterNav = (user) => {
-  if (!user) return [];
-  if (user.role === "admin") return NAV;
-  if (user.role === "employee") {
-    const perms = user.permissions || [];
-    return NAV.filter(
-      (item) => !item.adminOnly && item.perm && perms.includes(item.perm),
-    );
-  }
-  return [];
-};
-
+/**
+ * The admin application shell: auth/permission gates, then a flex row of
+ * [sidebar][content column]. The content column is its own flex-col
+ * (topbar, main, footer) so the footer sits in normal flow and lands at
+ * the bottom of short pages without any absolute positioning — the classic
+ * sticky-footer pattern (`main` carries `flex-1`, everything else is
+ * `flex-none`). `min-w-0` on the content column is what stops a wide table
+ * or long unbreakable string from forcing the whole shell to overflow
+ * horizontally; the sidebar's own width is fixed and never contributes to
+ * that overflow.
+ *
+ * This app has no NextAuth/server session — auth is a Redux-held bearer
+ * token hydrated from localStorage (see store/authSlice.js's
+ * hydrateAuth()), so the gates below are unchanged from before this
+ * refactor: they're what actually keeps someone off a page they can't
+ * use. A hidden sidebar link never was, and still isn't, a security
+ * boundary — findRequiredPermission()'s page-level check below is.
+ */
 export default function AdminLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Only ever read/written after the auth gates below have already decided
+  // to render the real shell (never during the loading/redirect branches),
+  // so this can't disagree with server-rendered markup — there isn't any
+  // for this branch. See adjacent components for the same reasoning.
+  const [collapsed, setCollapsed] = useState(() => storage.get(COLLAPSE_KEY) === "1");
+  const mobileNavTriggerRef = useRef(null);
   const pathname = usePathname();
+  const router = useRouter();
   const user = useSelector(selectCurrentUser);
-  const navItems = filterNav(user);
+  const hydrated = useSelector(selectAuthHydrated);
+  const canAccessAdmin = useSelector(selectCanAccessAdmin);
+  const navItems = filterAdminNav(user);
+  const shouldReduceMotion = useReducedMotion();
+  useAdminEventStream();
+
+  // Redirect only after the localStorage session check has actually run —
+  // `hydrated` is what tells "genuinely logged out" apart from "haven't
+  // checked yet," so a real admin never gets bounced on a hard refresh.
+  useEffect(() => {
+    if (hydrated && !user) {
+      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+    }
+  }, [hydrated, user, router, pathname]);
+
+  // Close the mobile drawer on route change (e.g. browser back/forward,
+  // not just an in-drawer link click, which already closes it itself) —
+  // set during render, React's documented "adjust state when a prop
+  // changes" pattern (same idiom Header.jsx uses for its own
+  // pathname-driven reset), so it can't cause an extra render pass the way
+  // doing this in an effect would.
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (lastPathname !== pathname) {
+    setLastPathname(pathname);
+    setMobileOpen(false);
+  }
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      storage.set(COLLAPSE_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
+
+  // Still reading localStorage — render nothing conclusive either way yet.
+  if (!hydrated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted/20">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // No session — the effect above is already redirecting; render nothing
+  // in the meantime rather than a half-built shell.
+  if (!user) return null;
+
+  // A real, logged-in session that just isn't admin/employee. Distinct from
+  // "no session" — this person is authenticated, they simply don't have
+  // access, so no redirect: tell them plainly instead.
+  if (!canAccessAdmin) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted/20 p-6">
+        <div className="w-full max-w-sm">
+          <AdminErrorState
+            title="Access denied"
+            message="Your account doesn't have permission to view the admin panel."
+            actionLabel="Back to store"
+            actionHref="/"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Admin/employee, but this specific page needs a permission they don't
+  // have. This is what actually stops direct-URL access — the sidebar only
+  // ever hides a link, it was never what kept someone off the page itself.
+  const requiredPermission = findRequiredPermission(pathname);
+  if (requiredPermission && !hasPermission(user, requiredPermission)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted/20 p-6">
+        <div className="w-full max-w-sm">
+          <AdminErrorState
+            title="Access denied"
+            message="You don't have permission to view this section."
+            actionLabel="Back to dashboard"
+            actionHref="/admin"
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-muted/20">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 flex-shrink-0 border-r border-border bg-background lg:block">
-        <SidebarContent items={navItems} />
-      </aside>
+      <AdminSidebar items={navItems} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+      <MobileSidebar
+        open={mobileOpen}
+        onClose={() => setMobileOpen(false)}
+        items={navItems}
+        triggerRef={mobileNavTriggerRef}
+      />
 
-      {/* Mobile sidebar */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setMobileOpen(false)}
-              className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-            />
-            <motion.aside
-              initial={{ x: "-100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-              className="fixed inset-y-0 left-0 z-50 w-64 border-r border-border bg-background lg:hidden"
-            >
-              <div className="flex items-center justify-between border-b border-border p-4">
-                <span className="font-heading font-bold">Admin</span>
-                <button
-                  onClick={() => setMobileOpen(false)}
-                  className="rounded p-1 hover:bg-muted"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <SidebarContent items={navItems} onNavigate={() => setMobileOpen(false)} />
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
+      {/* Content column — min-w-0 is load-bearing: without it, a wide table
+          or an unbreakable string in `children` forces this flex item (and
+          the whole shell) wider than the viewport instead of scrolling
+          inside its own container. */}
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
+        <AdminTopbar onOpenMobileNav={() => setMobileOpen(true)} mobileNavTriggerRef={mobileNavTriggerRef} />
 
-      {/* Main content */}
-      <main className="flex-1 overflow-hidden">
-        {/* Top bar */}
-        <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-background px-4 py-3">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="rounded p-1 hover:bg-muted lg:hidden"
-            aria-label="Menu"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-          <div className="flex-1 lg:hidden">
-            <Breadcrumb />
-          </div>
-          <div className="ml-auto">
-            <NotificationsDropdown />
-          </div>
-        </div>
-
-        <motion.div
+        <motion.main
           key={pathname}
-          initial={{ opacity: 0, y: 6 }}
+          initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          className="p-4 sm:p-6 lg:p-8"
+          transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
+          className="min-w-0 flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8"
         >
           {children}
-        </motion.div>
-      </main>
-    </div>
-  );
-}
+        </motion.main>
 
-function SidebarContent({ items, onNavigate }) {
-  return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border p-5">
-        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-          Admin Panel
-        </p>
-        <h2 className="mt-1 font-heading text-xl font-black">
-          Dashboard<span className="text-accent">.</span>
-        </h2>
+        <AdminFooter />
       </div>
-
-      <nav className="flex-1 space-y-1 p-3">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.to}
-              href={item.to}
-              end={item.end}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all",
-                  isActive
-                    ? "bg-accent/10 text-accent shadow-soft"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  item.highlight && !isActive && "text-accent/80"
-                )
-              }
-            >
-              <Icon className="h-4 w-4" />
-              {item.label}
-              {item.highlight && (
-                <span className="ml-auto inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
-              )}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <Link
-        href="/"
-        onClick={onNavigate}
-        className="flex items-center gap-3 border-t border-border p-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        <Home className="h-4 w-4" />
-        Back to store
-      </Link>
-    </div>
-  );
-}
-
-function Breadcrumb() {
-  const pathname = usePathname();
-  const parts = pathname.split("/").filter(Boolean);
-  const current = parts[parts.length - 1] || "overview";
-  return (
-    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      <span>Admin</span>
-      <ChevronRight className="h-3 w-3" />
-      <span className="font-semibold capitalize text-foreground">{current}</span>
     </div>
   );
 }

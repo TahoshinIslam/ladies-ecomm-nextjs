@@ -54,6 +54,15 @@ const settingsSchema = new mongoose.Schema(
       firstOrderFreeShipping: { type: Boolean, default: false },
     },
 
+    // Single source of truth for the exchange-policy copy shown across the
+    // storefront (Header announcement bar, homepage trust row, PDP perk) —
+    // previously hardcoded as "14-day exchange" in three separate frontend
+    // files with no way to change it without editing code.
+    exchangePolicy: {
+      windowDays: { type: Number, default: 14, min: 0 },
+      description: { type: String, default: "Easy exchanges" },
+    },
+
     taxRules: {
       type: [taxRuleSchema],
       default: () => [
@@ -90,5 +99,7 @@ settingsSchema.statics.getSingleton = async function () {
   return doc;
 };
 
-const Settings = mongoose.model("settings", settingsSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const Settings = mongoose.models.settings || mongoose.model("settings", settingsSchema);
 export default Settings;

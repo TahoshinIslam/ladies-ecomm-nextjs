@@ -8,6 +8,16 @@ const categorySchema = new mongoose.Schema(
       required: [true, "Category name is required"],
       trim: true,
     },
+    // Optional Bangla mirror of `name` — see categoryService.js's
+    // localizeCategory(). Absent/empty falls back to the English `name`,
+    // never a blank label. Slugs/ids stay English-only and stable — see
+    // section 7 of the localization audit for why filter values never
+    // translate.
+    nameBn: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     slug: {
       type: String,
       required: true,
@@ -26,6 +36,11 @@ const categorySchema = new mongoose.Schema(
       default: "",
     },
     description: {
+      type: String,
+      default: "",
+    },
+    // Optional Bangla mirror of `description` — same fallback rule as nameBn.
+    descriptionBn: {
       type: String,
       default: "",
     },

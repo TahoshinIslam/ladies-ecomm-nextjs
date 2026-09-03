@@ -75,8 +75,8 @@ const themeSchema = new mongoose.Schema(
     logoUrl: { type: String, default: "" },
     logoDarkUrl: { type: String, default: "" },
     faviconUrl: { type: String, default: "" },
-    siteName: { type: String, default: "ShoeStore" },
-    tagline: { type: String, default: "Step into something new." },
+    siteName: { type: String, default: "TAHOS." },
+    tagline: { type: String, default: "Modest fashion, made with intention." },
 
     // --- Feature toggles (admin can flip these from dashboard) ---
     features: {
@@ -95,15 +95,16 @@ const themeSchema = new mongoose.Schema(
 );
 
 // Ensure only one active theme at a time
-themeSchema.pre("save", async function (next) {
+themeSchema.pre("save", async function () {
   if (this.isActive && this.isModified("isActive")) {
     await this.constructor.updateMany(
       { _id: { $ne: this._id }, isActive: true },
       { isActive: false },
     );
   }
-  next();
 });
 
-const Theme = mongoose.model("themes", themeSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const Theme = mongoose.models.themes || mongoose.model("themes", themeSchema);
 export default Theme;

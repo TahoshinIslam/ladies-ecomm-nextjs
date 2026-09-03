@@ -1,24 +1,16 @@
 import { NextResponse } from "next/server";
 
-/**
- * Not implemented yet.
- *
- * The logic already exists in controllers/notificationController.js, but it is written against
- * Express (req/res/next) and cannot run inside a Route Handler unchanged.
- * Adapting it is the backend phase; until then this answers explicitly
- * instead of failing as an unhandled 500.
- */
-const pending = () =>
-  NextResponse.json(
-    {
-      message:
-        "This endpoint is not implemented yet — controllers/notificationController.js still needs to be adapted to a Next.js Route Handler.",
-    },
-    { status: 501 },
-  );
+import { requireUser } from "../../../lib/auth.js";
+import { getNotifications } from "../../../services/notificationService.js";
+import { withRoute } from "../../../lib/http.js";
 
-export const GET = pending;
-export const POST = pending;
-export const PUT = pending;
-export const PATCH = pending;
-export const DELETE = pending;
+export const GET = withRoute(async (request) => {
+  const user = await requireUser(request);
+  const { searchParams } = new URL(request.url);
+  const result = await getNotifications(user._id, {
+    page: searchParams.get("page") || undefined,
+    limit: searchParams.get("limit") || undefined,
+    unreadOnly: searchParams.get("unreadOnly") || undefined,
+  });
+  return NextResponse.json({ success: true, ...result });
+});

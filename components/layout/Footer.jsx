@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 
-import CurrencySwitcher from "./CurrencySwitcher.jsx";
 import { useSettings } from "../../context/SettingsContext.jsx";
+import { useLocale } from "../../context/LocaleProvider.jsx";
+import { departmentName } from "../../lib/i18n/catalog.js";
+import { useGetCategoriesQuery } from "../../store/shopApi.js";
 
 /**
  * lucide-react v1 dropped its brand glyphs, and the board draws these as
@@ -34,6 +36,7 @@ const SOCIALS = [
   },
   {
     label: "Newsletter archive",
+    labelKey: "footer.newsletterArchive",
     href: "/#newsletter",
     path: (
       <>
@@ -44,42 +47,51 @@ const SOCIALS = [
   },
 ];
 
-const COLUMNS = [
+const STATIC_COLUMN_KEYS = [
   {
-    heading: "Shop",
+    headingKey: "footer.help",
     links: [
-      { label: "New arrivals", href: "/shop?sort=-createdAt" },
-      { label: "The Rotation", href: "/shop?featured=true" },
-      { label: "Everyday", href: "/shop?category=everyday" },
-      { label: "Performance", href: "/shop?category=performance" },
-      { label: "Sale", href: "/shop?sale=true" },
+      { labelKey: "footer.shippingReturns", href: "/shipping" },
+      { labelKey: "footer.sizeGuide", href: "/size-guide" },
+      { labelKey: "footer.trackOrder", href: "/orders" },
+      { labelKey: "footer.contact", href: "/contact" },
+      { labelKey: "footer.faq", href: "/faq" },
     ],
   },
   {
-    heading: "Help",
+    headingKey: "footer.account",
     links: [
-      { label: "Shipping & returns", href: "/shipping" },
-      { label: "Size guide", href: "/size-guide" },
-      { label: "Track an order", href: "/orders" },
-      { label: "Contact", href: "/contact" },
-      { label: "FAQ", href: "/faq" },
-    ],
-  },
-  {
-    heading: "Account",
-    links: [
-      { label: "Sign in", href: "/login" },
-      { label: "Create account", href: "/register" },
-      { label: "Orders", href: "/orders" },
-      { label: "Wishlist", href: "/wishlist" },
-      { label: "Preferences", href: "/profile" },
+      { labelKey: "footer.signIn", href: "/login" },
+      { labelKey: "footer.createAccount", href: "/register" },
+      { labelKey: "footer.orders", href: "/orders" },
+      { labelKey: "footer.wishlist", href: "/wishlist" },
+      { labelKey: "footer.preferences", href: "/profile" },
     ],
   },
 ];
 
 export default function Footer() {
   const settings = useSettings();
+  const { t, locale } = useLocale();
   const year = new Date().getFullYear();
+  const { data: catsData } = useGetCategoriesQuery();
+  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
+
+  const columns = [
+    {
+      heading: t("footer.shop"),
+      links: [
+        { label: t("header.newArrivals"), href: "/shop?sort=-createdAt" },
+        ...departments
+          .slice(0, 4)
+          .map((d) => ({ label: departmentName(locale, d.slug, d.name), href: `/shop?category=${d._id}` })),
+      ],
+    },
+    ...STATIC_COLUMN_KEYS.map((col) => ({
+      heading: t(col.headingKey),
+      links: col.links.map((l) => ({ label: t(l.labelKey), href: l.href })),
+    })),
+  ];
 
   return (
     <footer className="mt-32 border-t border-line bg-surface">
@@ -92,17 +104,31 @@ export default function Footer() {
             href="/"
             className="text-[23px] font-semibold tracking-[-0.045em] text-ink"
           >
-            TAHOS.
+            {settings?.store?.name || "TAHOS."}
           </Link>
           <p className="mt-4 max-w-[26ch] text-base leading-relaxed text-stone">
-            Footwear for wherever the day goes next.
+            {t("footer.tagline")}
           </p>
+          {(settings?.store?.supportEmail || settings?.store?.supportPhone) && (
+            <div className="mt-4 space-y-1 text-[13.5px] text-stone">
+              {settings.store.supportEmail && (
+                <a href={`mailto:${settings.store.supportEmail}`} className="block hover:text-ink">
+                  {settings.store.supportEmail}
+                </a>
+              )}
+              {settings.store.supportPhone && (
+                <a href={`tel:${settings.store.supportPhone}`} className="block hover:text-ink">
+                  {settings.store.supportPhone}
+                </a>
+              )}
+            </div>
+          )}
           <div className="mt-6 flex gap-2">
             {SOCIALS.map((s) => (
               <a
                 key={s.label}
                 href={s.href}
-                aria-label={s.label}
+                aria-label={s.labelKey ? t(s.labelKey) : s.label}
                 target={s.href.startsWith("http") ? "_blank" : undefined}
                 rel={s.href.startsWith("http") ? "noreferrer noopener" : undefined}
                 className="grid h-11 w-11 place-items-center rounded-lg border border-line text-ink transition-colors hover:border-ink focus-ring"
@@ -123,7 +149,7 @@ export default function Footer() {
           </div>
         </div>
 
-        {COLUMNS.map((col) => (
+        {columns.map((col) => (
           <div key={col.heading}>
             <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
               {col.heading}
@@ -144,35 +170,31 @@ export default function Footer() {
 
         <div>
           <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
-            Region
+            {t("footer.region")}
           </div>
           <div className="mt-[18px] flex flex-col gap-3">
-            <span className="text-[13px] text-stone">Ship to</span>
-            <CurrencySwitcher />
-            <p className="text-[13px] leading-relaxed text-stone">
-              Duties and taxes are calculated at checkout.
-            </p>
+            <span className="text-[13px] text-stone">{t("footer.shipsTo")}</span>
+            <span className="text-[14.5px] font-medium text-ink">{t("footer.shipsToValue")}</span>
+            <p className="text-[13px] leading-relaxed text-stone">{t("footer.deliveryNote")}</p>
           </div>
         </div>
       </div>
 
       <div className="border-t border-line">
         <div className="mx-auto flex max-w-[1480px] flex-wrap items-center gap-x-[22px] gap-y-2 px-5 py-5 text-[12.5px] text-stone sm:px-8 lg:px-14">
-          <span>
-            © {year} {settings?.siteName || "Tahos Store"}
-          </span>
+          <span>{t("footer.copyright", { year, name: settings?.store?.name || "TAHOS." })}</span>
           <Link href="/privacy" className="hover:text-ink focus-ring">
-            Privacy
+            {t("footer.privacy")}
           </Link>
           <Link href="/terms" className="hover:text-ink focus-ring">
-            Terms
+            {t("footer.terms")}
           </Link>
           <Link href="/accessibility" className="hover:text-ink focus-ring">
-            Accessibility
+            {t("footer.accessibility")}
           </Link>
           <div className="flex-1" />
           <span className="font-mono text-[11px] uppercase tracking-[0.08em]">
-            Prices in USD · Ships from the United States
+            {t("footer.priceNote")}
           </span>
         </div>
       </div>

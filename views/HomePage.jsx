@@ -3,123 +3,154 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useDispatch } from "react-redux";
-import { motion } from "framer-motion";
-import { ArrowRight, Pause, Play, RefreshCw, Shield, Truck } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import { ArrowRight, Banknote, RefreshCw, Sparkles, Gem, Percent, Shirt, AlertCircle } from "lucide-react";
 
 import ProductCard from "../components/product/ProductCard.jsx";
 import ProductCardSkeleton from "../components/product/ProductCardSkeleton.jsx";
 import Button from "../components/ui/Button.jsx";
+import EmptyState from "../components/ui/EmptyState.jsx";
+import Skeleton from "../components/ui/Skeleton.jsx";
 import { useGetProductsQuery } from "../store/productApi.js";
+import { useGetCategoriesQuery } from "../store/shopApi.js";
 import { setFinderOpen } from "../store/uiSlice.js";
 import { useSettings } from "../context/SettingsContext.jsx";
-import { cn } from "../lib/utils.js";
+import { useLocale } from "../context/LocaleProvider.jsx";
+import { departmentName } from "../lib/i18n/catalog.js";
+import { cn, resolveImage } from "../lib/utils.js";
 
 /**
  * Editorial content is authored here rather than fetched — it is the store's
- * voice, not catalogue data, and the board treats it as fixed copy.
- *
- * Product rows come from the API. Until the catalogue is populated these fall
- * back to the reference rotation so the page never renders as empty shelves.
+ * voice, not catalogue data. Product rows come from the API only — no
+ * fallback to placeholder items; a section with no real products yet simply
+ * doesn't render, rather than showing something invented. `name` here is
+ * the real department name from the DB (see departments.find below); the
+ * body/tagline copy is a translation key, resolved via t() in the
+ * component — everything in these arrays that isn't a stable value
+ * (slug/href) is a *Key, never literal text.
  */
-const HERO_SLIDES = [
-  { brand: "New Balance", name: "2002R", colorway: "Rain Cloud", price: 155, colors: 4, annotation: "Suede & mesh upper" },
-  { brand: "Salomon", name: "XT-6", colorway: "Black & Phantom", price: 210, colors: 2, annotation: "Quicklace + Contagrip" },
-  { brand: "Nike", name: "Air Max 1", colorway: "Sail & Medium Grey", price: 145, colors: 3, annotation: "Visible Air unit" },
-];
+const DEPARTMENT_ROTATION_SLUGS = ["burqa", "abaya", "hijab"];
 
 const TRUST = [
-  { icon: Truck, title: "Complimentary delivery", body: "On every order over $200, shipped within two business days." },
-  { icon: RefreshCw, title: "Easy 14-day exchanges", body: "Wrong size? Send it back and we'll swap it, no questions." },
-  { icon: Shield, title: "Secure checkout", body: "Encrypted payments with every major card and wallet." },
-  { icon: ArrowRight, title: "Curated, not everything", body: "We only stock pairs the floor team actually wears." },
+  { icon: Banknote, titleKey: "home.trustCod", bodyKey: "home.trustCodBody" },
+  { icon: RefreshCw, titleKey: "home.trustExchange", bodyKey: "home.trustExchangeBody" },
+  { icon: Gem, titleKey: "home.trustFabric", bodyKey: "home.trustFabricBody" },
+  { icon: Sparkles, titleKey: "home.trustCoverage", bodyKey: "home.trustCoverageBody" },
 ];
 
-const CATEGORIES = [
-  { num: "01", title: "Everyday", body: "Low-profile pairs that survive a full day on foot.", href: "/shop?category=everyday", cta: "Explore everyday", tone: "media", span: "tall" },
-  { num: "02", title: "Performance", body: "Trail, track, and technical builds made to be used.", href: "/shop?category=performance", tone: "media", span: "wide" },
-  { num: "03", title: "Statement", body: "The pair that gets asked about.", href: "/shop?category=statement", tone: "coral" },
-  { num: "04", title: "After dark", body: "Reflective hits and late-night blacks.", href: "/shop?category=after-dark", tone: "night" },
+const DEPARTMENT_COPY = {
+  burqa: { num: "01", bodyKey: "catalog.deptBurqaBody", tone: "media", span: "tall" },
+  abaya: { num: "02", bodyKey: "catalog.deptAbayaBody", tone: "media", span: "wide" },
+  hijab: { num: "03", bodyKey: "catalog.deptHijabBody", tone: "coral" },
+  niqab: { num: "04", bodyKey: "catalog.deptNiqabBody", tone: "night" },
+  khimar: { num: "05", bodyKey: "catalog.deptKhimarBody", tone: "media" },
+  "modest-sets": { num: "06", bodyKey: "catalog.deptModestSetsBody", tone: "coral" },
+};
+
+const FABRICS = [
+  { nameKey: "catalog.fabricNida", value: "nida", bodyKey: "home.fabricNidaBody" },
+  { nameKey: "catalog.fabricCrepe", value: "crepe", bodyKey: "home.fabricCrepeBody" },
+  { nameKey: "catalog.fabricChiffon", value: "chiffon", bodyKey: "home.fabricChiffonBody" },
+  { nameKey: "catalog.fabricJersey", value: "jersey", bodyKey: "home.fabricJerseyBody" },
+  { nameKey: "catalog.fabricGeorgette", value: "georgette", bodyKey: "home.fabricGeorgetteBody" },
 ];
 
-const STAFF_PICKS = [
-  { quote: "Wore these through three cities in a week and never thought about my feet once.", who: "[Staff name]", product: "Salomon XT-6" },
-  { quote: "The Samba does everything. It's the shoe I recommend when someone only wants one pair.", who: "[Staff name]", product: "Adidas Samba OG" },
-];
-
-const shape = (id, brand, name, colorway, price, colors, isNew = false) => ({
-  _id: id,
-  slug: id,
-  name,
-  brand: { name: brand },
-  colorway,
-  colors,
-  basePrice: price,
-  images: [],
-  isNew,
-});
-
-const FALLBACK_ROTATION = [
-  shape("r1", "New Balance", "2002R", "Rain Cloud", 155, 4),
-  shape("r2", "Adidas", "Samba OG", "Cloud White & Core Black", 110, 6),
-  shape("r3", "Nike", "Air Max 1", "Sail & Medium Grey", 145, 3, true),
-  shape("r4", "Asics", "Gel-1130", "Cream & Steel Grey", 130, 5),
-  shape("r5", "Salomon", "XT-6", "Black & Phantom", 210, 2),
-  shape("r6", "Puma", "Speedcat OG", "Team Regal Red", 100, 4),
-  shape("r7", "New Balance", "990v6", "Grey Day", 210, 3),
-  shape("r8", "Nike", "P-6000", "Summit White", 130, 2, true),
-];
-
-const FALLBACK_LANDED = [
-  { ...shape("l1", "Adidas", "Gazelle Indoor", "Green & Off White", 110, 4, true), num: "01", drop: "Drop 02 · Aug" },
-  { ...shape("l2", "Onitsuka Tiger", "Mexico 66", "Cream & Peacoat", 115, 3, true), num: "02", drop: "Drop 02 · Aug" },
-  { ...shape("l3", "Hoka", "Clifton 9", "Shifting Sand", 145, 2, true), num: "03", drop: "Drop 02 · Aug" },
-  { ...shape("l4", "Reebok", "Club C 85", "Chalk & Green", 90, 5, true), num: "04", drop: "Drop 02 · Aug" },
+const OCCASIONS = [
+  { nameKey: "catalog.occasionEid", value: "eid", bodyKey: "home.occasionEidBody" },
+  { nameKey: "home.dailyWear", value: "everyday", bodyKey: "home.occasionEverydayBody" },
+  { nameKey: "home.wedding", value: "bridal", bodyKey: "home.occasionBridalBody" },
+  { nameKey: "catalog.occasionPrayer", value: "prayer", bodyKey: "home.occasionPrayerBody" },
 ];
 
 export default function HomePage() {
   const settings = useSettings();
+  const { t, locale } = useLocale();
   const dispatch = useDispatch();
   const [hero, setHero] = useState(0);
-  const [videoPlaying, setVideoPlaying] = useState(false);
 
-  // "The Rotation" is merchandising-curated (isFeatured), not sorted by a
-  // rating that doesn't exist yet — no reviews have been collected, so there
-  // is nothing real to rank by.
-  const { data: rotationData, isLoading: rotationLoading } = useGetProductsQuery({
+  const { data: catsData } = useGetCategoriesQuery();
+  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
+
+  const { data: arrivalsData, isLoading: arrivalsLoading } = useGetProductsQuery({
     limit: 8,
-    featured: true,
-  });
-  const { data: landedData } = useGetProductsQuery({
-    limit: 4,
     sort: "-createdAt",
   });
+  const arrivals = arrivalsData?.products ?? [];
 
-  const rotation = rotationData?.products?.length
-    ? rotationData.products
-    : FALLBACK_ROTATION;
-  const landed = landedData?.products?.length
-    ? landedData.products
-    : FALLBACK_LANDED;
+  // One real product image per rotating hero department (burqa/abaya/hijab)
+  // — fetched explicitly, not just hoped-for inside `arrivals`, so the hero
+  // still has a real photo once the catalog outgrows arrivals' limit. Three
+  // named calls, not a loop over DEPARTMENT_ROTATION_SLUGS: hooks can't be
+  // called from inside a .map() callback (rules-of-hooks). All three fire
+  // unconditionally on mount, same pattern as ProductTabsSection below, so
+  // switching slides is instant instead of a fresh loading state per click.
+  // Same map also backs the "Shop by Department" tiles below for burqa/
+  // abaya/khimar (the three tiles whose editorial tone is "media", i.e.
+  // meant to show a photo rather than a flat brand color — see
+  // DEPARTMENT_COPY) — one shared source of truth instead of fetching the
+  // same product twice.
+  const burqaDeptId = departments.find((d) => d.slug === "burqa")?._id;
+  const abayaDeptId = departments.find((d) => d.slug === "abaya")?._id;
+  const hijabDeptId = departments.find((d) => d.slug === "hijab")?._id;
+  const khimarDeptId = departments.find((d) => d.slug === "khimar")?._id;
+  const heroBurqaQ = useGetProductsQuery({ limit: 1, category: burqaDeptId, sort: "-rating" }, { skip: !burqaDeptId });
+  const heroAbayaQ = useGetProductsQuery({ limit: 1, category: abayaDeptId, sort: "-rating" }, { skip: !abayaDeptId });
+  const heroHijabQ = useGetProductsQuery({ limit: 1, category: hijabDeptId, sort: "-rating" }, { skip: !hijabDeptId });
+  const heroKhimarQ = useGetProductsQuery({ limit: 1, category: khimarDeptId, sort: "-rating" }, { skip: !khimarDeptId });
+  const heroImageBySlug = {
+    burqa: heroBurqaQ.data?.products?.[0]?.images?.[0],
+    abaya: heroAbayaQ.data?.products?.[0]?.images?.[0],
+    hijab: heroHijabQ.data?.products?.[0]?.images?.[0],
+    khimar: heroKhimarQ.data?.products?.[0]?.images?.[0],
+  };
+  // Skipped while `departments` hasn't resolved yet (dept ids still
+  // unknown), so `isLoading` alone would stay false through that window —
+  // fold `!catsData` in too so the skeleton covers the whole gap between
+  // "nothing fetched yet" and "this slug's photo actually arrived".
+  const catsLoading = !catsData;
+  const heroLoadingBySlug = {
+    burqa: catsLoading || heroBurqaQ.isLoading,
+    abaya: catsLoading || heroAbayaQ.isLoading,
+    hijab: catsLoading || heroHijabQ.isLoading,
+    khimar: catsLoading || heroKhimarQ.isLoading,
+  };
 
-  const slide = HERO_SLIDES[hero];
+  // Department name goes through departmentName() (lib/i18n/catalog.js) —
+  // the DB only ever stores it in English, so this overlays the Bangla
+  // translation for the six known departments and falls back to the DB's
+  // own name (or the raw slug, in the impossible case categories haven't
+  // loaded yet) — paired with this file's own editorial tagline copy,
+  // translated via t().
+  const heroSlug = DEPARTMENT_ROTATION_SLUGS[hero];
+  const heroDept = departments.find((d) => d.slug === heroSlug);
+  const heroImage = heroImageBySlug[heroSlug] || null;
+  const slide = {
+    name: departmentName(locale, heroSlug, heroDept?.name),
+    tagline: t(DEPARTMENT_COPY[heroSlug]?.bodyKey || "common.loading"),
+    image: heroImage,
+    loading: heroLoadingBySlug[heroSlug],
+  };
 
   // Auto-advance the hero, but never while the user prefers reduced motion.
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const t = setInterval(() => setHero((i) => (i + 1) % HERO_SLIDES.length), 6000);
-    return () => clearInterval(t);
+    const timer = setInterval(
+      () => setHero((i) => (i + 1) % DEPARTMENT_ROTATION_SLUGS.length),
+      6000,
+    );
+    return () => clearInterval(timer);
   }, []);
 
   return (
     <>
       {/* ------------------------------------------------------ Mobile hero
           (<768px only — see MobileHero below). */}
-      <MobileHero slide={slide} dispatch={dispatch} settings={settings} />
+      <MobileHero slide={slide} dispatch={dispatch} />
 
       {/* ----------------------------------------------------- Tablet hero
           (768–1023px only — see TabletHero below). Desktop hero (1024px+)
           is untouched below this. */}
-      <TabletHero slide={slide} dispatch={dispatch} settings={settings} />
+      <TabletHero slide={slide} dispatch={dispatch} />
 
       {/* ------------------------------------------------------------ Hero */}
       <section
@@ -137,27 +168,24 @@ export default function HomePage() {
           <div className="relative z-[2] lg:col-span-5">
             <div className="flex items-center gap-3 font-mono text-[11.5px] uppercase tracking-[0.16em] text-stone">
               <span className="h-px w-[22px] bg-verm" />
-              Drop 02 / City in Motion
+              {t("home.heroEyebrow")}
             </div>
             <h1
               id="hero-h"
               className="mt-5 text-[clamp(56px,6.4vw,98px)] font-semibold leading-[0.9] tracking-[-0.045em] text-balance"
             >
-              Find the pair
-              <br />
-              that moves{" "}
+              {t("home.heroTitle")}{" "}
               <span className="font-serif font-normal italic tracking-[-0.01em]">
-                like you.
+                {t("home.heroTitleAccent")}
               </span>
             </h1>
             <p className="mt-6 max-w-[42ch] text-xl leading-[1.5] text-stone text-pretty">
-              Everyday icons, rare colorways, and all-day favorites—curated for
-              wherever the day decides to go.
+              {t("home.heroSubtitle")}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href="/shop?sort=-createdAt">
                 <Button variant="accent" size="xl">
-                  Shop new arrivals
+                  {t("home.shopNewArrivals")}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
@@ -166,30 +194,50 @@ export default function HomePage() {
                 size="xl"
                 onClick={() => dispatch(setFinderOpen(true))}
               >
-                Find my pair
+                {t("home.helpMeChoose")}
               </Button>
             </div>
             <div className="mt-8 flex flex-wrap gap-x-[18px] gap-y-2 font-mono text-[11.5px] uppercase tracking-[0.08em] text-stone">
-              <span>Curated selection</span>
+              <span>{t("home.cashOnDelivery")}</span>
               <span className="opacity-40">·</span>
-              <span>Easy exchanges</span>
+              <span>{t("home.easyExchanges")}</span>
               <span className="opacity-40">·</span>
-              <span>Secure checkout</span>
+              <span>{t("home.premiumFabrics")}</span>
             </div>
           </div>
 
           {/* Hero stage */}
           <div className="relative lg:col-span-7">
             <div className="absolute right-0 top-0 font-mono text-xs tracking-[0.14em] text-stone">
-              0{hero + 1} / 0{HERO_SLIDES.length}
+              0{hero + 1} / 0{DEPARTMENT_ROTATION_SLUGS.length}
             </div>
             <div className="relative ml-auto aspect-5/4 w-full max-w-[760px]">
+              {/* Backdrop card peeking out behind the sharp foreground photo
+                  — purely decorative depth, so instead of a loading state it
+                  gets a frosted-glass treatment: the same photo, blurred and
+                  scaled up, standing in for a real blurred-backdrop shot. */}
               <div
                 aria-hidden="true"
                 className="absolute inset-x-[4%] bottom-[8%] top-[6%] overflow-hidden rounded-3xl bg-media"
               >
-                <div className="absolute inset-0 glow" />
-                <div className="absolute inset-0 hatch" />
+                {slide.loading ? (
+                  <Skeleton className="absolute inset-0 rounded-none" />
+                ) : slide.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={resolveImage(slide.image, 700)}
+                    alt=""
+                    className="h-full w-full scale-125 object-cover opacity-90 blur-2xl"
+                  />
+                ) : (
+                  <div className="absolute inset-0 hatch" />
+                )}
+                {!slide.loading && (
+                  <>
+                    <div className="absolute inset-0 glow" />
+                    <div className="absolute inset-0 bg-elev/20" />
+                  </>
+                )}
               </div>
 
               <motion.div
@@ -203,15 +251,28 @@ export default function HomePage() {
                   aria-hidden="true"
                   className="absolute inset-x-[4%] -bottom-[2%] h-[22%] contact-shadow"
                 />
-                <div className="absolute inset-0 grid place-items-center rounded-2xl border border-hair bg-wash">
-                  <span className="px-6 text-center font-mono text-xs uppercase leading-[1.7] tracking-[0.1em] text-stone">
-                    {slide.brand} {slide.name}
-                  </span>
+                <div className="absolute inset-0 overflow-hidden rounded-2xl border border-hair bg-wash">
+                  {slide.loading ? (
+                    <Skeleton className="absolute inset-0 rounded-2xl" />
+                  ) : slide.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={resolveImage(slide.image, 900)}
+                      alt={slide.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center">
+                      <span className="px-6 text-center font-mono text-xs uppercase leading-[1.7] tracking-[0.1em] text-stone">
+                        {slide.name}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="absolute left-[26%] top-[30%] hidden items-center gap-2.5 lg:flex">
                   <span className="h-[11px] w-[11px] rounded-full bg-verm shadow-[0_0_0_5px_rgba(255,61,33,0.18)]" />
                   <span className="whitespace-nowrap rounded-lg border border-line bg-elev px-2.5 py-[7px] text-[12.5px] font-medium">
-                    {slide.annotation}
+                    {slide.tagline}
                   </span>
                 </div>
               </motion.div>
@@ -219,35 +280,37 @@ export default function HomePage() {
 
             <div className="mt-2 flex flex-wrap items-end justify-between gap-6">
               <div>
-                <div className="font-mono text-[11.5px] uppercase tracking-[0.12em] text-stone">
-                  {slide.brand}
-                </div>
                 <div className="mt-1.5 text-[23px] font-semibold tracking-[-0.02em]">
                   {slide.name}
                 </div>
-                <div className="mt-1.5 flex items-center gap-3 text-[14.5px] text-stone">
-                  <span data-tabular className="font-semibold text-ink">
-                    {settings.formatPrice(slide.price)}
-                  </span>
-                  <span className="opacity-40">·</span>
-                  <span>{slide.colorway}</span>
-                  <span className="opacity-40">·</span>
-                  <span>{slide.colors} colors</span>
+                <div className="mt-1.5 text-[14.5px] text-stone">
+                  {slide.tagline}
                 </div>
               </div>
-              <div role="group" aria-label="Choose hero product" className="flex gap-2">
-                {HERO_SLIDES.map((s, i) => (
+              <div role="group" aria-label={t("home.chooseDepartment")} className="flex gap-2">
+                {DEPARTMENT_ROTATION_SLUGS.map((slug, i) => (
                   <button
-                    key={s.name}
+                    key={slug}
                     onClick={() => setHero(i)}
-                    aria-label={`Show ${s.brand} ${s.name}`}
+                    aria-label={t("home.showDepartment", { name: departments.find((d) => d.slug === slug)?.name || slug })}
                     aria-pressed={i === hero}
                     className={cn(
                       "relative h-[66px] w-[66px] overflow-hidden rounded-[10px] border bg-media transition-colors focus-ring",
                       i === hero ? "border-ink" : "border-line hover:border-ink",
                     )}
                   >
-                    <span aria-hidden="true" className="absolute inset-0 hatch" />
+                    {heroLoadingBySlug[slug] ? (
+                      <Skeleton className="absolute inset-0 rounded-none" />
+                    ) : heroImageBySlug[slug] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveImage(heroImageBySlug[slug], 132)}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span aria-hidden="true" className="absolute inset-0 hatch" />
+                    )}
                     <span className="absolute left-1.5 top-1 font-mono text-[9.5px] text-stone">
                       0{i + 1}
                     </span>
@@ -263,13 +326,13 @@ export default function HomePage() {
           (desktop only — mobile has its own trust rail inside MobileHero;
           tablet drops it entirely per request, no replacement.) */}
       <section
-        aria-label="Service benefits"
+        aria-label={t("home.serviceBenefits")}
         className="hidden border-y border-line bg-surface lg:block"
       >
         <div className="container-x grid sm:grid-cols-2 lg:grid-cols-4">
-          {TRUST.map((t, i) => (
+          {TRUST.map((item, i) => (
             <div
-              key={t.title}
+              key={item.titleKey}
               className={cn(
                 "flex items-start gap-3.5 py-[26px] pr-[30px]",
                 i < TRUST.length - 1 && "lg:border-r lg:border-line",
@@ -279,12 +342,12 @@ export default function HomePage() {
                 aria-hidden="true"
                 className="grid h-[34px] w-[34px] flex-none place-items-center rounded-lg border border-line text-verm"
               >
-                <t.icon className="h-[17px] w-[17px]" strokeWidth={1.6} />
+                <item.icon className="h-[17px] w-[17px]" strokeWidth={1.6} />
               </span>
               <div>
-                <div className="text-[14.5px] font-semibold">{t.title}</div>
+                <div className="text-[14.5px] font-semibold">{t(item.titleKey)}</div>
                 <div className="mt-1 text-[13.5px] leading-[1.45] text-stone">
-                  {t.body}
+                  {t(item.bodyKey)}
                 </div>
               </div>
             </div>
@@ -292,113 +355,187 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ------------------------------------------------------ Categories */}
-      <section id="categories" aria-labelledby="cat-h" className="container-x pt-32">
+      {/* ------------------------------------------------------ Departments */}
+      <section id="departments" aria-labelledby="dept-h" className="container-x pt-32">
         <SectionHead
-          eyebrow="02 — Categories"
-          title="Shop your pace"
-          aside="Built for commutes, weekends, late nights, and everything between."
-          id="cat-h"
+          eyebrow={t("home.departmentsEyebrow")}
+          title={t("home.shopByDepartment")}
+          aside={t("home.departmentsSub")}
+          id="dept-h"
         />
         <div className="mt-12 grid gap-5 lg:grid-cols-3">
-          {CATEGORIES.map((c) => (
-            <Link
-              key={c.title}
-              href={c.href}
-              data-reveal
-              className={cn(
-                "group relative flex flex-col justify-end overflow-hidden rounded-3xl p-8 focus-ring",
-                c.span === "tall" && "lg:row-span-2 lg:min-h-[560px]",
-                c.span === "wide" && "lg:col-span-2 lg:min-h-[265px]",
-                !c.span && "min-h-[275px]",
-                c.tone === "media" && "bg-media",
-                c.tone === "coral" && "bg-coral",
-                c.tone === "night" && "bg-[#101012]",
-              )}
-            >
-              {c.tone === "media" && (
-                <>
-                  <div aria-hidden="true" className="absolute inset-0 hatch" />
-                  <div aria-hidden="true" className="absolute inset-0 scrim" />
-                </>
-              )}
-              {c.tone === "night" && (
-                <div
-                  aria-hidden="true"
-                  className="absolute inset-0 bg-[radial-gradient(90%_70%_at_70%_20%,rgba(212,255,69,0.14),transparent_60%)]"
-                />
-              )}
-              <div
+          {departments.map((d) => {
+            const copy = DEPARTMENT_COPY[d.slug] || { num: "•", bodyKey: null, tone: "media" };
+            const body = copy.bodyKey ? t(copy.bodyKey) : d.description || "";
+            const deptName = departmentName(locale, d.slug, d.name);
+            return (
+              <Link
+                key={d._id}
+                href={`/shop?category=${d._id}`}
+                data-reveal
                 className={cn(
-                  "relative",
-                  c.tone === "coral" && "text-[#101012]",
-                  c.tone === "night" && "text-[#F5F2EA]",
+                  "group relative flex flex-col justify-end overflow-hidden rounded-3xl p-8 focus-ring",
+                  copy.span === "tall" && "lg:row-span-2 lg:min-h-[560px]",
+                  copy.span === "wide" && "lg:col-span-2 lg:min-h-[265px]",
+                  !copy.span && "min-h-[275px]",
+                  copy.tone === "media" && "bg-media",
+                  copy.tone === "coral" && "bg-coral",
+                  copy.tone === "night" && "bg-[#101012]",
                 )}
               >
+                {copy.tone === "media" && (
+                  <>
+                    {heroImageBySlug[d.slug] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resolveImage(heroImageBySlug[d.slug], 700)}
+                        alt=""
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div aria-hidden="true" className="absolute inset-0 hatch" />
+                    )}
+                    <div aria-hidden="true" className="absolute inset-0 scrim" />
+                  </>
+                )}
+                {copy.tone === "night" && (
+                  <div
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-[radial-gradient(90%_70%_at_70%_20%,rgba(212,255,69,0.14),transparent_60%)]"
+                  />
+                )}
                 <div
                   className={cn(
-                    "font-mono text-[11px] uppercase tracking-[0.14em]",
-                    c.tone === "night" ? "text-lime" : "text-verm",
-                    c.tone === "coral" && "text-[#101012]",
+                    "relative",
+                    copy.tone === "coral" && "text-[#101012]",
+                    copy.tone === "night" && "text-[#F5F2EA]",
                   )}
                 >
-                  {c.num}
-                </div>
-                <h3
-                  className={cn(
-                    "mt-2.5 font-semibold leading-none tracking-[-0.03em]",
-                    c.span === "tall" ? "text-[44px]" : c.span === "wide" ? "text-[38px]" : "text-[34px]",
-                  )}
-                >
-                  {c.title}
-                </h3>
-                <p
-                  className={cn(
-                    "mt-2.5 max-w-[32ch] text-base leading-[1.45]",
-                    c.tone === "night"
-                      ? "text-[rgba(245,242,234,0.66)]"
-                      : c.tone === "coral"
-                        ? "opacity-70"
-                        : "text-stone",
-                  )}
-                >
-                  {c.body}
-                </p>
-                {c.cta && (
+                  <div
+                    className={cn(
+                      "font-mono text-[11px] uppercase tracking-[0.14em]",
+                      copy.tone === "night" ? "text-lime" : "text-verm",
+                      copy.tone === "coral" && "text-[#101012]",
+                    )}
+                  >
+                    {copy.num}
+                  </div>
+                  <h3
+                    className={cn(
+                      "mt-2.5 font-semibold leading-none tracking-[-0.03em]",
+                      copy.span === "tall" ? "text-[44px]" : copy.span === "wide" ? "text-[38px]" : "text-[34px]",
+                    )}
+                  >
+                    {deptName}
+                  </h3>
+                  <p
+                    className={cn(
+                      "mt-2.5 max-w-[32ch] text-base leading-[1.45]",
+                      copy.tone === "night"
+                        ? "text-[rgba(245,242,234,0.66)]"
+                        : copy.tone === "coral"
+                          ? "opacity-70"
+                          : "text-stone",
+                    )}
+                  >
+                    {body}
+                  </p>
                   <span className="mt-4 inline-flex items-center gap-2 text-[14.5px] font-semibold">
-                    {c.cta}
+                    {t("home.explore", { name: deptName })}
                     <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                   </span>
-                )}
-              </div>
-            </Link>
-          ))}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
-      {/* -------------------------------------------------------- Rotation */}
-      <section id="rotation" aria-labelledby="rot-h" className="container-x pt-32">
+      {/* --------------------------------------------------- New arrivals */}
+      <section id="new-arrivals" aria-labelledby="new-h" className="container-x pt-32">
         <SectionHead
-          eyebrow="03 — Best sellers"
-          title="The Rotation"
-          sub="The pairs people keep reaching for."
-          id="rot-h"
+          eyebrow={t("home.newArrivalsEyebrow")}
+          title={t("home.justLanded")}
+          sub={t("home.justLandedSub")}
+          id="new-h"
           bordered
           action={
-            <Link href="/shop?featured=true">
+            <Link href="/shop?sort=-createdAt">
               <Button variant="subtle" size="lg">
-                See the rotation
+                {t("home.shopAllNewArrivals")}
                 <ArrowRight className="h-[15px] w-[15px]" />
               </Button>
             </Link>
           }
         />
         <div className="mt-9 grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {rotationLoading
+          {arrivalsLoading
             ? Array.from({ length: 8 }, (_, i) => <ProductCardSkeleton key={i} />)
-            : rotation.map((p, i) => (
-                <ProductCard key={p._id} product={p} index={i} />
-              ))}
+            : arrivals.map((p, i) => <ProductCard key={p._id} product={p} index={i} />)}
+        </div>
+      </section>
+
+      {/* --------------------------------------------------- Featured picks */}
+      <FeaturedPicksSection departments={departments} />
+
+      {/* ---------------------------------------- Featured / Discount / Dept */}
+      <ProductTabsSection departments={departments} />
+
+      {/* ------------------------------------------------------ Fabric story */}
+      <section aria-labelledby="fabric-h" className="container-x pt-32">
+        <SectionHead
+          eyebrow={t("home.fabricStoryEyebrow")}
+          title={t("home.fabricStoryTitle")}
+          aside={t("home.fabricStoryAside")}
+          id="fabric-h"
+        />
+        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
+          {FABRICS.map((f) => (
+            <Link
+              key={f.value}
+              href={`/shop?fabric=${f.value}`}
+              data-reveal
+              className="group relative flex min-h-[220px] flex-col justify-end overflow-hidden rounded-2xl bg-media p-6 focus-ring"
+            >
+              <div aria-hidden="true" className="absolute inset-0 hatch" />
+              <div aria-hidden="true" className="absolute inset-0 scrim" />
+              <div className="relative">
+                <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(f.nameKey)}</h3>
+                <p className="mt-2 text-[13.5px] leading-[1.5] text-stone">{t(f.bodyKey)}</p>
+                <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-verm">
+                  {t("home.shopFabric", { name: t(f.nameKey) })}
+                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      {/* ------------------------------------------------- Occasions */}
+      <section aria-labelledby="occ-h" className="container-x pt-32">
+        <SectionHead
+          eyebrow={t("home.occasionsEyebrow")}
+          title={t("home.dressedForMoment")}
+          aside={t("home.occasionsAside")}
+          id="occ-h"
+        />
+        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {OCCASIONS.map((o) => (
+            <Link
+              key={o.value}
+              href={`/shop?occasion=${o.value}`}
+              data-reveal
+              className="group flex min-h-[200px] flex-col justify-end rounded-2xl border border-line p-6 transition-colors hover:border-ink focus-ring"
+            >
+              <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(o.nameKey)}</h3>
+              <p className="mt-2 text-[13.5px] leading-[1.5] text-stone">{t(o.bodyKey)}</p>
+              <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-verm">
+                {t("home.shopOccasion", { name: t(o.nameKey) })}
+                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+              </span>
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -409,15 +546,15 @@ export default function HomePage() {
           className="relative grid overflow-hidden rounded-[26px] border border-line bg-surface lg:grid-cols-[1.1fr_1fr]"
         >
           <div className="p-8 sm:p-14">
-            <div className="eyebrow">04 — Guided discovery</div>
+            <div className="eyebrow">{t("home.guidedDiscoveryEyebrow")}</div>
             <h2
               id="finder-h"
               className="mt-4 text-[clamp(32px,3.2vw,46px)] font-semibold leading-[1.02] tracking-[-0.03em]"
             >
-              Not sure where to start?
+              {t("home.notSureTitle")}
             </h2>
             <p className="mt-3.5 max-w-[36ch] text-xl leading-[1.5] text-stone">
-              Tell us how you move. We&rsquo;ll narrow the rotation.
+              {t("home.notSureBody")}
             </p>
             <Button
               variant="primary"
@@ -425,170 +562,71 @@ export default function HomePage() {
               className="mt-7"
               onClick={() => dispatch(setFinderOpen(true))}
             >
-              Find my pair
+              {t("home.helpMeChoose")}
               <ArrowRight className="h-4 w-4" />
             </Button>
             <div className="mt-[22px] font-mono text-[11px] uppercase tracking-[0.1em] text-stone">
-              3 questions · no account needed
+              {t("home.threeQuestions")}
             </div>
           </div>
           <div className="relative hidden min-h-[340px] border-l border-line bg-media lg:grid lg:place-items-center">
             <div aria-hidden="true" className="absolute inset-0 hatch" />
             <div className="relative flex gap-3.5">
               <span className="rounded-lg border border-line bg-elev px-4 py-2.5 text-[14.5px] font-medium">
-                Commute
+                {t("home.everyday")}
               </span>
               <span className="rounded-lg bg-verm px-4 py-2.5 text-[14.5px] font-medium text-white">
-                Miles
+                {t("home.fullCoverage")}
               </span>
               <span className="rounded-lg border border-line bg-elev px-4 py-2.5 text-[14.5px] font-medium">
-                Nights out
+                {t("home.eid")}
               </span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ---------------------------------------------------- Just landed */}
-      <section id="just-landed" aria-labelledby="jl-h" className="pt-32">
-        <div className="container-x">
-          <SectionHead
-            eyebrow="05 — New arrivals"
-            title="Just landed"
-            sub="New pairs, before everyone else finds them."
-            id="jl-h"
+      {/* -------------------------------------------------------- Campaign
+          Bounded card (matches the Guided-finder/Newsletter siblings around
+          it) instead of a full-viewport-bleed section — at ultra-wide
+          widths the old version left the text pinned to the left edge with
+          a large, unbounded dead zone of empty background to its right.
+          Single column, not split — a second column here had nothing real
+          to put in it and just left a big empty decorative panel. */}
+      <section id="campaign" aria-labelledby="camp-h" className="container-x pt-32">
+        <div className="relative overflow-hidden rounded-[26px] bg-[#101012] text-[#F5F2EA]">
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-[repeating-linear-gradient(115deg,rgba(245,242,234,0.05)_0_1px,transparent_1px_14px)]"
           />
-        </div>
-        <div className="container-x mt-11 grid grid-cols-2 gap-5 lg:grid-cols-3 xl:grid-cols-4">
-          {landed.map((p, i) => (
-            <div key={p._id} className="flex flex-col">
-              {p.num && (
-                <div className="flex items-baseline gap-2.5 border-b border-line pb-3">
-                  <span className="font-mono text-xs tracking-[0.1em] text-verm">
-                    {p.num}
-                  </span>
-                  <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-stone">
-                    {p.drop}
-                  </span>
-                </div>
-              )}
-              <div className={cn(p.num && "mt-4")}>
-                <ProductCard product={p} index={i} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-[radial-gradient(55%_90%_at_22%_35%,rgba(255,61,33,0.16),transparent_65%)]"
+          />
 
-      {/* -------------------------------------------------------- Campaign */}
-      <section
-        id="campaign"
-        aria-labelledby="camp-h"
-        className="relative mt-32 overflow-hidden bg-[#101012] text-[#F5F2EA]"
-      >
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 bg-[repeating-linear-gradient(115deg,rgba(245,242,234,0.05)_0_1px,transparent_1px_14px)]"
-        />
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 bg-[radial-gradient(80%_100%_at_78%_40%,rgba(255,61,33,0.16),transparent_62%)]"
-        />
-        <div
-          aria-hidden="true"
-          className="absolute inset-y-0 right-0 hidden w-[58%] border-l border-[rgba(245,242,234,0.12)] lg:block"
-        >
-          <div className="absolute inset-0 bg-[repeating-linear-gradient(135deg,rgba(245,242,234,0.06)_0_1px,transparent_1px_12px)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,#101012_0%,rgba(16,16,18,0.55)_26%,rgba(16,16,18,0)_60%)]" />
-        </div>
-
-        <div className="container-x relative grid min-h-[640px] items-center lg:grid-cols-12">
-          <div className="z-[2] py-24 lg:col-span-6">
+          <div className="relative max-w-[640px] px-8 py-16 sm:px-14">
             <div className="flex items-center gap-3 font-mono text-[11.5px] uppercase tracking-[0.16em] text-[rgba(245,242,234,0.6)]">
               <span className="h-px w-[22px] bg-verm" />
-              06 — Journal
+              {t("home.ourApproach")}
             </div>
             <h2
               id="camp-h"
-              className="mt-6 text-[clamp(44px,5.2vw,78px)] font-semibold leading-[0.94] tracking-[-0.04em] text-balance"
+              className="mt-6 text-[clamp(36px,3.6vw,58px)] font-semibold leading-[0.98] tracking-[-0.03em] text-balance"
             >
-              Made for the miles{" "}
-              <span className="font-serif font-normal italic">between plans.</span>
+              {t("home.campaignTitle")}{" "}
+              <span className="font-serif font-normal italic">{t("home.campaignTitleAccent")}</span>
             </h2>
-            <p className="mt-6 max-w-[40ch] text-xl leading-[1.5] text-[rgba(245,242,234,0.7)] text-pretty">
-              From the first train to the last stop, find the pair that keeps up.
+            <p className="mt-5 text-lg leading-[1.5] text-[rgba(245,242,234,0.7)] text-pretty">
+              {t("home.campaignBody")}
             </p>
-            <div className="mt-9 flex flex-wrap items-center gap-3.5">
-              <Link href="/shop?category=everyday">
+            <div className="mt-8 flex flex-wrap items-center gap-3.5">
+              <Link href="/shop">
                 <span className="inline-flex h-[52px] items-center gap-2.5 rounded-[9px] bg-[#F5F2EA] px-6 text-[15.5px] font-semibold text-[#101012] transition-colors hover:bg-verm hover:text-white">
-                  Explore everyday sneakers
+                  {t("home.shopTheCollection")}
                   <ArrowRight className="h-4 w-4" />
                 </span>
               </Link>
-              <button
-                onClick={() => setVideoPlaying((v) => !v)}
-                aria-label={videoPlaying ? "Pause campaign film" : "Play campaign film"}
-                className="inline-flex h-[52px] items-center gap-2.5 rounded-[9px] border border-[rgba(245,242,234,0.28)] px-5 text-[14.5px] font-medium text-[#F5F2EA] transition-colors hover:border-[#F5F2EA] focus-ring"
-              >
-                {videoPlaying ? (
-                  <Pause className="h-[15px] w-[15px]" fill="currentColor" />
-                ) : (
-                  <Play className="h-[15px] w-[15px]" fill="currentColor" />
-                )}
-                {videoPlaying ? "Pause film" : "Play film"}
-              </button>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ----------------------------------------------------- Staff picks */}
-      <section aria-labelledby="staff-h" className="container-x pt-32">
-        <SectionHead
-          eyebrow="07 — From the floor"
-          title="Staff picks"
-          id="staff-h"
-          bordered
-          aside="What the people who sell them actually reach for."
-        />
-        <div className="mt-10 grid gap-5 lg:grid-cols-2">
-          <blockquote
-            data-reveal
-            className="flex flex-col justify-between gap-10 rounded-3xl border border-line bg-surface p-12"
-          >
-            <p className="font-serif text-[clamp(28px,2.8vw,42px)] leading-[1.15] tracking-[-0.02em]">
-              &ldquo;The 2002R is the one I hand to people who say they
-              can&rsquo;t wear <span className="italic">chunky</span> shoes. It
-              disappears on the foot after a block.&rdquo;
-            </p>
-            <footer className="flex items-center gap-4">
-              <span className="h-[52px] w-[52px] rounded-full border border-line bg-media" />
-              <div>
-                <div className="text-[15px] font-semibold">[Staff name]</div>
-                <div className="mt-0.5 font-mono text-[11.5px] uppercase tracking-[0.08em] text-stone">
-                  [Role] · Tahos floor team
-                </div>
-              </div>
-            </footer>
-          </blockquote>
-          <div className="grid gap-5">
-            {STAFF_PICKS.map((s) => (
-              <div
-                key={s.product}
-                data-reveal
-                className="flex items-center gap-5 rounded-[20px] border border-line p-7"
-              >
-                <div className="relative aspect-square w-24 flex-none overflow-hidden rounded-xl bg-media">
-                  <div aria-hidden="true" className="absolute inset-0 hatch" />
-                </div>
-                <div>
-                  <p className="text-base leading-[1.45]">{s.quote}</p>
-                  <div className="mt-3 font-mono text-[11px] uppercase tracking-[0.1em] text-stone">
-                    {s.who} · {s.product}
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       </section>
@@ -605,19 +643,9 @@ export default function HomePage() {
  * The mobile app shell's hero: HeroProductStage + TrustRail.
  * <768px only — `<Header>`'s mobile bar and `<MobileNav>` are this page's
  * counterparts for the rest of the shell (both untouched here).
- *
- * Sized so the whole stack — drop label through trust cards — fits the
- * first viewport above the fixed bottom nav on a real phone, not just the
- * reference's single 390×844 frame: the stage is a flatter 2:1 plate rather
- * than the reference's taller 390:268 crop, and every gap between blocks is
- * pulled in to match, so nothing (CTAs, trust cards) gets pushed below the
- * fold on shorter devices.
- *
- * The stage bleeds to the true viewport edge via a negative margin that
- * exactly cancels this section's own horizontal padding — both expressed as
- * the same clamp(), so the bleed stays exact at any width in the mobile range.
  */
-function MobileHero({ slide, dispatch, settings }) {
+function MobileHero({ slide, dispatch }) {
+  const { t } = useLocale();
   const gutter = "clamp(20px,4vw,56px)";
 
   return (
@@ -640,7 +668,7 @@ function MobileHero({ slide, dispatch, settings }) {
         className="relative flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-stone"
       >
         <span className="h-px w-4 bg-verm" />
-        Drop 02 / City in Motion
+        {t("home.heroEyebrow")}
       </motion.div>
 
       <motion.h1
@@ -650,12 +678,10 @@ function MobileHero({ slide, dispatch, settings }) {
         transition={{ duration: 0.45, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
         className="relative mt-2 text-[32px] font-semibold leading-[0.98] tracking-[-0.035em]"
       >
-        Find the pair that moves{" "}
-        <span className="font-serif font-normal italic">like you.</span>
+        {t("home.heroTitle")}{" "}
+        <span className="font-serif font-normal italic">{t("home.heroTitleAccent")}</span>
       </motion.h1>
 
-      {/* HeroProductStage — flatter than the reference's 390:268 crop so it
-          stops dominating the viewport; still full-bleed with pagination. */}
       <motion.div
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -664,34 +690,35 @@ function MobileHero({ slide, dispatch, settings }) {
         style={{ marginInline: `calc(-1 * ${gutter})` }}
       >
         <div className="absolute inset-0 overflow-hidden rounded-2xl bg-media">
-          <div aria-hidden="true" className="absolute inset-0 hatch" />
-          <div aria-hidden="true" className="absolute inset-0 glow" />
-          <div className="absolute inset-x-[10%] bottom-[14%] top-[12%] grid place-items-center">
-            <div
-              aria-hidden="true"
-              className="absolute inset-x-[6%] -bottom-[4%] h-[18%] contact-shadow"
-            />
-            <span className="px-6 text-center font-mono text-[9.5px] uppercase leading-[1.7] tracking-[0.08em] text-stone">
-              {slide.brand} {slide.name}
-            </span>
-          </div>
-          <div className="absolute bottom-[10px] left-3.5 font-mono text-[9.5px] tracking-[0.1em] text-stone">
-            0{HERO_SLIDES.indexOf(slide) + 1} / 0{HERO_SLIDES.length}
-          </div>
+          {slide.loading ? (
+            <Skeleton className="absolute inset-0 rounded-2xl" />
+          ) : slide.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={resolveImage(slide.image, 700)} alt={slide.name} className="h-full w-full object-cover" />
+          ) : (
+            <>
+              <div aria-hidden="true" className="absolute inset-0 hatch" />
+              <div aria-hidden="true" className="absolute inset-0 glow" />
+              <div className="absolute inset-x-[10%] bottom-[14%] top-[12%] grid place-items-center">
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-x-[6%] -bottom-[4%] h-[18%] contact-shadow"
+                />
+                <span className="px-6 text-center font-mono text-[9.5px] uppercase leading-[1.7] tracking-[0.08em] text-stone">
+                  {slide.name}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </motion.div>
 
       <div className="relative mt-3 flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-stone">
-            {slide.brand}
-          </div>
           <div className="mt-0.5 truncate text-[15px] font-semibold tracking-[-0.02em]">
-            {slide.name} · {slide.colorway}
+            {slide.name}
           </div>
-        </div>
-        <div data-tabular className="flex-none text-[15px] font-semibold">
-          {settings.formatPrice(slide.price)}
+          <div className="text-[12.5px] text-stone">{slide.tagline}</div>
         </div>
       </div>
 
@@ -699,36 +726,26 @@ function MobileHero({ slide, dispatch, settings }) {
       <div className="relative mt-3 flex gap-2">
         <Link href="/shop?sort=-createdAt" className="flex-1">
           <span className="flex h-12 items-center justify-center rounded-[10px] bg-verm text-sm font-semibold text-white transition-transform active:scale-[0.975]">
-            Shop new arrivals
+            {t("home.shopNewArrivals")}
           </span>
         </Link>
         <button
           onClick={() => dispatch(setFinderOpen(true))}
           className="flex h-12 items-center justify-center whitespace-nowrap rounded-[10px] border border-ink px-4 text-sm font-semibold transition-transform active:scale-[0.975]"
         >
-          Find my pair
+          {t("home.helpMeChoose")}
         </button>
       </div>
-
     </section>
   );
 }
 
 /**
- * A dedicated hero for 768–1023px — previously this band just got the
- * desktop hero's 12-column grid collapsed to one column (`lg:grid-cols-12`
- * has no columns below `lg`), which stacked the full desktop composition
- * (98px-capable heading, 5:4 stage) into something far taller than the
- * viewport with none of the intentionality of either the phone or desktop
- * treatment.
- *
- * This keeps the single-column shape — a true two-column split gets tight
- * fast in a ~700px content width — but sizes every piece for it: a fixed
- * heading size instead of desktop's clamp up to 98px, and a flatter 2:1
- * stage instead of 5:4, so the whole hero settles into a sane height rather
- * than the previous stack.
+ * A dedicated hero for 768–1023px — a single-column shape sized for that
+ * width rather than the desktop composition collapsed into one column.
  */
-function TabletHero({ slide, dispatch, settings }) {
+function TabletHero({ slide, dispatch }) {
+  const { t } = useLocale();
   return (
     <section
       aria-labelledby="hero-h-tablet"
@@ -745,25 +762,24 @@ function TabletHero({ slide, dispatch, settings }) {
         <div className="max-w-[520px]">
           <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-stone">
             <span className="h-px w-5 bg-verm" />
-            Drop 02 / City in Motion
+            {t("home.heroEyebrow")}
           </div>
           <h1
             id="hero-h-tablet"
             className="mt-4 text-[46px] font-semibold leading-[0.98] tracking-[-0.04em]"
           >
-            Find the pair that moves{" "}
+            {t("home.heroTitle")}{" "}
             <span className="font-serif font-normal italic tracking-[-0.01em]">
-              like you.
+              {t("home.heroTitleAccent")}
             </span>
           </h1>
           <p className="mt-4 max-w-[46ch] text-lg leading-[1.5] text-stone">
-            Everyday icons, rare colorways, and all-day favorites—curated for
-            wherever the day decides to go.
+            {t("home.heroSubtitleShort")}
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link href="/shop?sort=-createdAt">
               <Button variant="accent" size="lg">
-                Shop new arrivals
+                {t("home.shopNewArrivals")}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -772,41 +788,40 @@ function TabletHero({ slide, dispatch, settings }) {
               size="lg"
               onClick={() => dispatch(setFinderOpen(true))}
             >
-              Find my pair
+              {t("home.helpMeChoose")}
             </Button>
           </div>
         </div>
 
-        {/* HeroProductStage — flatter than desktop's 5:4 so a full-width
-            plate at this content width doesn't run tall. */}
         <div className="relative mt-10 aspect-[2/1] w-full overflow-hidden rounded-3xl bg-media">
-          <div aria-hidden="true" className="absolute inset-0 hatch" />
-          <div aria-hidden="true" className="absolute inset-0 glow" />
-          <div className="absolute inset-x-[8%] bottom-[12%] top-[10%] grid place-items-center">
-            <div
-              aria-hidden="true"
-              className="absolute inset-x-[6%] -bottom-[3%] h-[16%] contact-shadow"
-            />
-            <span className="px-6 text-center font-mono text-xs uppercase leading-[1.7] tracking-[0.1em] text-stone">
-              {slide.brand} {slide.name}
-            </span>
-          </div>
-          <div className="absolute bottom-4 left-5 font-mono text-xs tracking-[0.14em] text-stone">
-            0{HERO_SLIDES.indexOf(slide) + 1} / 0{HERO_SLIDES.length}
-          </div>
+          {slide.loading ? (
+            <Skeleton className="absolute inset-0 rounded-3xl" />
+          ) : slide.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={resolveImage(slide.image, 1200)} alt={slide.name} className="h-full w-full object-cover" />
+          ) : (
+            <>
+              <div aria-hidden="true" className="absolute inset-0 hatch" />
+              <div aria-hidden="true" className="absolute inset-0 glow" />
+              <div className="absolute inset-x-[8%] bottom-[12%] top-[10%] grid place-items-center">
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-x-[6%] -bottom-[3%] h-[16%] contact-shadow"
+                />
+                <span className="px-6 text-center font-mono text-xs uppercase leading-[1.7] tracking-[0.1em] text-stone">
+                  {slide.name}
+                </span>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-stone">
-              {slide.brand}
-            </div>
             <div className="mt-1 text-lg font-semibold tracking-[-0.02em]">
-              {slide.name} · {slide.colorway}
+              {slide.name}
             </div>
-          </div>
-          <div data-tabular className="text-lg font-semibold">
-            {settings.formatPrice(slide.price)}
+            <div className="text-sm text-stone">{slide.tagline}</div>
           </div>
         </div>
       </div>
@@ -843,7 +858,222 @@ function SectionHead({ eyebrow, title, sub, aside, id, action, bordered }) {
   );
 }
 
+/**
+ * 04 — Featured picks. Real isFeatured products only (see
+ * services/productService.js's buildFilter — `?featured=true` was already
+ * a working filter, just nothing on the homepage used it) — scoped for
+ * now to Burqa + Hijab, the only departments this phase covers. No
+ * fallback content: a genuinely empty result renders EmptyState, never an
+ * invented product.
+ */
+function FeaturedPicksSection({ departments }) {
+  const { t } = useLocale();
+  const burqa = departments.find((d) => d.slug === "burqa");
+  const hijab = departments.find((d) => d.slug === "hijab");
+  const categoryIds = [burqa?._id, hijab?._id].filter(Boolean).join(",");
+  const ready = !!(burqa?._id && hijab?._id);
+
+  const { data, isLoading, isError } = useGetProductsQuery(
+    { limit: 8, featured: "true", category: categoryIds },
+    { skip: !ready },
+  );
+  const products = data?.products ?? [];
+
+  return (
+    <section id="featured-picks" aria-labelledby="featured-h" className="container-x pt-32">
+      <SectionHead
+        eyebrow={t("home.featuredPicksEyebrow")}
+        title={t("home.editorsPicks")}
+        sub={t("home.featuredPicksSub")}
+        id="featured-h"
+        bordered
+        action={
+          <Link href="/shop?featured=true">
+            <Button variant="subtle" size="lg">
+              {t("home.shopAllFeatured")}
+              <ArrowRight className="h-[15px] w-[15px]" />
+            </Button>
+          </Link>
+        }
+      />
+      <div className="mt-9">
+        {!ready || isLoading ? (
+          <div className="grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => (
+              <ProductCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : isError ? (
+          <EmptyState
+            icon={AlertCircle}
+            title={t("home.couldntLoadProducts")}
+            message={t("home.pleaseTryAgain")}
+          />
+        ) : products.length === 0 ? (
+          <EmptyState
+            icon={Sparkles}
+            title={t("home.noFeaturedTitle")}
+            message={t("home.noFeaturedMessage")}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {products.map((p, i) => (
+              <ProductCard key={p._id} product={p} index={i} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const HOME_TABS = [
+  { key: "featured", labelKey: "home.tabFeatured", icon: Sparkles },
+  { key: "discount", labelKey: "home.tabDiscount", icon: Percent },
+  { key: "burqa", labelKey: "home.tabBurqa", icon: Shirt },
+  { key: "hijab", labelKey: "home.tabHijab", icon: Shirt },
+];
+
+/**
+ * 05 — the tabbed section. Each tab is its own live API query (Featured/
+ * Discount reuse the same Burqa+Hijab scope as the Featured Picks section
+ * above; Burqa/Hijab are single-department queries ShopPage already
+ * supports unmodified) — all four fire in parallel on mount so switching
+ * tabs after the first paint is instant, not a fresh loading state every
+ * click. "View all" links point at the exact /shop query params ShopPage
+ * and the API already understand.
+ */
+function ProductTabsSection({ departments }) {
+  const { t } = useLocale();
+  const burqa = departments.find((d) => d.slug === "burqa");
+  const hijab = departments.find((d) => d.slug === "hijab");
+  const bothIds = [burqa?._id, hijab?._id].filter(Boolean).join(",");
+  const bothReady = !!(burqa?._id && hijab?._id);
+  const shouldReduceMotion = useReducedMotion();
+  const [active, setActive] = useState("featured");
+
+  const featuredQ = useGetProductsQuery({ limit: 8, featured: "true", category: bothIds }, { skip: !bothReady });
+  const discountQ = useGetProductsQuery({ limit: 8, discount: "true", category: bothIds }, { skip: !bothReady });
+  const burqaQ = useGetProductsQuery({ limit: 8, category: burqa?._id }, { skip: !burqa?._id });
+  const hijabQ = useGetProductsQuery({ limit: 8, category: hijab?._id }, { skip: !hijab?._id });
+
+  const TAB_PANELS = {
+    featured: { ...featuredQ, ready: bothReady, viewAllHref: "/shop?featured=true", emptyMessageKey: "home.noFeaturedBurqaHijab" },
+    discount: { ...discountQ, ready: bothReady, viewAllHref: "/shop?discount=true", emptyMessageKey: "home.noDiscountItems" },
+    burqa: { ...burqaQ, ready: !!burqa?._id, viewAllHref: burqa ? `/shop?category=${burqa._id}` : "/shop", emptyMessageKey: "home.noBurqaItems" },
+    hijab: { ...hijabQ, ready: !!hijab?._id, viewAllHref: hijab ? `/shop?category=${hijab._id}` : "/shop", emptyMessageKey: "home.noHijabItems" },
+  };
+
+  const current = TAB_PANELS[active];
+  const activeTabDef = HOME_TABS.find((tab) => tab.key === active);
+  const products = current.data?.products ?? [];
+  const showSkeleton = !current.ready || current.isLoading;
+
+  const underlineTransition = shouldReduceMotion ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 34 };
+
+  return (
+    <section id="shop-by-tab" aria-labelledby="tabs-h" className="container-x pt-32">
+      <SectionHead
+        eyebrow={t("home.findYourFitEyebrow")}
+        title={t("home.findYourFit")}
+        sub={t("home.findYourFitSub")}
+        id="tabs-h"
+        bordered
+      />
+
+      <div
+        role="tablist"
+        aria-label={t("home.productCategories")}
+        className="mt-8 flex gap-7 overflow-x-auto border-b border-line no-scrollbar"
+      >
+        {HOME_TABS.map((tab) => {
+          const isActive = active === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              id={`home-tab-${tab.key}`}
+              aria-selected={isActive}
+              aria-controls={`home-tabpanel-${tab.key}`}
+              onClick={() => setActive(tab.key)}
+              className={cn(
+                "relative flex flex-none items-center gap-2 whitespace-nowrap pb-3.5 font-mono text-[12px] uppercase tracking-[0.12em] transition-colors focus-ring",
+                isActive ? "text-ink" : "text-stone hover:text-ink",
+              )}
+            >
+              <tab.icon className={cn("h-3.5 w-3.5 transition-transform duration-150", isActive && "scale-110")} />
+              {t(tab.labelKey)}
+              {isActive && (
+                <motion.span
+                  layoutId="home-tabs-underline"
+                  transition={underlineTransition}
+                  className="absolute inset-x-0 -bottom-px h-[2px] bg-verm"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div role="tabpanel" id={`home-tabpanel-${active}`} aria-labelledby={`home-tab-${active}`} className="mt-9">
+        {showSkeleton ? (
+          <div className="grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }, (_, i) => (
+              <ProductCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : current.isError ? (
+          <EmptyState
+            icon={AlertCircle}
+            title={t("home.couldntLoadProducts")}
+            message={t("home.pleaseTryAgain")}
+          />
+        ) : (
+          // Plain key-remount fade, same pattern as the hero stage above
+          // (motion.div key={hero}) and ProductDetailPage's gallery — not
+          // AnimatePresence, which (with a single always-present child) left
+          // the outgoing tab's content stuck on screen indefinitely instead
+          // of unmounting once its exit finished; an enter-only fade has no
+          // such handoff to get stuck on.
+          <motion.div
+            key={active}
+            initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {products.length === 0 ? (
+              <EmptyState
+                icon={activeTabDef?.icon || Sparkles}
+                title={t("home.nothingHereYet")}
+                message={t(current.emptyMessageKey)}
+              />
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {products.map((p, i) => (
+                    <ProductCard key={p._id} product={p} index={i} />
+                  ))}
+                </div>
+                <div className="mt-9 flex justify-center">
+                  <Link href={current.viewAllHref}>
+                    <Button variant="subtle" size="lg">
+                      {t("home.viewAllLower", { label: t(activeTabDef?.labelKey) })}
+                      <ArrowRight className="h-[15px] w-[15px]" />
+                    </Button>
+                  </Link>
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function NewsletterPoster() {
+  const { t } = useLocale();
   const [email, setEmail] = useState("");
   const [state, setState] = useState("idle"); // idle | loading | invalid | success
 
@@ -859,21 +1089,23 @@ function NewsletterPoster() {
   };
 
   const note = {
-    idle: "One or two a month. Unsubscribe in a click.",
-    invalid: "That email doesn't look right — check for a typo.",
-    loading: "Signing you up…",
-    success: "You're in. Watch for Drop 03.",
+    idle: t("home.newsletterNoteIdle"),
+    invalid: t("home.newsletterNoteInvalid"),
+    loading: t("home.newsletterNoteLoading"),
+    success: t("home.newsletterNoteSuccess"),
   }[state];
 
   return (
     <section aria-labelledby="news-h" className="container-x pt-32">
+      {/* Single column, not split against an empty second column — see the
+          Campaign card above for why. */}
       <div
         data-reveal
-        className="relative grid overflow-hidden rounded-[26px] bg-ink text-canvas lg:grid-cols-[1.35fr_1fr]"
+        className="relative overflow-hidden rounded-[26px] bg-ink text-canvas"
       >
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-8 right-[38%] text-[300px] font-bold leading-[0.8] tracking-[-0.06em] opacity-[0.06]"
+          className="pointer-events-none absolute -top-8 right-[6%] text-[300px] font-bold leading-[0.8] tracking-[-0.06em] opacity-[0.06]"
         >
           02
         </div>
@@ -891,20 +1123,20 @@ function NewsletterPoster() {
           />
         </svg>
 
-        <div className="relative px-8 py-16 sm:px-14">
+        <div className="relative max-w-[760px] px-8 py-16 sm:px-14">
           <div className="font-mono text-[11.5px] uppercase tracking-[0.18em] text-verm">
-            Tahos Notes
+            {t("home.newsletterEyebrow")}
           </div>
           <h2
             id="news-h"
             className="mt-4 text-[clamp(38px,4.2vw,60px)] font-semibold leading-[0.98] tracking-[-0.035em]"
           >
-            Good shoes.
+            {t("home.newsletterTitle")}
             <br />
-            Better inbox.
+            {t("home.newsletterTitleLine2")}
           </h2>
           <p className="mt-4 max-w-[38ch] text-[19px] leading-[1.5] text-[rgba(245,242,234,0.66)]">
-            New drops, restocks, and edits worth opening. No daily noise.
+            {t("home.newsletterBody")}
           </p>
 
           <form onSubmit={submit} className="mt-8 max-w-[520px]">
@@ -912,7 +1144,7 @@ function NewsletterPoster() {
               htmlFor="nl"
               className="block font-mono text-[11px] uppercase tracking-[0.12em] text-[rgba(245,242,234,0.6)]"
             >
-              Email address
+              {t("home.emailAddress")}
             </label>
             <div className="mt-2.5 flex flex-col gap-2.5 sm:flex-row">
               <input
@@ -923,7 +1155,7 @@ function NewsletterPoster() {
                   setEmail(e.target.value);
                   if (state === "invalid") setState("idle");
                 }}
-                placeholder="Email address"
+                placeholder={t("home.emailPlaceholder")}
                 aria-describedby="nl-note"
                 aria-invalid={state === "invalid"}
                 className={cn(
@@ -938,7 +1170,7 @@ function NewsletterPoster() {
                 disabled={state === "loading"}
                 className="h-[54px] whitespace-nowrap rounded-[9px] bg-verm px-6 text-[15.5px] font-semibold text-white transition-colors hover:bg-[#F5F2EA] hover:text-[#101012] focus-ring active:scale-[0.98] disabled:opacity-60"
               >
-                {state === "success" ? "Subscribed" : "Sign up"}
+                {state === "success" ? t("home.subscribed") : t("home.signUp")}
               </button>
             </div>
             <div
@@ -954,13 +1186,6 @@ function NewsletterPoster() {
               {note}
             </div>
           </form>
-        </div>
-
-        <div className="relative hidden min-h-[380px] border-l border-[rgba(245,242,234,0.14)] bg-[#17171A] lg:block">
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 bg-[repeating-linear-gradient(135deg,rgba(245,242,234,0.06)_0_1px,transparent_1px_12px)]"
-          />
         </div>
       </div>
     </section>

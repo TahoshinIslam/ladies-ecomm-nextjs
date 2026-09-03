@@ -24,6 +24,7 @@ import Badge from "../../components/ui/Badge.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
 import Skeleton from "../../components/ui/Skeleton.jsx";
+import AdminErrorState from "../../components/admin/AdminErrorState.jsx";
 
 import {
   useListThemesQuery,
@@ -61,7 +62,7 @@ const FONT_OPTIONS = [
 ];
 
 export default function AdminThemesPage() {
-  const { data, isLoading } = useListThemesQuery();
+  const { data, isLoading, isError, error, refetch } = useListThemesQuery();
   const themes = data?.themes ?? [];
 
   const [editing, setEditing] = useState(null);
@@ -143,6 +144,12 @@ export default function AdminThemesPage() {
             <Skeleton key={i} className="h-64" />
           ))}
         </div>
+      ) : isError ? (
+        <AdminErrorState
+          title="Couldn't load themes"
+          message={error?.data?.message || "Your session may have expired. Try again."}
+          onRetry={refetch}
+        />
       ) : themes.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-12 text-center">
           <Palette className="mx-auto h-10 w-10 text-muted-foreground" />
@@ -612,7 +619,7 @@ function ThemeEditor({ theme, onClose }) {
             </div>
             <Input
               label="Announcement bar text"
-              placeholder="e.g. Free shipping on orders $200+"
+              placeholder="e.g. Free shipping on orders over ৳2,000"
               value={formData.features.announcementBar || ""}
               onChange={(e) => updateFeature("announcementBar", e.target.value)}
               hint="Shows as a thin banner at the very top of the site"
@@ -725,7 +732,7 @@ function LivePreview({ theme, dark }) {
               className="font-black"
               style={{ fontFamily: theme.fonts.heading, color: c.foreground }}
             >
-              {theme.siteName || "ShoeStore"}
+              {theme.siteName || "TAHOS."}
               <span style={{ color: c.accent }}>.</span>
             </span>
             <span

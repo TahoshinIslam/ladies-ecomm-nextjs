@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion } from "framer-motion";
 import {
+  Home,
   MapPin,
   CreditCard,
   Tag,
@@ -26,6 +27,7 @@ import Textarea from "../components/ui/Textarea.jsx";
 import Button from "../components/ui/Button.jsx";
 import Badge from "../components/ui/Badge.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
+import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 
 import {
   useGetMyAddressesQuery,
@@ -43,6 +45,7 @@ import { useCart } from "../hooks/useCart.js";
 import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
 import { downloadReceipt } from "../lib/receipt.js";
 import { useSettings } from "../context/SettingsContext.jsx";
+import { useLocale } from "../context/LocaleProvider.jsx";
 
 const addressSchema = z.object({
   fullName: z.string().min(2, "Required"),
@@ -58,16 +61,17 @@ const addressSchema = z.object({
 // Stripe / bKash / Nagad are temporarily disabled until the gateway
 // integrations are reworked. Only Cash on Delivery is offered at launch.
 const PAYMENT_METHODS = [
-  // { id: "stripe", label: "Credit/Debit Card", desc: "Secure checkout via Stripe", icon: CreditCard },
-  // { id: "bkash", label: "bKash", desc: "Pay with your bKash wallet", icon: Smartphone },
-  // { id: "nagad", label: "Nagad", desc: "Pay with Nagad", icon: Smartphone },
-  { id: "cod", label: "Cash on Delivery", desc: "Pay when your order arrives", icon: Banknote },
+  // { id: "stripe", labelKey: "...", descKey: "...", icon: CreditCard },
+  // { id: "bkash", labelKey: "...", descKey: "...", icon: Smartphone },
+  // { id: "nagad", labelKey: "...", descKey: "...", icon: Smartphone },
+  { id: "cod", labelKey: "checkout.cashOnDelivery", descKey: "checkout.cashOnDeliveryDesc", icon: Banknote },
 ];
 
 export default function CheckoutPage() {
   const router = useRouter();
   const user = useSelector(selectCurrentUser);
   const settings = useSettings();
+  const { t, locale } = useLocale();
 
   // Guests can browse checkout — auth is only required when placing the order.
   const { items: cartItems, isLoading: cartLoading } = useCart();
@@ -140,8 +144,8 @@ export default function CheckoutPage() {
       try {
         const res = await previewOrder({
           items: items.map((i) => ({
-            product: i.product._id,
-            size: i.size,
+            productId: i.productId,
+            variantId: i.variantId,
             quantity: i.quantity,
           })),
           shippingAddress: {
@@ -169,21 +173,18 @@ export default function CheckoutPage() {
     };
   }, [user, items, selectedAddress, appliedCoupon, previewOrder]);
 
-  // Local fallback math used only before first preview response arrives.
-  // We compute in the user's display currency here so the UI doesn't flicker
-  // before the server preview lands; once it does, totals.currency is the
-  // authoritative checkout currency and we'll re-render everything in it.
+  // Local fallback math used only before first preview response arrives —
+  // always computed in Taka (this storefront is BDT-only; the shipping
+  // address's country defaults to "Bangladesh", so this agrees with the
+  // real preview in the overwhelming common case and avoids a flash of a
+  // different currency while the debounced preview request is in flight).
   const fallbackTotals = useMemo(() => {
     let subtotal = 0;
     for (const it of items) {
       const p = it.product;
       if (!p) continue;
       const usdPrice = p.discountPrice ?? p.basePrice;
-      const localPrice =
-        settings.activeCurrency === "BDT"
-          ? Math.round(usdPrice * (settings.currency?.usdToBdt || 120))
-          : usdPrice;
-      subtotal += localPrice * it.quantity;
+      subtotal += settings.toBdt(usdPrice) * it.quantity;
     }
     return {
       subtotal,
@@ -193,22 +194,34 @@ export default function CheckoutPage() {
       shippingCost: 0,
       discount: 0,
       total: subtotal,
-      currency: settings.activeCurrency || "USD",
+      currency: "BDT",
     };
-  }, [items, settings.activeCurrency, settings.currency?.usdToBdt]);
+  }, [items, settings]);
 
-  const totals = serverTotals || fallbackTotals;
-  const displayCurrency = totals.currency;
-
-  // Convert a USD-stored product price into the active checkout currency.
-  // The checkout currency is dictated by the shipping address (BD → BDT,
-  // else USD), not by the user's browse-currency preference. This keeps
-  // line items and totals in the same currency so the math reads cleanly.
-  const toCheckoutPrice = (usdPrice) => {
-    const rate = settings.currency?.usdToBdt || 120;
-    if (displayCurrency === "BDT") return Math.round(Number(usdPrice) * rate);
-    return Number(usdPrice);
+  const rawTotals = serverTotals || fallbackTotals;
+  // Every totals.* field below is guaranteed Taka from this point on. The
+  // real, common path is already BDT (server preview for a Bangladesh
+  // address, or the fallback above) — this conversion only ever actually
+  // does something on the rare INTL-address server preview (see
+  // services/orderService.js's regionFromCountry/toRegionCurrency, a real,
+  // separate, USD-denominated order path this task intentionally leaves
+  // untouched) so that path still never shows a customer a dollar sign.
+  const rate = settings.currency?.usdToBdt || 120;
+  const toBdtTotal = (v) => (rawTotals.currency === "USD" ? Math.round(Number(v) * rate) : Number(v));
+  const totals = {
+    ...rawTotals,
+    subtotal: toBdtTotal(rawTotals.subtotal),
+    shippingCost: toBdtTotal(rawTotals.shippingCost),
+    tax: toBdtTotal(rawTotals.tax),
+    discount: toBdtTotal(rawTotals.discount),
+    total: toBdtTotal(rawTotals.total),
   };
+
+  // Raw catalog price (USD-denominated, see services/productService.js) to
+  // the checkout line-item's Taka amount — the same live exchange-rate
+  // conversion settings.formatPrice() applies, exposed as a raw number so
+  // line items can be summed before formatting.
+  const toCheckoutPrice = (usdPrice) => settings.toBdt(usdPrice);
 
   const handleNewAddress = async (data) => {
     try {
@@ -216,9 +229,9 @@ export default function CheckoutPage() {
       setSelectedAddressId(res.address._id);
       setAddingAddress(false);
       reset();
-      toast.success("Address added");
+      toast.success(t("checkout.addressAdded"));
     } catch (e) {
-      toast.error(e?.data?.message || "Could not save address");
+      toast.error(e?.data?.message || t("checkout.addressAddFailed"));
     }
   };
 
@@ -230,10 +243,10 @@ export default function CheckoutPage() {
         subtotal: totals.subtotal,
       }).unwrap();
       setAppliedCoupon(res);
-      toast.success(`Coupon applied: -${formatCurrency(res.discount, displayCurrency)}`);
+      toast.success(t("checkout.couponApplied", { amount: formatCurrency(res.discount, locale) }));
     } catch (e) {
       setAppliedCoupon(null);
-      toast.error(e?.data?.message || "Invalid coupon");
+      toast.error(e?.data?.message || t("checkout.invalidCoupon"));
     }
   };
 
@@ -243,24 +256,24 @@ export default function CheckoutPage() {
       return;
     }
     if (!selectedAddressId) {
-      toast.error("Please select a shipping address");
+      toast.error(t("checkout.selectShippingAddress"));
       return;
     }
     if (items.length === 0) {
-      toast.error("Your cart is empty");
+      toast.error(t("checkout.cartEmptyError"));
       return;
     }
     const address = addrData.addresses.find((a) => a._id === selectedAddressId);
     if (!address) {
-      toast.error("Invalid address");
+      toast.error(t("checkout.invalidAddress"));
       return;
     }
 
     try {
       const orderRes = await createOrder({
         items: items.map((i) => ({
-          product: i.product._id,
-          size: i.size,
+          productId: i.productId,
+          variantId: i.variantId,
           quantity: i.quantity,
         })),
         shippingAddress: {
@@ -292,18 +305,18 @@ export default function CheckoutPage() {
       // if (paymentMethod === "nagad") {
       //   toast.success("Order placed. Continue Nagad payment.");
       //   downloadReceipt(orderRes.order);
-      //   router.push(`/order/${orderId}`);
+      //   router.push(`/orders/${orderId}`);
       //   return;
       // }
       if (paymentMethod === "cod") {
         await codCreate(orderId).unwrap();
-        toast.success("Order placed! Pay in cash on delivery.");
-        downloadReceipt(orderRes.order);
-        router.push(`/order/${orderId}`);
+        toast.success(t("checkout.orderPlacedCod"));
+        downloadReceipt(orderRes.order, locale);
+        router.push(`/order-success/${orderId}`);
         return;
       }
     } catch (e) {
-      toast.error(e?.data?.message || "Failed to place order");
+      toast.error(e?.data?.message || t("checkout.placeOrderFailed"));
     }
   };
 
@@ -317,33 +330,47 @@ export default function CheckoutPage() {
 
   if (!items.length) {
     return (
-      <EmptyState
-        icon={ShoppingBag}
-        title="Your cart is empty"
-        description="Add something to your cart to check out."
-        action={<Button onClick={() => router.push("/shop")}>Continue shopping</Button>}
-      />
+      <div className="container-x py-8">
+        <Breadcrumb
+          items={[
+            { label: t("navigation.home"), href: "/", icon: Home },
+            { label: t("cart.bag"), href: "/cart", icon: ShoppingBag },
+            { label: t("checkout.title"), icon: CreditCard },
+          ]}
+        />
+        <EmptyState
+          icon={ShoppingBag}
+          title={t("cart.empty")}
+          description={t("cart.emptyBody")}
+          action={<Button onClick={() => router.push("/shop")}>{t("cart.continueShopping")}</Button>}
+        />
+      </div>
     );
   }
 
   return (
     <div className="container-x py-8">
-      <h1 className="mb-6 font-heading text-3xl font-black">Checkout</h1>
+      <Breadcrumb
+        items={[
+          { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("cart.bag"), href: "/cart", icon: ShoppingBag },
+          { label: t("checkout.title"), icon: CreditCard },
+        ]}
+      />
+      <h1 className="mb-6 font-heading text-3xl font-black">{t("checkout.title")}</h1>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
         {/* Left: forms */}
         <div className="space-y-6">
-          <Section icon={MapPin} title="Shipping address">
+          <Section icon={MapPin} title={t("checkout.shippingAddress")}>
             {!user ? (
               <div className="rounded-lg border border-dashed border-border p-4 text-sm">
-                <p className="text-muted-foreground">
-                  Sign in to add a shipping address and place your order.
-                </p>
+                <p className="text-muted-foreground">{t("checkout.signInPrompt")}</p>
                 <Button
                   className="mt-3"
                   onClick={() => router.push("/login?redirect=/checkout")}
                 >
-                  Sign in to continue
+                  {t("checkout.signInToContinue")}
                 </Button>
               </div>
             ) : addrData?.addresses?.length ? (
@@ -366,7 +393,7 @@ export default function CheckoutPage() {
                     <div className="flex-1 text-sm">
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{a.fullName}</span>
-                        {a.isDefault && <Badge variant="default">Default</Badge>}
+                        {a.isDefault && <Badge variant="default">{t("checkout.default")}</Badge>}
                         <Badge variant="outline" className="capitalize">{a.label}</Badge>
                       </div>
                       <p className="mt-1 text-muted-foreground">{a.street}, {a.city}, {a.postalCode}, {a.country}</p>
@@ -376,33 +403,33 @@ export default function CheckoutPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No saved addresses.</p>
+              <p className="text-sm text-muted-foreground">{t("checkout.noSavedAddresses")}</p>
             )}
 
             {!user ? null : !addingAddress ? (
               <Button variant="outline" onClick={() => setAddingAddress(true)} className="mt-3">
-                + Add new address
+                {t("checkout.addNewAddressBtn")}
               </Button>
             ) : (
               <form onSubmit={handleSubmit(handleNewAddress)} className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Input label="Full name" {...register("fullName")} error={errors.fullName?.message} />
-                <Input label="Phone" {...register("phone")} error={errors.phone?.message} />
-                <Input label="Street" className="md:col-span-2" {...register("street")} error={errors.street?.message} />
-                <Input label="City" {...register("city")} error={errors.city?.message} />
-                <Input label="State" {...register("state")} />
-                <Input label="Postal code" {...register("postalCode")} error={errors.postalCode?.message} />
-                <Input label="Country" {...register("country")} error={errors.country?.message} />
+                <Input label={t("checkout.fullName")} {...register("fullName")} error={errors.fullName?.message} />
+                <Input label={t("checkout.phone")} {...register("phone")} error={errors.phone?.message} />
+                <Input label={t("checkout.street")} className="md:col-span-2" {...register("street")} error={errors.street?.message} />
+                <Input label={t("checkout.city")} {...register("city")} error={errors.city?.message} />
+                <Input label={t("checkout.state")} {...register("state")} />
+                <Input label={t("checkout.postalCode")} {...register("postalCode")} error={errors.postalCode?.message} />
+                <Input label={t("checkout.country")} {...register("country")} error={errors.country?.message} />
                 <div className="md:col-span-2 flex gap-2">
-                  <Button type="submit">Save</Button>
+                  <Button type="submit">{t("common.save")}</Button>
                   <Button variant="outline" type="button" onClick={() => { setAddingAddress(false); reset(); }}>
-                    Cancel
+                    {t("checkout.cancel")}
                   </Button>
                 </div>
               </form>
             )}
           </Section>
 
-          <Section icon={CreditCard} title="Payment method">
+          <Section icon={CreditCard} title={t("checkout.paymentMethodSection")}>
             <div className="grid gap-2 md:grid-cols-2">
               {PAYMENT_METHODS.map((m) => {
                 const Icon = m.icon;
@@ -423,39 +450,56 @@ export default function CheckoutPage() {
                     />
                     <Icon className="h-4 w-4 mt-0.5 shrink-0" />
                     <div className="flex-1 text-sm">
-                      <p className="font-semibold">{m.label}</p>
-                      <p className="text-xs text-muted-foreground">{m.desc}</p>
+                      <p className="font-semibold">{t(m.labelKey)}</p>
+                      <p className="text-xs text-muted-foreground">{t(m.descKey)}</p>
                     </div>
                   </label>
                 );
               })}
             </div>
+            {(settings.store?.supportEmail || settings.store?.supportPhone) && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {t("checkout.questionsBeforeOrder")}{" "}
+                {settings.store.supportPhone && (
+                  <a href={`tel:${settings.store.supportPhone}`} className="font-medium text-foreground hover:underline">
+                    {settings.store.supportPhone}
+                  </a>
+                )}
+                {settings.store.supportPhone && settings.store.supportEmail && ` ${t("checkout.or")} `}
+                {settings.store.supportEmail && (
+                  <a href={`mailto:${settings.store.supportEmail}`} className="font-medium text-foreground hover:underline">
+                    {settings.store.supportEmail}
+                  </a>
+                )}
+                .
+              </p>
+            )}
           </Section>
 
-          <Section icon={Tag} title="Promo code">
+          <Section icon={Tag} title={t("checkout.promoCode")}>
             <div className="flex gap-2">
               <Input
                 value={couponCode}
                 onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
-                placeholder="Enter code"
+                placeholder={t("checkout.enterCode")}
               />
               <Button onClick={handleApplyCoupon} disabled={!couponCode.trim()}>
-                Apply
+                {t("checkout.apply")}
               </Button>
             </div>
             {appliedCoupon && (
               <div className="mt-3 flex items-center gap-2 text-sm text-success">
                 <Check className="h-4 w-4" />
-                <span>Applied <strong>{appliedCoupon.coupon.code}</strong></span>
+                <span>{t("checkout.couponAppliedLabel")} <strong>{appliedCoupon.coupon.code}</strong></span>
               </div>
             )}
           </Section>
 
-          <Section icon={ShoppingBag} title="Order notes (optional)">
+          <Section icon={ShoppingBag} title={t("checkout.orderNotes")}>
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Special delivery instructions…"
+              placeholder={t("checkout.orderNotesPlaceholder")}
               rows={3}
             />
           </Section>
@@ -468,7 +512,7 @@ export default function CheckoutPage() {
           className="lg:sticky lg:top-24 lg:self-start"
         >
           <div className="rounded-xl border border-border bg-card p-5 shadow-soft">
-            <h2 className="mb-4 font-heading text-xl font-bold">Order summary</h2>
+            <h2 className="mb-4 font-heading text-xl font-bold">{t("checkout.orderSummaryTitle")}</h2>
 
             <ul className="divide-y divide-border">
               {items.map((it) => {
@@ -476,8 +520,11 @@ export default function CheckoutPage() {
                 if (!p) return null;
                 const usdPrice = p.discountPrice ?? p.basePrice;
                 const lineTotal = toCheckoutPrice(usdPrice) * it.quantity;
+                const variantLine = [it.variant?.color, it.variant?.size, it.variant?.fabric]
+                  .filter(Boolean)
+                  .join(" · ");
                 return (
-                  <li key={`${p._id}-${it.size}`} className="py-3">
+                  <li key={`${p._id}-${it.variantId}`} className="py-3">
                     <div className="flex gap-3">
                       {/* Hatched plate stands in until artwork exists, matching
                           how ProductCard/CartDrawer render a missing image —
@@ -485,9 +532,9 @@ export default function CheckoutPage() {
                           file that doesn't exist. */}
                       <div className="relative h-14 w-14 flex-none overflow-hidden rounded-md bg-media">
                         <div aria-hidden="true" className="absolute inset-0 hatch" />
-                        {p.images?.[0] && (
+                        {(it.variant?.image || p.images?.[0]) && (
                           <img
-                            src={resolveImage(p.images[0], 112)}
+                            src={resolveImage(it.variant?.image || p.images[0], 112)}
                             alt={p.name}
                             loading="lazy"
                             decoding="async"
@@ -497,11 +544,13 @@ export default function CheckoutPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">Size {it.size} · Qty {it.quantity}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {variantLine ? `${variantLine} · ` : ""}{t("checkout.qty")} {it.quantity}
+                        </p>
                       </div>
                       <p className="text-sm font-bold">
                         {/* In checkout currency — matches subtotal/total below */}
-                        {formatCurrency(lineTotal, displayCurrency)}
+                        {formatCurrency(lineTotal, locale)}
                       </p>
                     </div>
                   </li>
@@ -511,41 +560,41 @@ export default function CheckoutPage() {
 
             <div className="mt-5 space-y-2 border-t border-border pt-4 text-sm">
               <Row
-                label="Subtotal"
-                value={formatCurrency(totals.subtotal, displayCurrency)}
+                label={t("checkout.subtotal")}
+                value={formatCurrency(totals.subtotal, locale)}
               />
               <Row
-                label={previewLoading ? "Shipping…" : "Shipping"}
+                label={previewLoading ? t("checkout.shippingLoading") : t("checkout.shippingLabel")}
                 value={
                   totals.shippingCost === 0 ? (
-                    <span className="text-success font-semibold">Free</span>
+                    <span className="text-success font-semibold">{t("checkout.free")}</span>
                   ) : (
-                    formatCurrency(totals.shippingCost, displayCurrency)
+                    formatCurrency(totals.shippingCost, locale)
                   )
                 }
               />
               {totals.tax > 0 && !totals.taxInclusive && (
                 <Row
-                  label={totals.taxLabel || "Tax"}
-                  value={formatCurrency(totals.tax, displayCurrency)}
+                  label={totals.taxLabel || t("checkout.tax")}
+                  value={formatCurrency(totals.tax, locale)}
                 />
               )}
               {totals.discount > 0 && (
                 <Row
-                  label="Discount"
-                  value={`-${formatCurrency(totals.discount, displayCurrency)}`}
+                  label={t("checkout.discount")}
+                  value={`-${formatCurrency(totals.discount, locale)}`}
                   valueClass="text-success"
                 />
               )}
               <Row
-                label="Total"
-                value={formatCurrency(totals.total, displayCurrency)}
+                label={t("checkout.total")}
+                value={formatCurrency(totals.total, locale)}
                 className="border-t border-border pt-3 text-base font-bold"
               />
               {totals.tax > 0 && totals.taxInclusive && (
                 <p className="pt-1 text-xs text-muted-foreground">
-                  Includes {totals.taxLabel.replace(/\s*\(incl\.\)/i, "")} of{" "}
-                  {formatCurrency(totals.tax, displayCurrency)}
+                  {t("checkout.includesTaxOf", { tax: totals.taxLabel.replace(/\s*\(incl\.\)/i, "") })}{" "}
+                  {formatCurrency(totals.tax, locale)}
                 </p>
               )}
             </div>
@@ -553,9 +602,9 @@ export default function CheckoutPage() {
             {user && (
               (() => {
                 const missing = [];
-                if (!selectedAddressId) missing.push("Add a shipping address");
-                if (!paymentMethod) missing.push("Choose a payment method");
-                if (items.length === 0) missing.push("Add items to your cart");
+                if (!selectedAddressId) missing.push(t("checkout.addShippingAddressWarning"));
+                if (!paymentMethod) missing.push(t("checkout.choosePaymentMethodWarning"));
+                if (items.length === 0) missing.push(t("checkout.addItemsWarning"));
                 return missing.length > 0 ? (
                   <ul className="mt-4 space-y-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs text-warning">
                     {missing.map((m) => (
@@ -576,11 +625,11 @@ export default function CheckoutPage() {
               className="mt-5 w-full"
             >
               {user
-                ? `Place order — ${formatCurrency(totals.total, displayCurrency)}`
-                : "Sign in to place order"}
+                ? t("checkout.placeOrderWithTotal", { total: formatCurrency(totals.total, locale) })
+                : t("checkout.signInToOrder")}
             </Button>
             <p className="mt-3 text-center text-xs text-muted-foreground">
-              By placing your order you agree to our Terms.
+              {t("checkout.agreeTermsNotice")}
             </p>
           </div>
         </motion.aside>

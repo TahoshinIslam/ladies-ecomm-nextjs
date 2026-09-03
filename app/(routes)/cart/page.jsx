@@ -2,34 +2,35 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Minus, Plus, ShoppingBag } from "lucide-react";
+import { Home, Minus, Plus, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 
 import Button from "@/components/ui/Button.jsx";
 import EmptyState from "@/components/ui/EmptyState.jsx";
 import Skeleton from "@/components/ui/Skeleton.jsx";
+import Breadcrumb from "@/components/ui/Breadcrumb.jsx";
 import { useCart } from "@/hooks/useCart.js";
 import { useSettings } from "@/context/SettingsContext.jsx";
-import { resolveImage } from "@/lib/utils.js";
-
-const FREE_SHIPPING_THRESHOLD = 200;
+import { useLocale } from "@/context/LocaleProvider.jsx";
+import { resolveImage, resolveVariantPricing } from "@/lib/utils.js";
 
 export default function CartPage() {
   const settings = useSettings();
+  const { t } = useLocale();
   const cart = useCart();
   const { items, isLoading } = cart;
   const [pending, setPending] = useState(() => new Set());
 
-  const keyOf = (productId, size) => `${productId}-${size}`;
+  const keyOf = (productId, variantId) => `${productId}-${variantId}`;
 
-  const withPending = async (productId, size, run) => {
-    const key = keyOf(productId, size);
+  const withPending = async (productId, variantId, run) => {
+    const key = keyOf(productId, variantId);
     if (pending.has(key)) return;
     setPending((prev) => new Set(prev).add(key));
     try {
       await run();
     } catch (e) {
-      toast.error(e?.data?.message || "Could not update your bag");
+      toast.error(e?.data?.message || t("errors.generic"));
     } finally {
       setPending((prev) => {
         const next = new Set(prev);
@@ -39,14 +40,18 @@ export default function CartPage() {
     }
   };
 
-  const subtotal = items.reduce((sum, i) => {
-    const p = i.product;
-    if (!p) return sum;
-    return sum + (p.discountPrice ?? p.basePrice) * i.quantity;
+  const subtotalUsd = items.reduce((sum, i) => {
+    if (!i.product) return sum;
+    const { displayPrice } = resolveVariantPricing(i.product, i.variant);
+    return sum + displayPrice * i.quantity;
   }, 0);
-
-  const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
-  const progress = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD) * 100);
+  const subtotal = settings.toBdt(subtotalUsd);
+  // Same settings-backed threshold CartDrawer/PDP read — never a number
+  // invented in this component, so bag/drawer/checkout can't disagree.
+  const threshold = settings.freeShippingThreshold();
+  const remaining = threshold ? Math.max(0, threshold.amount - subtotal) : 0;
+  const progress = threshold ? Math.min(100, (subtotal / threshold.amount) * 100) : 0;
+  const thresholdMet = !!threshold && remaining <= 0;
 
   if (isLoading) {
     return (
@@ -67,11 +72,11 @@ export default function CartPage() {
         <PageHeading count={0} />
         <EmptyState
           icon={ShoppingBag}
-          title="Your bag is empty"
-          message="Once you add a pair it'll show up here with size and color."
+          title={t("cart.empty")}
+          message={t("cart.emptyBody")}
           action={
             <Link href="/shop">
-              <Button size="lg">See the rotation</Button>
+              <Button size="lg">{t("cart.startShopping")}</Button>
             </Link>
           }
         />
@@ -90,12 +95,16 @@ export default function CartPage() {
             const p = item.product;
             if (!p) return null;
             const id = p._id;
-            const busy = pending.has(keyOf(id, item.size));
-            const price = p.discountPrice ?? p.basePrice;
+            const variantId = item.variantId;
+            const busy = pending.has(keyOf(id, variantId));
+            const { displayPrice } = resolveVariantPricing(p, item.variant);
+            const variantLine = [item.variant?.color, item.variant?.size, item.variant?.fabric]
+              .filter(Boolean)
+              .join(" · ");
 
             return (
               <li
-                key={keyOf(id, item.size)}
+                key={keyOf(id, variantId)}
                 className="flex gap-5 border-b border-line py-6 transition-opacity"
                 style={{ opacity: busy ? 0.5 : 1 }}
               >
@@ -104,10 +113,10 @@ export default function CartPage() {
                   className="relative aspect-4/5 w-[88px] flex-none overflow-hidden rounded-[10px] bg-media sm:w-28"
                 >
                   <div aria-hidden="true" className="absolute inset-0 hatch" />
-                  {p.images?.[0] && (
+                  {(item.variant?.image || p.images?.[0]) && (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={resolveImage(p.images[0], 240)}
+                      src={resolveImage(item.variant?.image || p.images[0], 240)}
                       alt={p.name}
                       loading="lazy"
                       className="relative h-full w-full object-cover"
@@ -129,12 +138,14 @@ export default function CartPage() {
                       >
                         {p.name}
                       </Link>
-                      <div className="mt-1 text-[13.5px] text-stone">
-                        Size {item.size}
-                      </div>
+                      {variantLine && (
+                        <div className="mt-1 text-[13.5px] text-stone">
+                          {variantLine}
+                        </div>
+                      )}
                     </div>
                     <div data-tabular className="text-[15.5px] font-semibold">
-                      {settings.formatPrice(price * item.quantity)}
+                      {settings.formatPrice(displayPrice * item.quantity)}
                     </div>
                   </div>
 
@@ -142,15 +153,15 @@ export default function CartPage() {
                     <div className="flex items-center rounded-lg border border-line">
                       <button
                         type="button"
-                        aria-label={`Decrease quantity of ${p.name}`}
+                        aria-label={t("product.decreaseQuantity")}
                         disabled={busy}
                         onClick={() =>
-                          withPending(id, item.size, () =>
+                          withPending(id, variantId, () =>
                             item.quantity <= 1
-                              ? cart.removeItem({ productId: id, size: item.size })
+                              ? cart.removeItem({ productId: id, variantId })
                               : cart.updateItem({
                                   productId: id,
-                                  size: item.size,
+                                  variantId,
                                   quantity: item.quantity - 1,
                                 }),
                           )
@@ -167,13 +178,13 @@ export default function CartPage() {
                       </span>
                       <button
                         type="button"
-                        aria-label={`Increase quantity of ${p.name}`}
+                        aria-label={t("product.increaseQuantity")}
                         disabled={busy}
                         onClick={() =>
-                          withPending(id, item.size, () =>
+                          withPending(id, variantId, () =>
                             cart.updateItem({
                               productId: id,
-                              size: item.size,
+                              variantId,
                               quantity: item.quantity + 1,
                             }),
                           )
@@ -188,13 +199,13 @@ export default function CartPage() {
                       type="button"
                       disabled={busy}
                       onClick={() =>
-                        withPending(id, item.size, () =>
-                          cart.removeItem({ productId: id, size: item.size }),
+                        withPending(id, variantId, () =>
+                          cart.removeItem({ productId: id, variantId }),
                         )
                       }
                       className="text-[13.5px] text-stone underline underline-offset-[3px] transition-colors hover:text-verm focus-ring"
                     >
-                      Remove
+                      {t("common.remove")}
                     </button>
                   </div>
                 </div>
@@ -205,43 +216,40 @@ export default function CartPage() {
 
         {/* Summary */}
         <aside className="rounded-2xl border border-line bg-surface p-7 lg:sticky lg:top-32">
-          <div className="text-[13.5px] text-stone">
-            {remaining > 0 ? (
-              <>
-                {settings.formatPrice(remaining)} away from complimentary
-                delivery
-              </>
-            ) : (
-              <span className="text-verm">
-                You&rsquo;ve unlocked complimentary delivery
-              </span>
-            )}
-          </div>
-          <div className="mt-2.5 h-[5px] overflow-hidden rounded-[3px] bg-media">
-            <div
-              className="h-full rounded-[3px] bg-verm transition-[width] duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+          {threshold && (
+            <>
+              <div className="text-[13.5px] text-stone">
+                {thresholdMet ? (
+                  <span className="text-verm">{t("cart.freeShippingUnlocked")}</span>
+                ) : (
+                  t("cart.freeShippingProgress", { amount: settings.formatBdt(remaining) })
+                )}
+              </div>
+              <div className="mt-2.5 h-[5px] overflow-hidden rounded-[3px] bg-media">
+                <div
+                  className="h-full rounded-[3px] bg-verm transition-[width] duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </>
+          )}
 
           <div className="mt-7 flex items-baseline justify-between border-t border-line pt-6">
-            <span className="text-[15px] text-stone">Subtotal</span>
+            <span className="text-[15px] text-stone">{t("cart.subtotal")}</span>
             <span data-tabular className="text-[22px] font-semibold">
-              {settings.formatPrice(subtotal)}
+              {settings.formatBdt(subtotal)}
             </span>
           </div>
-          <p className="mt-1.5 text-[12.5px] text-stone">
-            Taxes and delivery calculated at checkout.
-          </p>
+          <p className="mt-1.5 text-[12.5px] text-stone">{t("cart.taxAndDeliveryNote")}</p>
 
           <Link href="/checkout" className="mt-5 block">
             <Button variant="accent" size="xl" className="w-full">
-              Checkout
+              {t("checkout.title")}
             </Button>
           </Link>
           <Link href="/shop" className="mt-2.5 block">
             <Button variant="ghost" size="lg" className="w-full text-stone">
-              Continue shopping
+              {t("cart.continueShopping")}
             </Button>
           </Link>
         </aside>
@@ -251,11 +259,18 @@ export default function CartPage() {
 }
 
 function PageHeading({ count }) {
+  const { t } = useLocale();
   return (
     <div>
-      <div className="eyebrow">Your bag</div>
+      <Breadcrumb
+        items={[
+          { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("cart.bag"), icon: ShoppingBag },
+        ]}
+      />
+      <div className="eyebrow">{t("cart.yourBag")}</div>
       <h1 className="mt-4 text-[clamp(34px,4vw,52px)] font-semibold leading-none tracking-[-0.035em]">
-        {count > 0 ? `${count} ${count === 1 ? "pair" : "pairs"} ready` : "Nothing here yet"}
+        {count > 0 ? t("cart.pairsReady", { count }) : t("cart.nothingHereYet")}
       </h1>
     </div>
   );

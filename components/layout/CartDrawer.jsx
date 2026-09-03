@@ -13,31 +13,31 @@ import EmptyState from "../ui/EmptyState.jsx";
 import Skeleton from "../ui/Skeleton.jsx";
 import { setCartOpen } from "../../store/uiSlice.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
+import { useLocale } from "../../context/LocaleProvider.jsx";
 import { useCart } from "../../hooks/useCart.js";
-import { resolveImage } from "../../lib/utils.js";
-
-const FREE_SHIPPING_THRESHOLD = 200;
+import { resolveImage, resolveVariantPricing } from "../../lib/utils.js";
 
 export default function CartDrawer() {
   const open = useSelector((s) => s.ui.cartOpen);
   const dispatch = useDispatch();
   const router = useRouter();
   const settings = useSettings();
+  const { t } = useLocale();
   const cart = useCart();
   const { items, isLoading } = cart;
   const [pending, setPending] = useState(() => new Set());
 
-  const keyOf = (productId, size) => `${productId}-${size}`;
-  const isBusy = (productId, size) => pending.has(keyOf(productId, size));
+  const keyOf = (productId, variantId) => `${productId}-${variantId}`;
+  const isBusy = (productId, variantId) => pending.has(keyOf(productId, variantId));
 
-  const withPending = async (productId, size, run) => {
-    const key = keyOf(productId, size);
+  const withPending = async (productId, variantId, run) => {
+    const key = keyOf(productId, variantId);
     if (pending.has(key)) return;
     setPending((prev) => new Set(prev).add(key));
     try {
       await run();
     } catch (e) {
-      toast.error(e?.data?.message || "Could not update your bag");
+      toast.error(e?.data?.message || t("errors.generic"));
     } finally {
       setPending((prev) => {
         const next = new Set(prev);
@@ -47,14 +47,18 @@ export default function CartDrawer() {
     }
   };
 
-  const subtotal = items.reduce((sum, i) => {
-    const p = i.product;
-    if (!p) return sum;
-    return sum + (p.discountPrice ?? p.basePrice) * i.quantity;
+  const subtotalUsd = items.reduce((sum, i) => {
+    if (!i.product) return sum;
+    const { displayPrice } = resolveVariantPricing(i.product, i.variant);
+    return sum + displayPrice * i.quantity;
   }, 0);
-  const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
-  const progress = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD) * 100);
-  const thresholdMet = remaining <= 0 && items.length > 0;
+  const subtotal = settings.toBdt(subtotalUsd);
+  // Same settings-backed threshold PDP's free-shipping perk reads — never a
+  // number invented in this component, so cart and checkout can't disagree.
+  const threshold = settings.freeShippingThreshold();
+  const remaining = threshold ? Math.max(0, threshold.amount - subtotal) : 0;
+  const progress = threshold ? Math.min(100, (subtotal / threshold.amount) * 100) : 0;
+  const thresholdMet = !!threshold && remaining <= 0 && items.length > 0;
 
   const close = () => dispatch(setCartOpen(false));
   const goCheckout = () => {
@@ -63,15 +67,15 @@ export default function CartDrawer() {
   };
 
   return (
-    <Drawer open={open} onClose={close} title="Your bag">
+    <Drawer open={open} onClose={close} title={t("cart.yourCart")}>
       {isLoading ? (
         <CartDrawerSkeleton />
       ) : items.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-10">
           <EmptyState
             icon={ShoppingBag}
-            title="Your bag is empty"
-            message="Once you add a pair it'll show up here with size and color."
+            title={t("cart.empty")}
+            message={t("cart.emptyBody")}
             action={
               <Button
                 variant="primary"
@@ -81,42 +85,48 @@ export default function CartDrawer() {
                   router.push("/shop");
                 }}
               >
-                See the rotation
+                {t("cart.startShopping")}
               </Button>
             }
           />
         </div>
       ) : (
         <>
-          <div className="border-b border-line px-6 py-[18px]">
-            <div className="flex justify-between text-[13.5px] text-stone">
-              <span>
-                {thresholdMet
-                  ? "You've unlocked complimentary delivery"
-                  : `${settings.formatPrice(remaining)} away from complimentary delivery`}
-              </span>
-              <span data-tabular className="font-mono text-[11.5px]">
-                {settings.formatPrice(FREE_SHIPPING_THRESHOLD)}
-              </span>
+          {threshold && (
+            <div className="border-b border-line px-6 py-[18px]">
+              <div className="flex justify-between text-[13.5px] text-stone">
+                <span>
+                  {thresholdMet
+                    ? t("cart.freeShippingUnlocked")
+                    : t("cart.freeShippingProgress", { amount: settings.formatBdt(remaining) })}
+                </span>
+                <span data-tabular className="font-mono text-[11.5px]">
+                  {settings.formatBdt(threshold.amount)}
+                </span>
+              </div>
+              <div className="mt-2.5 h-[5px] overflow-hidden rounded-[3px] bg-media">
+                <div
+                  className="h-full rounded-[3px] bg-verm transition-[width] duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
             </div>
-            <div className="mt-2.5 h-[5px] overflow-hidden rounded-[3px] bg-media">
-              <div
-                className="h-full rounded-[3px] bg-verm transition-[width] duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
+          )}
 
           <ul className="flex-1 overflow-y-auto px-6">
             {items.map((item) => {
               const p = item.product;
               if (!p) return null;
-              const busy = isBusy(p._id, item.size);
-              const price = p.discountPrice ?? p.basePrice;
+              const variantId = item.variantId;
+              const busy = isBusy(p._id, variantId);
+              const { displayPrice } = resolveVariantPricing(p, item.variant);
+              const variantLine = [item.variant?.color, item.variant?.size, item.variant?.fabric]
+                .filter(Boolean)
+                .join(" · ");
 
               return (
                 <li
-                  key={keyOf(p._id, item.size)}
+                  key={keyOf(p._id, variantId)}
                   className="flex gap-4 border-b border-line py-5 transition-opacity"
                   style={{ opacity: busy ? 0.5 : 1 }}
                 >
@@ -126,10 +136,10 @@ export default function CartDrawer() {
                     className="relative aspect-4/5 w-[88px] flex-none overflow-hidden rounded-[10px] bg-media"
                   >
                     <div aria-hidden="true" className="absolute inset-0 hatch" />
-                    {p.images?.[0] && (
+                    {(item.variant?.image || p.images?.[0]) && (
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img
-                        src={resolveImage(p.images[0], 180)}
+                        src={resolveImage(item.variant?.image || p.images[0], 180)}
                         alt=""
                         loading="lazy"
                         className="relative h-full w-full object-cover"
@@ -152,12 +162,14 @@ export default function CartDrawer() {
                         >
                           {p.name}
                         </Link>
-                        <div className="mt-1 text-[13.5px] text-stone">
-                          Size {item.size}
-                        </div>
+                        {variantLine && (
+                          <div className="mt-1 text-[13.5px] text-stone">
+                            {variantLine}
+                          </div>
+                        )}
                       </div>
                       <div data-tabular className="text-[15.5px] font-semibold">
-                        {settings.formatPrice(price * item.quantity)}
+                        {settings.formatPrice(displayPrice * item.quantity)}
                       </div>
                     </div>
 
@@ -166,14 +178,14 @@ export default function CartDrawer() {
                         <button
                           type="button"
                           disabled={busy}
-                          aria-label={`Decrease quantity of ${p.name}`}
+                          aria-label={t("product.decreaseQuantity")}
                           onClick={() =>
-                            withPending(p._id, item.size, () =>
+                            withPending(p._id, variantId, () =>
                               item.quantity <= 1
-                                ? cart.removeItem({ productId: p._id, size: item.size })
+                                ? cart.removeItem({ productId: p._id, variantId })
                                 : cart.updateItem({
                                     productId: p._id,
-                                    size: item.size,
+                                    variantId,
                                     quantity: item.quantity - 1,
                                   }),
                             )
@@ -192,12 +204,12 @@ export default function CartDrawer() {
                         <button
                           type="button"
                           disabled={busy}
-                          aria-label={`Increase quantity of ${p.name}`}
+                          aria-label={t("product.increaseQuantity")}
                           onClick={() =>
-                            withPending(p._id, item.size, () =>
+                            withPending(p._id, variantId, () =>
                               cart.updateItem({
                                 productId: p._id,
-                                size: item.size,
+                                variantId,
                                 quantity: item.quantity + 1,
                               }),
                             )
@@ -212,13 +224,13 @@ export default function CartDrawer() {
                         type="button"
                         disabled={busy}
                         onClick={() =>
-                          withPending(p._id, item.size, () =>
-                            cart.removeItem({ productId: p._id, size: item.size }),
+                          withPending(p._id, variantId, () =>
+                            cart.removeItem({ productId: p._id, variantId }),
                           )
                         }
                         className="text-[13.5px] text-stone underline underline-offset-[3px] transition-colors hover:text-verm focus-ring"
                       >
-                        Remove
+                        {t("common.remove")}
                       </button>
                     </div>
                   </div>
@@ -229,19 +241,17 @@ export default function CartDrawer() {
 
           <div className="border-t border-line bg-elev p-6">
             <div className="flex items-baseline justify-between">
-              <span className="text-[15px] text-stone">Subtotal</span>
+              <span className="text-[15px] text-stone">{t("cart.subtotal")}</span>
               <span data-tabular className="text-[22px] font-semibold">
-                {settings.formatPrice(subtotal)}
+                {settings.formatBdt(subtotal)}
               </span>
             </div>
-            <p className="mt-1.5 text-[12.5px] text-stone">
-              Taxes and delivery calculated at checkout.
-            </p>
+            <p className="mt-1.5 text-[12.5px] text-stone">{t("cart.taxAndDeliveryNote")}</p>
             <Button variant="accent" size="xl" className="mt-5 w-full" onClick={goCheckout}>
-              Checkout
+              {t("checkout.title")}
             </Button>
             <Button variant="ghost" size="lg" className="mt-2.5 w-full text-stone" onClick={close}>
-              Continue shopping
+              {t("cart.continueShopping")}
             </Button>
           </div>
         </>

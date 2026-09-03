@@ -3,39 +3,64 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { SlidersHorizontal, X, AlertCircle } from "lucide-react";
+import { Home, ShoppingBag, SlidersHorizontal, X, AlertCircle } from "lucide-react";
 
 import ProductCard from "../components/product/ProductCard.jsx";
 import ProductCardSkeleton from "../components/product/ProductCardSkeleton.jsx";
 import PriceHistogramSlider from "../components/product/PriceHistogramSlider.jsx";
 import Button from "../components/ui/Button.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
+import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 import { useGetProductsQuery, useGetProductGroupingsQuery } from "../store/productApi.js";
 import { useGetBrandsQuery, useGetCategoriesQuery, useGetAttributesQuery } from "../store/shopApi.js";
 import { cn } from "../lib/utils.js";
+import { useSettings } from "../context/SettingsContext.jsx";
+import { useLocale } from "../context/LocaleProvider.jsx";
+import { attrLabel, attrValue, departmentName } from "../lib/i18n/catalog.js";
+
+// The storefront only ever shows these departments and their subcategories
+// (see services/productService.js's STOREFRONT_DEPARTMENT_SLUGS, the source
+// of truth the backend enforces this same scope against).
+const STOREFRONT_DEPARTMENT_SLUGS = new Set(["burqa", "hijab", "niqab", "abaya", "khimar", "modest-sets"]);
+
+// `value` is the stable filter/query value (see section 7 of the
+// localization audit — never translated); `labelKey` is resolved via t()
+// at every render site.
+const AGE_GROUP_OPTIONS = [
+  { value: "kids", labelKey: "filters.kids" },
+  { value: "girls", labelKey: "filters.girls" },
+  { value: "adult", labelKey: "filters.adults" },
+];
+const COLLECTION_OPTIONS = [
+  { value: "new", labelKey: "filters.new" },
+  { value: "featured", labelKey: "filters.featured" },
+  { value: "discount", labelKey: "filters.discount" },
+];
 
 const SORTS = [
-  { value: "-createdAt", label: "New arrivals" },
-  { value: "basePrice", label: "Price: Low → High" },
-  { value: "-basePrice", label: "Price: High → Low" },
-  { value: "-rating", label: "Popular" },
-  { value: "-isFeatured", label: "Featured" },
+  { value: "-createdAt", labelKey: "sort.newest" },
+  { value: "basePrice", labelKey: "sort.priceLowHigh" },
+  { value: "-basePrice", labelKey: "sort.priceHighLow" },
+  { value: "-rating", labelKey: "sort.popular" },
+  { value: "-isFeatured", labelKey: "filters.featured" },
 ];
 const PAGE_SIZE = 12;
 
-const computeTitle = (sp, departments) => {
+const computeTitle = (sp, departments, t, locale) => {
   const search = sp.get("search");
-  if (search) return `Results for "${search}"`;
+  if (search) return t("shop.resultsFor", { query: search });
   const deptId = sp.get("category");
   const dept = deptId ? departments.find((d) => d._id === deptId) : null;
-  if (dept) return dept.name;
-  return "Shop all";
+  if (dept) return departmentName(locale, dept.slug, dept.name);
+  return t("shop.shopAll");
 };
 
 export default function ShopPage() {
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const settings = useSettings();
+  const { t, locale } = useLocale();
 
   // Filters live in the URL so they survive refresh and can be shared.
   // Scroll is pinned: re-filtering should not throw the grid back to the top.
@@ -88,7 +113,10 @@ export default function ShopPage() {
   const { data: brandsData } = useGetBrandsQuery();
   const { data: catsData, isLoading: catsLoading } = useGetCategoriesQuery();
 
-  const departments = useMemo(() => (catsData?.categories ?? []).filter((c) => !c.parent), [catsData]);
+  const departments = useMemo(
+    () => (catsData?.categories ?? []).filter((c) => !c.parent && STOREFRONT_DEPARTMENT_SLUGS.has(c.slug)),
+    [catsData],
+  );
   const selectedDept = sp.get("category") || "";
 
   const { data: groupingsData, isLoading: groupingsLoading } = useGetProductGroupingsQuery(
@@ -97,6 +125,17 @@ export default function ShopPage() {
   );
   const { data: attrData, isLoading: attrLoading } = useGetAttributesQuery(selectedDept, { skip: !selectedDept });
   const attributeDefs = (attrData?.attributes ?? []).filter((d) => d.filterable !== false);
+
+  // Unscoped (no category arg) — the full raw AttributeDefinition list,
+  // fetched once regardless of which department is selected. Used only to
+  // resolve color swatch hexes and the size/length label for product cards
+  // in the grid, which can show products from every department at once
+  // (unlike the sidebar's attributeDefs above, which is deliberately
+  // scoped to the selected department).
+  const { data: allAttrsData } = useGetAttributesQuery();
+  const colorDef = allAttrsData?.attributes?.find((d) => d.key === "color");
+  const sizeDef = allAttrsData?.attributes?.find((d) => d.key === "size");
+  const cardAttributeMeta = useMemo(() => ({ colorDef, sizeDef }), [colorDef, sizeDef]);
 
   const activeFilterCount = useMemo(() => {
     const skip = new Set(["sort", "limit", "page", "search", "category"]);
@@ -121,47 +160,131 @@ export default function ShopPage() {
 
   // Switching department invalidates every style/attribute selection made
   // under the previous one — reset to just the new department (keep sort,
-  // search, price, since those are department-agnostic).
+  // search, price, Age Group, and Product Collection, since none of those
+  // are department-specific the way Style/attribute facets are).
   const selectDepartment = (deptId) => {
     const next = new URLSearchParams();
-    for (const k of ["sort", "search", "priceMin", "priceMax"]) {
+    for (const k of ["sort", "search", "priceMin", "priceMax", "ageGroup", "new", "featured", "discount"]) {
       if (sp.get(k)) next.set(k, sp.get(k));
     }
     if (deptId) next.set("category", deptId);
     setSp(next);
   };
 
-  const clearAll = () => setSp(new URLSearchParams());
+  // Clears product-filter parameters only — search and sort aren't filters
+  // in this app's own vocabulary (activeFilterCount below already excludes
+  // them), and which department you're browsing is page-level navigation,
+  // not a filter, so Clear All leaves both alone.
+  const clearAll = () => {
+    const next = new URLSearchParams();
+    for (const k of ["category", "search", "sort"]) {
+      if (sp.get(k)) next.set(k, sp.get(k));
+    }
+    setSp(next);
+  };
 
   // Defensive: use empty array if data is undefined
   const products = data?.products ?? [];
   const total = data?.total ?? 0;
   const hasMore = products.length < total;
-  const title = computeTitle(sp, departments);
+  const title = computeTitle(sp, departments, t, locale);
+  const selectedDeptObj = selectedDept ? departments.find((d) => d._id === selectedDept) : null;
+  const facets = data?.facets;
+
+  // Individually removable chips for every active product-filter param —
+  // built from the same URL state and lookup data the sidebar renders
+  // from, so a chip's label always matches what's actually applied.
+  const activeChips = useMemo(() => {
+    const chips = [];
+
+    for (const opt of AGE_GROUP_OPTIONS) {
+      if ((sp.get("ageGroup") || "").split(",").includes(opt.value)) {
+        chips.push({ id: `ageGroup:${opt.value}`, label: t(opt.labelKey), onRemove: () => toggleFacetValue("ageGroup", opt.value, false) });
+      }
+    }
+
+    for (const opt of COLLECTION_OPTIONS) {
+      if (sp.get(opt.value) === "true") {
+        chips.push({ id: opt.value, label: t(opt.labelKey), onRemove: () => setParam(opt.value, "") });
+      }
+    }
+
+    const styleId = sp.get("style");
+    if (styleId) {
+      const styleName = (groupingsData?.groupings ?? []).find((g) => g._id === styleId)?.name || t("shop.style");
+      chips.push({ id: "style", label: styleName, onRemove: () => setParam("style", "") });
+    }
+
+    const brandId = sp.get("brand");
+    if (brandId) {
+      const brandName = brandsData?.brands?.find((b) => b._id === brandId)?.name || t("shop.brand");
+      chips.push({ id: "brand", label: brandName, onRemove: () => setParam("brand", "") });
+    }
+
+    for (const def of attributeDefs) {
+      for (const v of (sp.get(def.key) || "").split(",").filter(Boolean)) {
+        const dbLabel = def.options?.find((o) => o.value === v)?.label || v;
+        const optLabel = attrValue(locale, def.key, v, dbLabel);
+        chips.push({ id: `${def.key}:${v}`, label: optLabel, onRemove: () => toggleFacetValue(def.key, v, false) });
+      }
+    }
+
+    const priceMin = sp.get("priceMin");
+    const priceMax = sp.get("priceMax");
+    if (priceMin || priceMax) {
+      // priceMin/priceMax are raw basePrice-unit numbers (same as the
+      // histogram slider's own value/labels just above) — settings.formatPrice()
+      // applies the same live USD→BDT conversion the slider's own labels use,
+      // so the chip and the slider can never disagree on what's selected.
+      const label = `${priceMin ? settings.formatPrice(Number(priceMin)) : t("filters.min")} – ${priceMax ? settings.formatPrice(Number(priceMax)) : t("filters.max")}`;
+      chips.push({
+        id: "price",
+        label,
+        onRemove: () => {
+          const next = new URLSearchParams(sp);
+          next.delete("priceMin");
+          next.delete("priceMax");
+          next.delete("page");
+          setSp(next);
+        },
+      });
+    }
+
+    return chips;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp, groupingsData, brandsData, attributeDefs, settings, t, locale]);
 
   return (
     <div className="container-x py-8">
+      <Breadcrumb
+        items={[
+          { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("navigation.shop"), href: "/shop", icon: ShoppingBag },
+          ...(selectedDeptObj ? [{ label: selectedDeptObj.name }] : []),
+        ]}
+      />
+
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl font-bold">{title}</h1>
           <p className="text-sm text-muted-foreground">
-            {total} products
+            {t("shop.productsCount", { count: total })}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <label htmlFor="shop-sort" className="sr-only">
-            Sort products by
+            {t("shop.sortBy")}
           </label>
           <select
             id="shop-sort"
-            aria-label="Sort products by"
+            aria-label={t("shop.sortBy")}
             value={sp.get("sort") || "-createdAt"}
             onChange={(e) => setParam("sort", e.target.value)}
             className="h-10 rounded-md border border-border bg-background px-3 text-sm focus-ring"
           >
             {SORTS.map((s) => (
               <option key={s.value} value={s.value}>
-                {s.label}
+                {t(s.labelKey)}
               </option>
             ))}
           </select>
@@ -172,7 +295,7 @@ export default function ShopPage() {
             className="relative inline-flex h-10 items-center gap-2 rounded-lg border border-line px-4 text-sm font-medium text-ink transition-colors hover:border-ink focus-ring active:scale-[0.98] lg:hidden"
           >
             <SlidersHorizontal className="h-4 w-4" />
-            Filters
+            {t("filters.filters")}
             {activeFilterCount > 0 && (
               <span
                 data-tabular
@@ -196,6 +319,8 @@ export default function ShopPage() {
         onSelect={selectDepartment}
       />
 
+      <ActiveFilterChips chips={activeChips} onClearAll={clearAll} />
+
       {/* Mobile filter sheet — rises from the bottom, matching the board's
           "sheet" motion (320ms, not spring physics) used by every other
           overlay in the app. */}
@@ -211,12 +336,16 @@ export default function ShopPage() {
           toggleFacetValue={toggleFacetValue}
           clearAll={clearAll}
           brandsData={brandsData}
+          departments={departments}
+          deptLoading={catsLoading}
           selectedDept={selectedDept}
+          selectDepartment={selectDepartment}
           groupingsData={groupingsData}
           groupingsLoading={groupingsLoading}
           attributeDefs={attributeDefs}
           attrLoading={attrLoading}
           histogramProducts={histogramData?.products ?? []}
+          facets={facets}
         />
       </FilterSheetMobile>
 
@@ -226,16 +355,21 @@ export default function ShopPage() {
           <div className="sticky top-20 overflow-y-auto rounded-lg border border-border bg-background p-5">
             <FilterPanel
               sp={sp}
+              setSp={setSp}
               setParam={setParam}
               toggleFacetValue={toggleFacetValue}
               clearAll={clearAll}
               brandsData={brandsData}
+              departments={departments}
+              deptLoading={catsLoading}
               selectedDept={selectedDept}
+              selectDepartment={selectDepartment}
               groupingsData={groupingsData}
               groupingsLoading={groupingsLoading}
               attributeDefs={attributeDefs}
               attrLoading={attrLoading}
               histogramProducts={histogramData?.products ?? []}
+              facets={facets}
             />
           </div>
         </aside>
@@ -251,18 +385,18 @@ export default function ShopPage() {
           ) : isError ? (
             <EmptyState
               icon={AlertCircle}
-              title="Couldn't load products"
-              message={error?.data?.message || "The server returned an error. Check your backend logs."}
+              title={t("errors.loadProducts")}
+              message={error?.data?.message || t("errors.generic")}
               action={
-                <Button onClick={() => window.location.reload()}>Try again</Button>
+                <Button onClick={() => window.location.reload()}>{t("shop.tryAgain")}</Button>
               }
             />
           ) : products.length === 0 ? (
             <EmptyState
               icon={SlidersHorizontal}
-              title="No products match"
-              message="Try adjusting your filters."
-              action={<Button onClick={clearAll}>Clear filters</Button>}
+              title={t("shop.noProductsMatch")}
+              message={t("shop.tryAdjustingFilters")}
+              action={<Button onClick={clearAll}>{t("shop.clearFilters")}</Button>}
             />
           ) : (
             <>
@@ -273,7 +407,7 @@ export default function ShopPage() {
                 )}
               >
                 {products.map((p, i) => (
-                  <ProductCard key={p._id} product={p} index={i} />
+                  <ProductCard key={p._id} product={p} index={i} attributeMeta={cardAttributeMeta} />
                 ))}
               </div>
 
@@ -281,14 +415,14 @@ export default function ShopPage() {
               {hasMore && (
                 <div className="mt-10 flex flex-col items-center gap-2">
                   <p className="text-xs text-muted-foreground">
-                    Showing {products.length} of {total}
+                    {t("shop.showingOfTotal", { count: products.length, total })}
                   </p>
                   <Button
                     variant="outline"
                     disabled={isFetching}
                     onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
                   >
-                    {isFetching ? "Loading..." : "Show more"}
+                    {isFetching ? t("shop.loadingEllipsis") : t("shop.showMore")}
                   </Button>
                 </div>
               )}
@@ -301,6 +435,7 @@ export default function ShopPage() {
 }
 
 function DepartmentChips({ departments, loading, selected, onSelect }) {
+  const { t, locale } = useLocale();
   if (loading && !departments.length) {
     return (
       <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
@@ -320,7 +455,7 @@ function DepartmentChips({ departments, loading, selected, onSelect }) {
           !selected ? "border-ink bg-ink text-canvas" : "border-line text-ink hover:border-ink",
         )}
       >
-        All
+        {t("shop.all")}
       </button>
       {departments.map((d) => (
         <button
@@ -332,7 +467,7 @@ function DepartmentChips({ departments, loading, selected, onSelect }) {
             selected === d._id ? "border-ink bg-ink text-canvas" : "border-line text-ink hover:border-ink",
           )}
         >
-          {d.name}
+          {departmentName(locale, d.slug, d.name)}
         </button>
       ))}
     </div>
@@ -344,6 +479,7 @@ const SHEET_FOCUSABLE =
 
 /** Board's FilterSheet: a Radix-Dialog-style bottom sheet, not a side drawer. */
 function FilterSheetMobile({ open, onClose, activeFilterCount, children }) {
+  const { t } = useLocale();
   const panelRef = useRef(null);
 
   useEffect(() => {
@@ -395,7 +531,7 @@ function FilterSheetMobile({ open, onClose, activeFilterCount, children }) {
             ref={panelRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Filters"
+            aria-label={t("filters.filters")}
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
@@ -405,7 +541,7 @@ function FilterSheetMobile({ open, onClose, activeFilterCount, children }) {
             <div className="mx-auto mt-3 h-1 w-9 flex-none rounded-full bg-line" aria-hidden="true" />
             <div className="flex items-center justify-between border-b border-line px-6 py-4">
               <h3 className="flex items-center gap-2 text-lg font-semibold tracking-[-0.02em]">
-                Filters
+                {t("filters.filters")}
                 {activeFilterCount > 0 && (
                   <span
                     data-tabular
@@ -417,7 +553,7 @@ function FilterSheetMobile({ open, onClose, activeFilterCount, children }) {
               </h3>
               <button
                 onClick={onClose}
-                aria-label="Close filters"
+                aria-label={t("shop.closeFilters")}
                 className="grid h-11 w-11 place-items-center rounded-lg transition-colors hover:bg-wash focus-ring"
               >
                 <X className="h-5 w-5" />
@@ -438,22 +574,36 @@ function FilterPanel({
   toggleFacetValue,
   clearAll,
   brandsData,
+  departments = [],
+  deptLoading,
   selectedDept,
+  selectDepartment,
   groupingsData,
   groupingsLoading,
   attributeDefs,
   attrLoading,
   histogramProducts = [],
+  facets,
 }) {
+  const { t, locale } = useLocale();
+  // Filter layout: Category, Age Group, Product Collection, [Style /
+  // attribute facets / Brand — only once a department narrows what's
+  // available], Price Range. Age Group and Product Collection are
+  // permanently visible regardless of department selection.
   if (!selectedDept) {
     return (
       <>
-        <p className="mb-5 text-sm text-muted-foreground">
-          Pick a department above to see its styles, fabrics, and other filters.
-        </p>
+        <CategoryFilterGroup
+          departments={departments}
+          loading={deptLoading}
+          selectedDept={selectedDept}
+          onSelect={selectDepartment}
+        />
+        <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
+        <ProductCollectionFilterGroup sp={sp} setParam={setParam} counts={facets?.collection} />
         <PriceRange sp={sp} setSp={setSp} histogramProducts={histogramProducts} />
         <Button variant="outline" size="sm" onClick={clearAll} className="w-full">
-          Clear all
+          {t("common.clearAll")}
         </Button>
       </>
     );
@@ -463,8 +613,18 @@ function FilterPanel({
 
   return (
     <>
+      <CategoryFilterGroup
+        departments={departments}
+        loading={deptLoading}
+        selectedDept={selectedDept}
+        onSelect={selectDepartment}
+      />
+
+      <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
+      <ProductCollectionFilterGroup sp={sp} setParam={setParam} counts={facets?.collection} />
+
       {(groupingsLoading || groupings.length > 0) && (
-        <FilterGroup title="Style">
+        <FilterGroup title={t("shop.style")}>
           {groupingsLoading ? (
             <FilterRowSkeleton count={4} />
           ) : (
@@ -481,31 +641,31 @@ function FilterPanel({
       )}
 
       {attrLoading ? (
-        <FilterGroup title="Loading filters">
+        <FilterGroup title={t("shop.loadingFilters")}>
           <FilterRowSkeleton count={4} />
         </FilterGroup>
       ) : (
         attributeDefs.map((def) => (
-          <FilterGroup key={def.key} title={def.label}>
+          <FilterGroup key={def.key} title={attrLabel(locale, def.key, def.label)}>
             {def.options?.length ? (
               def.options.map((opt) => (
                 <CheckBox
                   key={opt.value}
-                  label={opt.label}
+                  label={attrValue(locale, def.key, opt.value, opt.label)}
                   swatchHex={def.type === "swatch" ? opt.swatchHex : undefined}
                   checked={(sp.get(def.key) || "").split(",").includes(opt.value)}
                   onChange={(v) => toggleFacetValue(def.key, opt.value, v)}
                 />
               ))
             ) : (
-              <p className="text-xs text-muted-foreground">No options set yet.</p>
+              <p className="text-xs text-muted-foreground">{t("shop.noOptionsYet")}</p>
             )}
           </FilterGroup>
         ))
       )}
 
       {brandsData?.brands?.length > 0 && (
-        <FilterGroup title="Brand">
+        <FilterGroup title={t("shop.brand")}>
           {brandsData.brands.map((b) => (
             <CheckBox
               key={b._id}
@@ -520,7 +680,7 @@ function FilterPanel({
       <PriceRange sp={sp} setSp={setSp} histogramProducts={histogramProducts} />
 
       <Button variant="outline" size="sm" onClick={clearAll} className="w-full">
-        Clear all
+        {t("common.clearAll")}
       </Button>
     </>
   );
@@ -565,6 +725,86 @@ function FilterRowSkeleton({ count = 4 }) {
   );
 }
 
+// Always the first group in the sidebar — Category, then (once one's
+// picked) Style, then the department's attribute-driven facets, then
+// Brand, then Price. Single-select via checkboxes, same convention the
+// Style/gender facets below already use elsewhere in this file: clicking
+// the active department clears it back to "Shop all," clicking another
+// switches to it (selectDepartment resets every filter that doesn't
+// survive a department change).
+function CategoryFilterGroup({ departments, loading, selectedDept, onSelect }) {
+  const { t, locale } = useLocale();
+  return (
+    <FilterGroup title={t("shop.category")}>
+      {loading && !departments.length ? (
+        <FilterRowSkeleton count={5} />
+      ) : (
+        departments.map((d) => (
+          <CheckBox
+            key={d._id}
+            label={departmentName(locale, d.slug, d.name)}
+            checked={selectedDept === d._id}
+            onChange={(v) => onSelect(v ? d._id : "")}
+          />
+        ))
+      )}
+    </FilterGroup>
+  );
+}
+
+// Permanently visible, second group in the sidebar. UI shows Kids / Girls /
+// Adults; stored ageGroup values stay exactly "kids" / "girls" / "adult"
+// (see productModel.js — "girls" added without renaming the pre-existing
+// two). Multiple selections OR together (toggleFacetValue's usual CSV
+// convention) — e.g. Kids + Girls returns Kids OR Girls products.
+function AgeGroupFilterGroup({ sp, toggleFacetValue, counts }) {
+  const { t } = useLocale();
+  const selected = (sp.get("ageGroup") || "").split(",").filter(Boolean);
+  return (
+    <FilterGroup title={t("filters.ageGroup")}>
+      {AGE_GROUP_OPTIONS.map((opt) => {
+        const checked = selected.includes(opt.value);
+        const count = counts?.[opt.value] ?? 0;
+        return (
+          <CheckBox
+            key={opt.value}
+            label={`${t(opt.labelKey)} (${count})`}
+            checked={checked}
+            disabled={count === 0 && !checked}
+            onChange={(v) => toggleFacetValue("ageGroup", opt.value, v)}
+          />
+        );
+      })}
+    </FilterGroup>
+  );
+}
+
+// Permanently visible, third group — New / Featured / Discount. Each is its
+// own boolean URL param (not a CSV multi-value field like ageGroup), and
+// checking more than one ORs them together server-side (see
+// services/productService.js's buildFilter: 2+ of new/featured/discount
+// become a $or block instead of independent AND'd conditions).
+function ProductCollectionFilterGroup({ sp, setParam, counts }) {
+  const { t } = useLocale();
+  return (
+    <FilterGroup title={t("filters.productCollection")}>
+      {COLLECTION_OPTIONS.map((opt) => {
+        const checked = sp.get(opt.value) === "true";
+        const count = counts?.[opt.value] ?? 0;
+        return (
+          <CheckBox
+            key={opt.value}
+            label={`${t(opt.labelKey)} (${count})`}
+            checked={checked}
+            disabled={count === 0 && !checked}
+            onChange={(v) => setParam(opt.value, v ? "true" : "")}
+          />
+        );
+      })}
+    </FilterGroup>
+  );
+}
+
 function FilterGroup({ title, children }) {
   return (
     <div className="mb-5 border-b border-border pb-5 last:border-0 last:pb-0">
@@ -576,14 +816,20 @@ function FilterGroup({ title, children }) {
   );
 }
 
-function CheckBox({ label, checked, onChange, swatchHex }) {
+function CheckBox({ label, checked, onChange, swatchHex, disabled }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground hover:text-accent">
+    <label
+      className={cn(
+        "flex items-center gap-2 text-sm",
+        disabled ? "cursor-not-allowed text-muted-foreground/50" : "cursor-pointer text-foreground hover:text-accent",
+      )}
+    >
       <input
         type="checkbox"
         checked={!!checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 accent-accent"
+        className="h-4 w-4 accent-accent disabled:cursor-not-allowed disabled:opacity-50"
       />
       {swatchHex && (
         <span
@@ -594,5 +840,38 @@ function CheckBox({ label, checked, onChange, swatchHex }) {
       )}
       {label}
     </label>
+  );
+}
+
+// Row of removable pills, one per active product-filter selection — sits
+// between the department chips and the grid, always full-width so it never
+// crowds the sort/filter-button row above it. Renders nothing when no
+// product filter is active (department/search/sort don't count — they're
+// not "filters" in this app's vocabulary, see activeFilterCount/clearAll).
+function ActiveFilterChips({ chips, onClearAll }) {
+  const { t } = useLocale();
+  if (!chips.length) return null;
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-2">
+      {chips.map((chip) => (
+        <button
+          key={chip.id}
+          type="button"
+          onClick={chip.onRemove}
+          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-wash pl-3 pr-2 text-xs font-medium text-ink transition-colors hover:border-ink focus-ring"
+        >
+          {chip.label}
+          <X className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="sr-only">{t("shop.removeFilterLabel", { label: chip.label })}</span>
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onClearAll}
+        className="h-8 rounded-full px-3 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-ink hover:underline focus-ring"
+      >
+        {t("common.clearAll")}
+      </button>
+    </div>
   );
 }

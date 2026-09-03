@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -25,13 +25,16 @@ import { toast } from "sonner";
 import { cn } from "../../lib/utils.js";
 import { useTheme } from "../../context/ThemeProvider.jsx";
 import { useSettings } from "../../context/SettingsContext.jsx";
+import { useLocale } from "../../context/LocaleProvider.jsx";
+import { departmentName } from "../../lib/i18n/catalog.js";
+import LanguageSwitcher from "./LanguageSwitcher.jsx";
 import {
   selectCurrentUser,
   selectCanAccessAdmin,
   clearCredentials,
 } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
-import { useGetCartQuery, useGetWishlistQuery } from "../../store/shopApi.js";
+import { useGetCartQuery, useGetWishlistQuery, useGetCategoriesQuery } from "../../store/shopApi.js";
 import {
   toggleCart,
   toggleMobileMenu,
@@ -39,66 +42,54 @@ import {
   setMobileMenuOpen,
 } from "../../store/uiSlice.js";
 
-const ANNOUNCEMENTS = [
-  { text: "Complimentary delivery over $200", accent: true },
-  { text: "Easy 14-day exchanges" },
-  { text: "Secure checkout" },
+// Free-shipping amount comes from live settings (see ANNOUNCEMENTS below,
+// built in the component body) so this copy can never drift from the real,
+// admin-configured threshold the way a hardcoded "$200" would. Translation
+// keys, not literal text — resolved via t() in the component so this stays
+// language-reactive without becoming a hook itself.
+const STATIC_ANNOUNCEMENT_KEYS = ["header.announcementExchange", "header.announcementSecureCheckout"];
+
+// The "Shop" mega-menu's Collections and Fabric columns are static — these
+// are stable attribute values from the AttributeDefinition seed data, not
+// documents with their own Mongo ids, so there's nothing to fetch. The
+// middle "Departments" column is built from real category data instead
+// (see the useGetCategoriesQuery call in Header() below) — it can't be a
+// static constant since department ids are real, database-generated
+// ObjectIds. `href` query values are stable filter values (see
+// filters.jsx-style consumers) and never translated — only `labelKey`
+// (resolved via t()) is.
+const OCCASION_LINKS = [
+  { labelKey: "header.newArrivals", href: "/shop?sort=-createdAt" },
+  { labelKey: "header.featured", href: "/shop?featured=true" },
+  { labelKey: "catalog.occasionEveryday", href: "/shop?occasion=everyday" },
+  { labelKey: "header.prayerWear", href: "/shop?occasion=prayer" },
+  { labelKey: "header.eidCollection", href: "/shop?occasion=eid", accent: true },
+  { labelKey: "header.formal", href: "/shop?occasion=formal" },
+  { labelKey: "header.bridal", href: "/shop?occasion=bridal" },
 ];
 
-const SHOP_MENU = [
-  {
-    heading: "Collections",
-    links: [
-      { label: "New arrivals", href: "/shop?sort=-createdAt" },
-      { label: "Best sellers", href: "/shop?featured=true" },
-      { label: "Everyday sneakers", href: "/shop?category=everyday" },
-      { label: "Performance", href: "/shop?category=performance" },
-      { label: "Statement pairs", href: "/shop?category=statement" },
-      { label: "Under $120", href: "/shop?priceMax=120" },
-      { label: "Sale", href: "/shop?sale=true", accent: true },
-    ],
-  },
-  {
-    heading: "Shop by",
-    links: [
-      { label: "Men", href: "/shop?gender=men" },
-      { label: "Women", href: "/shop?gender=women" },
-      { label: "Kids", href: "/shop?gender=kids" },
-      { label: "Unisex", href: "/shop?gender=unisex" },
-      { label: "Size guide", href: "/size-guide" },
-    ],
-  },
-  {
-    heading: "Silhouette",
-    links: [
-      { label: "Retro runners", href: "/shop?silhouette=retro-runner" },
-      { label: "Low-profile terrace", href: "/shop?silhouette=terrace" },
-      { label: "Trail & technical", href: "/shop?silhouette=trail" },
-      { label: "Court classics", href: "/shop?silhouette=court" },
-      { label: "Chunky & dad", href: "/shop?silhouette=chunky" },
-    ],
-  },
+const FABRIC_LINKS = [
+  { labelKey: "catalog.fabricNida", href: "/shop?fabric=nida" },
+  { labelKey: "catalog.fabricCrepe", href: "/shop?fabric=crepe" },
+  { labelKey: "catalog.fabricChiffon", href: "/shop?fabric=chiffon" },
+  { labelKey: "catalog.fabricJersey", href: "/shop?fabric=jersey" },
+  { labelKey: "catalog.fabricGeorgette", href: "/shop?fabric=georgette" },
 ];
 
-const FEATURED_BRANDS = [
-  { name: "New Balance", count: "48" },
-  { name: "Adidas", count: "62" },
-  { name: "Nike", count: "57" },
-  { name: "Asics", count: "31" },
-  { name: "Salomon", count: "18" },
-  { name: "Puma", count: "24" },
-  { name: "Hoka", count: "16" },
-  { name: "Reebok", count: "21" },
-];
-
-const GENDER_LINKS = [
-  { label: "Men", href: "/shop?gender=men" },
-  { label: "Women", href: "/shop?gender=women" },
-  { label: "Kids", href: "/shop?gender=kids" },
+// Second mega-menu trigger — occasion tiles replace the old brand grid;
+// brand is optional/de-emphasized in this catalog (see Phase 1 architecture),
+// occasion is a real, working filter facet across every department.
+const OCCASIONS = [
+  { nameKey: "catalog.occasionEveryday", value: "everyday" },
+  { nameKey: "catalog.occasionPrayer", value: "prayer" },
+  { nameKey: "catalog.occasionEid", value: "eid" },
+  { nameKey: "catalog.occasionFormal", value: "formal" },
+  { nameKey: "catalog.occasionBridal", value: "bridal" },
 ];
 
 export default function Header() {
   const { theme, isDark, toggleTheme } = useTheme();
+  const { t, locale } = useLocale();
   const settings = useSettings();
   const user = useSelector(selectCurrentUser);
   const isAdmin = useSelector(selectCanAccessAdmin);
@@ -107,6 +98,7 @@ export default function Header() {
   const dispatch = useDispatch();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [logout] = useLogoutMutation();
 
   const [menu, setMenu] = useState(null); // "shop" | "brands" | null
@@ -115,6 +107,14 @@ export default function Header() {
   const closeTimer = useRef(null);
 
   const shopName = settings?.store?.name || theme?.siteName || "TAHOS.";
+
+  const freeShipAmount = settings.freeShippingPitch();
+  const ANNOUNCEMENTS = [
+    ...(freeShipAmount
+      ? [{ text: t("header.announcementFreeShipping", { amount: freeShipAmount }), accent: true }]
+      : []),
+    ...STATIC_ANNOUNCEMENT_KEYS.map((key) => ({ text: t(key) })),
+  ];
 
   const { data: cartData } = useGetCartQuery(undefined, { skip: !user });
   const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
@@ -125,6 +125,12 @@ export default function Header() {
     ? cartData?.cart?.items?.reduce((s, i) => s + i.quantity, 0) || 0
     : guestCount;
   const wlCount = wlData?.wishlist?.products?.length || 0;
+
+  // Real departments for the top nav + Shop mega-menu — same query
+  // ShopPage.jsx's department chips already use, so this stays consistent
+  // with the live taxonomy instead of a hardcoded, driftable list.
+  const { data: catsData } = useGetCategoriesQuery();
+  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
 
   // The board compacts the bar from 88px to 66px past 32px of scroll.
   useEffect(() => {
@@ -184,7 +190,7 @@ export default function Header() {
     }
     dispatch(clearCredentials());
     setUserMenuOpen(false);
-    toast.success("Signed out");
+    toast.success(t("auth.signedOut"));
     router.push("/");
   };
 
@@ -196,7 +202,7 @@ export default function Header() {
           make a horizontally-scrolling marquee work on a small screen. */}
       <div
         role="region"
-        aria-label="Store announcements"
+        aria-label={t("header.shipsWithinBangladesh")}
         className="sticky top-0 z-[120] hidden overflow-x-auto border-b border-line bg-surface no-scrollbar md:block"
       >
         <div className="mx-auto flex max-w-[1480px] items-center gap-[22px] whitespace-nowrap px-5 py-[9px] font-mono text-[11.5px] uppercase tracking-[0.09em] text-stone sm:px-8 lg:px-14">
@@ -213,9 +219,7 @@ export default function Header() {
             ))
           )}
           <div className="flex-1" />
-          <span className="hidden md:inline">
-            Ships within the United States · USD
-          </span>
+          <span className="hidden md:inline">{t("header.shipsWithinBangladesh")}</span>
         </div>
       </div>
 
@@ -244,14 +248,14 @@ export default function Header() {
           <div className="flex-1" />
           <button
             onClick={toggleTheme}
-            aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            aria-label={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
             className="grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
           >
             {isDark ? <Sun className="h-[20px] w-[20px]" /> : <Moon className="h-[20px] w-[20px]" />}
           </button>
           <button
             onClick={() => dispatch(toggleCart())}
-            aria-label={cartCount ? `Cart, ${cartCount} items` : "Cart"}
+            aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
             className="relative grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
           >
             <ShoppingBag className="h-[21px] w-[21px]" strokeWidth={1.6} />
@@ -268,7 +272,7 @@ export default function Header() {
           {/* Mobile menu (tablet only — true mobile has no hamburger) */}
           <button
             onClick={() => dispatch(toggleMobileMenu())}
-            aria-label="Open menu"
+            aria-label={t("header.openMenu")}
             aria-expanded={mobileMenuOpen}
             className="-ml-2 grid h-11 w-11 flex-none place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring lg:hidden"
           >
@@ -287,37 +291,48 @@ export default function Header() {
             aria-label="Primary"
             className="hidden items-center gap-[14px] text-[14.5px] font-medium lg:flex xl:gap-[26px]"
           >
-            <HeaderNavLink href="/shop?sort=-createdAt" pathname={pathname} className="gap-1.5">
-              New
+            <HeaderNavLink
+              href="/shop?sort=-createdAt"
+              pathname={pathname}
+              searchParams={searchParams}
+              className="gap-1.5"
+            >
+              {t("navigation.new")}
               <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-lime" />
             </HeaderNavLink>
 
             <MegaTrigger
-              label="Shop"
+              label={t("navigation.shop")}
               open={menu === "shop"}
               onOpen={() => openMenu("shop")}
               onToggle={() => setMenu(menu === "shop" ? null : "shop")}
             />
 
-            {GENDER_LINKS.map((l) => (
-              <HeaderNavLink key={l.label} href={l.href} pathname={pathname}>
-                {l.label}
+            {departments.slice(0, 3).map((d) => (
+              <HeaderNavLink
+                key={d._id}
+                href={`/shop?category=${d._id}`}
+                pathname={pathname}
+                searchParams={searchParams}
+              >
+                {departmentName(locale, d.slug, d.name)}
               </HeaderNavLink>
             ))}
 
             <MegaTrigger
-              label="Brands"
-              open={menu === "brands"}
-              onOpen={() => openMenu("brands")}
-              onToggle={() => setMenu(menu === "brands" ? null : "brands")}
+              label={t("navigation.occasions")}
+              open={menu === "occasions"}
+              onOpen={() => openMenu("occasions")}
+              onToggle={() => setMenu(menu === "occasions" ? null : "occasions")}
             />
 
             <HeaderNavLink
               href="/journal"
               pathname={pathname}
+              searchParams={searchParams}
               className="hidden xl:flex"
             >
-              Journal
+              {t("navigation.journal")}
             </HeaderNavLink>
           </nav>
 
@@ -326,22 +341,24 @@ export default function Header() {
           {/* Search */}
           <button
             onClick={() => dispatch(toggleSearch())}
-            aria-label="Search products"
-            title="Search (⌘K)"
+            aria-label={t("header.searchPlaceholder")}
+            title={t("header.searchShortcut")}
             className="flex h-11 items-center justify-center gap-2.5 rounded-lg border border-line px-3 text-stone transition-colors hover:border-ink hover:text-ink focus-ring md:w-[210px] md:justify-start"
           >
             <Search className="h-[18px] w-[18px] flex-none" />
-            <span className="hidden text-[14px] md:inline">Search</span>
+            <span className="hidden text-[14px] md:inline">{t("navigation.search")}</span>
             <span className="ml-auto hidden font-mono text-[11px] text-stone lg:inline">
               ⌘K
             </span>
           </button>
 
           <div className="flex items-center gap-0.5">
+            <LanguageSwitcher />
+
             <button
               onClick={toggleTheme}
-              aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-              title={isDark ? "Light theme" : "Dark theme"}
+              aria-label={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
+              title={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
               className="grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
             >
               {isDark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
@@ -350,7 +367,7 @@ export default function Header() {
             {compareCount > 0 && (
               <Link
                 href="/compare"
-                aria-label={`Compare ${compareCount} products`}
+                aria-label={t("header.compareLabel", { count: compareCount })}
                 className="relative hidden h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring sm:grid"
               >
                 <Scale className="h-[18px] w-[18px]" />
@@ -360,7 +377,7 @@ export default function Header() {
 
             <Link
               href="/wishlist"
-              aria-label={wlCount ? `Wishlist, ${wlCount} saved` : "Wishlist"}
+              aria-label={wlCount ? t("header.wishlistLabel", { count: wlCount }) : t("header.wishlistEmpty")}
               className="relative hidden h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring sm:grid"
             >
               <Heart className="h-[18px] w-[18px]" />
@@ -371,7 +388,7 @@ export default function Header() {
             <div className="relative hidden sm:block">
               <button
                 onClick={() => setUserMenuOpen((v) => !v)}
-                aria-label="Account"
+                aria-label={t("header.account")}
                 aria-expanded={userMenuOpen}
                 aria-haspopup="menu"
                 className="grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
@@ -399,11 +416,11 @@ export default function Header() {
                             {user.email}
                           </div>
                         </div>
-                        <MenuLink href="/profile" icon={UserIcon}>Profile</MenuLink>
-                        <MenuLink href="/orders" icon={Package}>Orders</MenuLink>
+                        <MenuLink href="/profile" icon={UserIcon}>{t("navigation.profile")}</MenuLink>
+                        <MenuLink href="/orders" icon={Package}>{t("navigation.orders")}</MenuLink>
                         {isAdmin && (
                           <MenuLink href="/admin" icon={LayoutDashboard}>
-                            Admin
+                            {t("navigation.admin")}
                           </MenuLink>
                         )}
                         <button
@@ -412,14 +429,14 @@ export default function Header() {
                           className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink transition-colors hover:bg-wash focus-ring"
                         >
                           <LogOut className="h-4 w-4 text-stone" />
-                          Sign out
+                          {t("navigation.signOut")}
                         </button>
                       </>
                     ) : (
                       <>
-                        <MenuLink href="/login" icon={LogIn}>Sign in</MenuLink>
+                        <MenuLink href="/login" icon={LogIn}>{t("navigation.signIn")}</MenuLink>
                         <MenuLink href="/register" icon={UserIcon}>
-                          Create account
+                          {t("navigation.createAccount")}
                         </MenuLink>
                       </>
                     )}
@@ -431,7 +448,7 @@ export default function Header() {
             {/* Cart */}
             <button
               onClick={() => dispatch(toggleCart())}
-              aria-label={cartCount ? `Cart, ${cartCount} items` : "Cart"}
+              aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
               className="relative ml-1 flex h-11 items-center gap-2.5 rounded-lg bg-ink px-4 text-canvas transition-colors hover:bg-verm hover:text-white focus-ring"
             >
               <ShoppingBag className="h-[18px] w-[18px]" />
@@ -447,27 +464,60 @@ export default function Header() {
           {menu === "shop" && (
             <MegaPanel key="shop" onMouseEnter={() => openMenu("shop")}>
               <div className="grid gap-12 lg:grid-cols-[1fr_1fr_1fr_1.25fr]">
-                {SHOP_MENU.map((col) => (
-                  <div key={col.heading}>
-                    <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
-                      {col.heading}
-                    </div>
-                    <div className="flex flex-col gap-[11px] text-[15.5px]">
-                      {col.links.map((l) => (
-                        <Link
-                          key={l.label}
-                          href={l.href}
-                          className={cn(
-                            "w-fit transition-colors hover:text-verm focus-ring",
-                            l.accent && "text-verm",
-                          )}
-                        >
-                          {l.label}
-                        </Link>
-                      ))}
-                    </div>
+                <div>
+                  <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                    {t("header.collections")}
                   </div>
-                ))}
+                  <div className="flex flex-col gap-[11px] text-[15.5px]">
+                    {OCCASION_LINKS.map((l) => (
+                      <Link
+                        key={l.labelKey}
+                        href={l.href}
+                        className={cn(
+                          "w-fit transition-colors hover:text-verm focus-ring",
+                          l.accent && "text-verm",
+                        )}
+                      >
+                        {t(l.labelKey)}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                    {t("header.departments")}
+                  </div>
+                  <div className="flex flex-col gap-[11px] text-[15.5px]">
+                    {departments.map((d) => (
+                      <Link
+                        key={d._id}
+                        href={`/shop?category=${d._id}`}
+                        className="w-fit transition-colors hover:text-verm focus-ring"
+                      >
+                        {departmentName(locale, d.slug, d.name)}
+                      </Link>
+                    ))}
+                    <Link href="/size-guide" className="w-fit transition-colors hover:text-verm focus-ring">
+                      {t("navigation.sizeGuide")}
+                    </Link>
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                    {t("header.fabric")}
+                  </div>
+                  <div className="flex flex-col gap-[11px] text-[15.5px]">
+                    {FABRIC_LINKS.map((l) => (
+                      <Link
+                        key={l.labelKey}
+                        href={l.href}
+                        className="w-fit transition-colors hover:text-verm focus-ring"
+                      >
+                        {t(l.labelKey)}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
                 <Link href="/journal" className="group block focus-ring">
                   <div className="relative aspect-16/10 overflow-hidden rounded-2xl bg-media">
                     <div aria-hidden="true" className="absolute inset-0 hatch" />
@@ -475,10 +525,10 @@ export default function Header() {
                   </div>
                   <div className="mt-3.5 flex items-baseline gap-2.5">
                     <span className="font-serif text-[25px] italic leading-tight">
-                      Drop 02 — City in Motion
+                      {t("header.theModestEdit")}
                     </span>
                     <span className="font-mono text-[11px] text-verm">
-                      View the story →
+                      {t("header.viewTheStory")}
                     </span>
                   </div>
                 </Link>
@@ -486,20 +536,17 @@ export default function Header() {
             </MegaPanel>
           )}
 
-          {menu === "brands" && (
-            <MegaPanel key="brands" onMouseEnter={() => openMenu("brands")}>
+          {menu === "occasions" && (
+            <MegaPanel key="occasions" onMouseEnter={() => openMenu("occasions")}>
               <div className="grid gap-14 lg:grid-cols-[2fr_1.1fr]">
                 <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-                  {FEATURED_BRANDS.map((b) => (
+                  {OCCASIONS.map((o) => (
                     <Link
-                      key={b.name}
-                      href={`/shop?brand=${encodeURIComponent(b.name)}`}
+                      key={o.value}
+                      href={`/shop?occasion=${o.value}`}
                       className="flex items-center justify-between rounded-[10px] border border-line px-[18px] py-4 text-[15px] font-medium transition-colors hover:border-ink hover:bg-wash focus-ring"
                     >
-                      <span>{b.name}</span>
-                      <span className="font-mono text-[11px] text-stone">
-                        {b.count}
-                      </span>
+                      <span>{t(o.nameKey)}</span>
                     </Link>
                   ))}
                 </div>
@@ -508,8 +555,7 @@ export default function Header() {
                     <div aria-hidden="true" className="absolute inset-0 hatch" />
                   </div>
                   <p className="mt-3.5 max-w-[34ch] text-[15px] leading-relaxed text-stone">
-                    Brand stories, archive notes, and what we actually keep in
-                    stock.
+                    {t("header.occasionsBlurb")}
                   </p>
                 </div>
               </div>
@@ -530,7 +576,7 @@ export default function Header() {
             onClick={() => dispatch(setMobileMenuOpen(false))}
           >
             <motion.nav
-              aria-label="Mobile"
+              aria-label={t("navigation.shop")}
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
@@ -544,7 +590,7 @@ export default function Header() {
                 </span>
                 <button
                   onClick={() => dispatch(setMobileMenuOpen(false))}
-                  aria-label="Close menu"
+                  aria-label={t("header.closeMenu")}
                   className="grid h-11 w-11 place-items-center rounded-lg transition-colors hover:bg-wash focus-ring"
                 >
                   <X className="h-5 w-5" />
@@ -553,45 +599,49 @@ export default function Header() {
 
               <div className="flex flex-col gap-1 p-4">
                 <Link href="/shop?sort=-createdAt" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
-                  New arrivals
+                  {t("header.newArrivals")}
                 </Link>
-                {GENDER_LINKS.map((l) => (
-                  <Link key={l.label} href={l.href} className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
-                    {l.label}
+                {departments.map((d) => (
+                  <Link key={d._id} href={`/shop?category=${d._id}`} className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
+                    {departmentName(locale, d.slug, d.name)}
                   </Link>
                 ))}
                 <Link href="/wishlist" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
-                  Wishlist{wlCount ? ` (${wlCount})` : ""}
+                  {t("navigation.wishlist")}
+                  {wlCount ? ` (${wlCount})` : ""}
                 </Link>
                 <Link href="/orders" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
-                  Orders
+                  {t("navigation.orders")}
                 </Link>
               </div>
 
               <div className="mt-auto border-t border-line p-4">
-                {SHOP_MENU[0].links.slice(0, 4).map((l) => (
+                {OCCASION_LINKS.slice(0, 4).map((l) => (
                   <Link
-                    key={l.label}
+                    key={l.labelKey}
                     href={l.href}
                     className="block rounded-lg px-3 py-2 text-sm text-stone hover:bg-wash focus-ring"
                   >
-                    {l.label}
+                    {t(l.labelKey)}
                   </Link>
                 ))}
                 <div className="mt-3 border-t border-line pt-3">
+                  <div className="mb-3 px-3">
+                    <LanguageSwitcher className="w-full justify-start px-3" showLabel="always" />
+                  </div>
                   {user ? (
                     <button
                       onClick={handleLogout}
                       className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm hover:bg-wash focus-ring"
                     >
-                      <LogOut className="h-4 w-4 text-stone" /> Sign out
+                      <LogOut className="h-4 w-4 text-stone" /> {t("navigation.signOut")}
                     </button>
                   ) : (
                     <Link
                       href="/login"
                       className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm hover:bg-wash focus-ring"
                     >
-                      <LogIn className="h-4 w-4 text-stone" /> Sign in
+                      <LogIn className="h-4 w-4 text-stone" /> {t("navigation.signIn")}
                     </Link>
                   )}
                 </div>
@@ -607,14 +657,25 @@ export default function Header() {
 /* -------------------------------------------------------------------------- */
 
 /**
- * A plain nav link that knows whether it's the current page. Matches on the
- * pathname only (not query string) — the gender links share /shop as their
- * path, so this marks Shop-family links as current together rather than
- * inventing a query-aware "active" state the design doesn't define.
+ * A plain nav link that knows whether it's the current page. Several of
+ * these links share /shop as their path (New, and one per department) —
+ * matching on pathname alone would light up all of them together the
+ * instant the pathname is /shop, regardless of which query params are
+ * actually set. So this checks the path AND, when the href carries a query
+ * string, that every one of its params is present with the exact same
+ * value in the current URL — "New" (?sort=-createdAt) and "Burqa"
+ * (?category=<id>) can then never both read as active, and switching
+ * department correctly kills the previous one's highlight.
  */
-function HeaderNavLink({ href, pathname, className, children }) {
-  const linkPath = href.split("?")[0];
-  const isActive = linkPath !== "/" && pathname === linkPath;
+function HeaderNavLink({ href, pathname, searchParams, className, children }) {
+  const [linkPath, linkQuery] = href.split("?");
+  const isActive =
+    linkPath !== "/" &&
+    pathname === linkPath &&
+    (!linkQuery ||
+      [...new URLSearchParams(linkQuery)].every(
+        ([key, value]) => searchParams?.get(key) === value,
+      ));
   return (
     <Link
       href={href}

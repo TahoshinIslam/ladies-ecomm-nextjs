@@ -56,5 +56,7 @@ const paymentSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-const paymentModel = mongoose.model("payments", paymentSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const paymentModel = mongoose.models.payments || mongoose.model("payments", paymentSchema);
 export default paymentModel;

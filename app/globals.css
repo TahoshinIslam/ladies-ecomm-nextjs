@@ -17,6 +17,7 @@
   --stone: #67645e;
   --line: #d8d3c9;
   --media: #e9e6de;
+  --shine: #ffffff;
   --verm: #ff3d21;
   --lime: #d4ff45;
   --coral: #ffd9d1;
@@ -64,6 +65,7 @@
   --stone: #a9a59c;
   --line: #2c2c31;
   --media: #191a1d;
+  --shine: #f5f2ea;
   --coral: #4a2e28;
   --lav: #2e2b45;
 
@@ -316,7 +318,7 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      color-mix(in srgb, var(--elev) 55%, transparent) 50%,
+      color-mix(in srgb, var(--shine) 55%, transparent) 50%,
       transparent 100%
     );
     animation: shimmer 1.4s linear infinite;

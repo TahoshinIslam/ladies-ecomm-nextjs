@@ -2,7 +2,7 @@ import Category from "../models/categoryModel.js";
 import Product from "../models/productModel.js";
 import { HttpError } from "../lib/http.js";
 
-const WRITABLE_FIELDS = ["name", "parent", "image", "description", "sortOrder", "isActive"];
+const WRITABLE_FIELDS = ["name", "nameBn", "parent", "image", "description", "descriptionBn", "sortOrder", "isActive"];
 
 const pickWritable = (body) => {
   const out = {};

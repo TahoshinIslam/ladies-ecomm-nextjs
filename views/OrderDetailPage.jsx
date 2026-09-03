@@ -2,20 +2,15 @@
 
 import Link from "next/link";
 import { usePathname, useParams, useRouter, useSearchParams } from "next/navigation";
-import { motion } from "framer-motion";
 import {
+  Home,
   Package,
   MapPin,
   CreditCard,
-  Clock,
-  CheckCircle2,
-  Truck,
-  Home,
   X,
   AlertCircle,
   Gift,
   Download,
-  Banknote,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -24,47 +19,30 @@ import Badge from "../components/ui/Badge.jsx";
 import Button from "../components/ui/Button.jsx";
 import ConfirmDialog from "../components/ui/ConfirmDialog.jsx";
 import Skeleton from "../components/ui/Skeleton.jsx";
+import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 import ReviewForm from "../components/review/ReviewForm.jsx";
+import OrderTimeline from "../components/order/OrderTimeline.jsx";
 
 import {
   useGetOrderQuery,
   useCancelOrderMutation,
   useGetPaymentByOrderQuery,
 } from "../store/shopApi.js";
-import { formatCurrency, formatDateTime, cn } from "../lib/utils.js";
+import { formatCurrency, cn } from "../lib/utils.js";
+import { formatDhakaDateTime } from "../lib/date.js";
 import { downloadReceipt } from "../lib/receipt.js";
-
-const PENDING_STEP = { key: "pending", label: "Pending", icon: Clock };
-const PAID_STEP = { key: "paid", label: "Payment confirmed", icon: CheckCircle2 };
-const PROCESSING_STEP = { key: "processing", label: "Processing", icon: Package };
-const SHIPPED_STEP = { key: "shipped", label: "Shipped", icon: Truck };
-const DELIVERED_STEP = { key: "delivered", label: "Delivered", icon: Home };
-
-// Tracker steps depend on payment method. COD never hits "paid" (cash is
-// collected at delivery), so showing Pending/Payment-confirmed would be
-// misleading — start straight from Processing for COD orders.
-// Empty string is treated as COD too, to cover legacy orders placed before
-// paymentMethod was being persisted on the order record.
-const isCodOrder = (order) =>
-  order?.paymentMethod === "cod" ||
-  (!order?.paymentMethod && order?.status !== "paid");
-
-const getTrackingSteps = (order) => {
-  if (isCodOrder(order)) {
-    return [PROCESSING_STEP, SHIPPED_STEP, DELIVERED_STEP];
-  }
-  return [PENDING_STEP, PAID_STEP, PROCESSING_STEP, SHIPPED_STEP, DELIVERED_STEP];
-};
-
-const statusIndex = (status, steps) => steps.findIndex((s) => s.key === status);
+import { useOrderStatusStream } from "../hooks/useOrderStatusStream.js";
+import { useLocale } from "../context/LocaleProvider.jsx";
 
 export default function OrderDetailPage() {
   const { id } = useParams();
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const { data, isLoading, isError, error } = useGetOrderQuery(id);
+  const { t, locale } = useLocale();
+  const { data, isLoading, isError, error, refetch } = useGetOrderQuery(id);
   const { data: paymentData } = useGetPaymentByOrderQuery(id, { skip: !id });
+  useOrderStatusStream(id, refetch);
   const [cancelOrder, { isLoading: cancelling }] = useCancelOrderMutation();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -77,7 +55,7 @@ export default function OrderDetailPage() {
     if (!order || receiptShown.current) return;
     if (sp.get("receipt") === "1") {
       receiptShown.current = true;
-      downloadReceipt(order);
+      downloadReceipt(order, locale);
       // Strip the flag so a refresh doesn't re-download the receipt.
       const next = new URLSearchParams(sp);
       next.delete("receipt");
@@ -98,56 +76,72 @@ export default function OrderDetailPage() {
 
   if (isError || !order) {
     return (
-      <div className="container-x py-10 text-center">
-        <AlertCircle className="mx-auto h-10 w-10 text-muted-foreground" />
-        <h2 className="mt-4 font-heading text-xl font-bold">Order not found</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {error?.data?.message || "We couldn't find this order."}
-        </p>
-        <Link href="/orders" className="mt-4 inline-block">
-          <Button variant="outline">Back to orders</Button>
-        </Link>
+      <div className="container-x py-10">
+        <Breadcrumb
+          items={[
+            { label: t("navigation.home"), href: "/", icon: Home },
+            { label: t("navigation.orders"), href: "/orders", icon: Package },
+            { label: t("orders.notFound") },
+          ]}
+        />
+        <div className="text-center">
+          <AlertCircle className="mx-auto h-10 w-10 text-muted-foreground" />
+          <h2 className="mt-4 font-heading text-xl font-bold">{t("orders.orderNotFound")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {error?.data?.message || t("orders.couldntFindOrder")}
+          </p>
+          <Link href="/orders" className="mt-4 inline-block">
+            <Button variant="outline">{t("orders.backToOrders")}</Button>
+          </Link>
+        </div>
       </div>
     );
   }
 
-  const currency = order.currency || "USD";
   const isFreeShippingPromo = /first order free/i.test(order.shippingTier || "");
   const isDelivered = order.status === "delivered";
 
-  const trackingSteps = getTrackingSteps(order);
-  const isCod = isCodOrder(order);
-  const currentIdx = statusIndex(order.status, trackingSteps);
   const isCancelled = order.status === "cancelled";
   const isRefunded = order.status === "refunded";
   const canCancel = ["pending", "paid", "processing"].includes(order.status);
+  const STATUS_KEYS = {
+    pending: "orders.statusPending",
+    paid: "orders.statusPaid",
+    processing: "orders.statusProcessing",
+    shipped: "orders.statusShipped",
+    delivered: "orders.statusDelivered",
+    cancelled: "orders.statusCancelled",
+    refunded: "orders.statusRefunded",
+  };
 
   const handleCancel = async () => {
     try {
       await cancelOrder(order._id).unwrap();
-      toast.success("Order cancelled");
+      toast.success(t("orders.orderCancelled"));
       setConfirmOpen(false);
     } catch (e) {
-      toast.error(e?.data?.message || "Could not cancel");
+      toast.error(e?.data?.message || t("orders.couldntCancel"));
     }
   };
 
   return (
     <div className="container-x py-10">
+      <Breadcrumb
+        items={[
+          { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("navigation.orders"), href: "/orders", icon: Package },
+          { label: `#${order._id.slice(-8).toUpperCase()}` },
+        ]}
+      />
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <Link
-            href="/orders"
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            ← Back to orders
-          </Link>
-          <h1 className="mt-1 font-heading text-3xl font-black">
-            Order #{order._id.slice(-8).toUpperCase()}
+          <h1 className="font-heading text-3xl font-black">
+            {t("orders.orderNumberHash", { id: order._id.slice(-8).toUpperCase() })}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Placed {formatDateTime(order.createdAt)}
+            {t("orders.placedOn", { date: formatDhakaDateTime(order.createdAt, locale) })}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -161,123 +155,49 @@ export default function OrderDetailPage() {
             }
             className="capitalize"
           >
-            {order.status}
+            {t(STATUS_KEYS[order.status] || "orders.statusPending")}
           </Badge>
-          <Button variant="outline" size="sm" onClick={() => downloadReceipt(order)}>
+          <Button variant="outline" size="sm" onClick={() => downloadReceipt(order, locale)}>
             <Download className="h-3 w-3" />
-            Receipt
+            {t("orders.receipt")}
           </Button>
           {canCancel && (
             <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)}>
               <X className="h-3 w-3" />
-              Cancel
+              {t("orders.cancel")}
             </Button>
           )}
         </div>
       </div>
 
       {/* Tracking timeline */}
-      {!isCancelled && !isRefunded && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-8 rounded-lg border border-border bg-background p-6"
-        >
-          <div className="mb-6 flex items-center justify-between gap-3">
-            <h2 className="font-heading text-lg font-bold">Tracking</h2>
-            {isCod && (
-              <Badge variant="outline" className="gap-1">
-                <Banknote className="h-3 w-3" />
-                Pay on delivery
-              </Badge>
-            )}
-          </div>
-          <div className="relative">
-            <div className="absolute left-5 top-5 bottom-5 w-0.5 bg-border sm:left-0 sm:top-5 sm:bottom-auto sm:h-0.5 sm:w-full" />
-            <motion.div
-              initial={{ scaleY: 0 }}
-              animate={{ scaleY: 1 }}
-              transition={{ duration: 0.8, ease: "easeOut" }}
-              className="absolute left-5 top-5 w-0.5 origin-top bg-accent sm:left-0 sm:h-0.5 sm:origin-left"
-              style={{
-                height:
-                  currentIdx >= 0
-                    ? `${(currentIdx / (trackingSteps.length - 1)) * 100}%`
-                    : "0%",
-              }}
-            />
-            <div className="relative space-y-5 sm:flex sm:space-y-0">
-              {trackingSteps.map((step, i) => {
-                const reached = i <= currentIdx;
-                const active = i === currentIdx;
-                const Icon = step.icon;
-                return (
-                  <div
-                    key={step.key}
-                    className="flex items-start gap-4 sm:flex-1 sm:flex-col sm:items-center sm:text-center"
-                  >
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: 0.1 * i + 0.3, type: "spring" }}
-                      className={cn(
-                        "relative z-10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-                        reached
-                          ? "border-accent bg-accent text-accent-foreground"
-                          : "border-border bg-background text-muted-foreground",
-                        active && "ring-4 ring-accent/20"
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </motion.div>
-                    <div className="sm:mt-2">
-                      <p
-                        className={cn(
-                          "text-sm font-semibold",
-                          reached ? "text-foreground" : "text-muted-foreground"
-                        )}
-                      >
-                        {step.label}
-                      </p>
-                      {active && (
-                        <p className="text-xs text-accent">Current status</p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          {order.trackingNumber && (
-            <p className="mt-6 text-sm">
-              <span className="text-muted-foreground">Tracking #: </span>
-              <span className="font-mono font-semibold">{order.trackingNumber}</span>
-            </p>
-          )}
-        </motion.div>
-      )}
+      <OrderTimeline order={order} className="mt-8" />
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_340px]">
         <div className="space-y-6">
-          <Card title="Items" icon={Package}>
+          <Card title={t("orders.items")} icon={Package}>
             <ul className="divide-y divide-border">
               {order.items.map((it, i) => (
                 <li key={i} className="py-4 first:pt-0 last:pb-0">
                   <div className="flex gap-4">
                     <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-md bg-muted">
                       <img
-                        src={it.image}
-                        alt={it.name}
+                        src={it.snapshot?.image}
+                        alt={it.snapshot?.name}
                         className="h-full w-full object-cover"
                       />
                     </div>
                     <div className="flex-1">
-                      <p className="font-semibold">{it.name}</p>
+                      <p className="font-semibold">{it.snapshot?.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        Size {it.size} · Qty {it.quantity}
+                        {[it.snapshot?.color, it.snapshot?.size, it.snapshot?.fabric]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        {" · "}{t("checkout.qty")}{" "}
+                        {it.quantity}
                       </p>
                       <p className="mt-1 text-sm font-bold">
-                        {formatCurrency(it.price * it.quantity, currency)}
+                        {formatCurrency(it.snapshot?.price * it.quantity, locale)}
                       </p>
                     </div>
                   </div>
@@ -285,7 +205,7 @@ export default function OrderDetailPage() {
                       The backend enforces this as a hard gate too. */}
                   {isDelivered && it.product && (
                     <div className="mt-3 ml-24">
-                      <ReviewForm productId={it.product} productName={it.name} />
+                      <ReviewForm productId={it.product} productName={it.snapshot?.name} />
                     </div>
                   )}
                 </li>
@@ -293,7 +213,7 @@ export default function OrderDetailPage() {
             </ul>
           </Card>
 
-          <Card title="Shipping address" icon={MapPin}>
+          <Card title={t("orders.shippingAddress2")} icon={MapPin}>
             <p className="font-semibold">{order.shippingAddress.fullName}</p>
             <p className="text-sm text-muted-foreground">
               {order.shippingAddress.street}, {order.shippingAddress.city}
@@ -309,11 +229,11 @@ export default function OrderDetailPage() {
           </Card>
 
           {paymentData?.payment && (
-            <Card title="Payment" icon={CreditCard}>
+            <Card title={t("orders.payment")} icon={CreditCard}>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm">
-                    Method:{" "}
+                    {t("orders.method")}:{" "}
                     <span className="font-semibold uppercase">
                       {paymentData.payment.method}
                     </span>
@@ -337,49 +257,49 @@ export default function OrderDetailPage() {
         </div>
 
         <div className="rounded-lg border border-border bg-muted/20 p-5 lg:sticky lg:top-24 lg:self-start">
-          <h2 className="mb-4 font-heading text-lg font-bold">Total</h2>
+          <h2 className="mb-4 font-heading text-lg font-bold">{t("checkout.total")}</h2>
           <div className="space-y-2 text-sm">
-            <Row label="Subtotal" value={formatCurrency(order.subtotal, currency)} />
+            <Row label={t("checkout.subtotal")} value={formatCurrency(order.subtotal, locale)} />
             <Row
-              label={isFreeShippingPromo ? "Shipping (first order)" : "Shipping"}
+              label={isFreeShippingPromo ? t("orders.shippingFirstOrder") : t("checkout.shippingLabel")}
               value={
                 order.shippingCost === 0 ? (
                   <span className="text-success font-semibold">
                     {isFreeShippingPromo ? (
                       <span className="inline-flex items-center gap-1">
-                        <Gift className="h-3 w-3" /> Free
+                        <Gift className="h-3 w-3" /> {t("checkout.free")}
                       </span>
                     ) : (
-                      "Free"
+                      t("checkout.free")
                     )}
                   </span>
                 ) : (
-                  formatCurrency(order.shippingCost, currency)
+                  formatCurrency(order.shippingCost, locale)
                 )
               }
             />
             {order.tax > 0 && !order.taxLabel?.toLowerCase().includes("(incl") && (
               <Row
-                label={order.taxLabel || "Tax"}
-                value={formatCurrency(order.tax, currency)}
+                label={order.taxLabel || t("checkout.tax")}
+                value={formatCurrency(order.tax, locale)}
               />
             )}
             {order.discount > 0 && (
               <Row
-                label="Discount"
-                value={`-${formatCurrency(order.discount, currency)}`}
+                label={t("checkout.discount")}
+                value={`-${formatCurrency(order.discount, locale)}`}
                 valueClass="text-success"
               />
             )}
             <Row
-              label="Total"
-              value={formatCurrency(order.total, currency)}
+              label={t("checkout.total")}
+              value={formatCurrency(order.total, locale)}
               className="border-t border-border pt-3 text-base font-bold"
             />
             {order.tax > 0 && order.taxLabel?.toLowerCase().includes("(incl") && (
               <p className="pt-1 text-xs text-muted-foreground">
-                Includes {order.taxLabel.replace(/\s*\(incl\.\)/i, "")} of{" "}
-                {formatCurrency(order.tax, currency)}
+                {t("checkout.includesTaxOf", { tax: order.taxLabel.replace(/\s*\(incl\.\)/i, "") })}{" "}
+                {formatCurrency(order.tax, locale)}
               </p>
             )}
           </div>
@@ -390,9 +310,9 @@ export default function OrderDetailPage() {
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         onConfirm={handleCancel}
-        title="Cancel this order?"
-        description="Items will be restocked. This can't be undone."
-        confirmLabel="Yes, cancel order"
+        title={t("orders.cancelOrderTitle")}
+        description={t("orders.cancelOrderDesc")}
+        confirmLabel={t("orders.yesCancel")}
         loading={cancelling}
       />
     </div>

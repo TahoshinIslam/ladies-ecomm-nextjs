@@ -14,6 +14,8 @@ import {
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { addToCompare, removeFromCompare, openQuickAdd } from "../../store/uiSlice.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
+import { useLocale } from "../../context/LocaleProvider.jsx";
+import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
 import { cn, resolveImage } from "../../lib/utils.js";
 
 /**
@@ -22,10 +24,11 @@ import { cn, resolveImage } from "../../lib/utils.js";
  * contact shadow under the shoe, and a 1.6° tilt on hover; the quick-add bar
  * rises into the plate rather than covering the whole image.
  */
-export default function ProductCard({ product, className, index = 0, onQuickAdd }) {
+export default function ProductCard({ product, className, index = 0, onQuickAdd, attributeMeta }) {
   const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const settings = useSettings();
+  const { t, locale } = useLocale();
   const [hovered, setHovered] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
 
@@ -52,23 +55,51 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
   const discounted =
     product.discountPrice && product.discountPrice < product.basePrice;
 
-  const categoryName = product.category?.name;
-  const fabric = product.attributes?.find((a) => a.key === "fabric")?.values.join(", ");
-  const colorCount = product.attributes?.find((a) => a.key === "color")?.values.length;
+  const categoryName = departmentName(locale, product.category?.slug, product.category?.name);
+  const fabric = product.attributes
+    ?.find((a) => a.key === "fabric")
+    ?.values.map((v) => attrValue(locale, "fabric", v)).join(", ");
+  const colorValues = product.attributes?.find((a) => a.key === "color")?.values ?? [];
+  const colorCount = colorValues.length;
+  const sizeValues = product.attributes?.find((a) => a.key === "size")?.values ?? [];
+  // "Size" reads as "Length" for Burqa/Khimar etc — same per-department
+  // override AttributeDefinition drives on the PDP and filter sidebar,
+  // resolved here against this card's own topCategory so a mixed "Shop
+  // all" grid still labels each card correctly. attrLabel() (which checks
+  // this app's own translation map first) takes priority over the DB's own
+  // label/labelOverrides, same fix as ProductDetailPage/ShopPage — see
+  // lib/i18n/catalog.js.
+  const sizeLabel = attrLabel(
+    locale,
+    "size",
+    attributeMeta?.sizeDef?.labelOverrides?.find(
+      (o) => String(o.category) === String(product.topCategory),
+    )?.label ||
+      attributeMeta?.sizeDef?.label ||
+      t("product.size"),
+  );
+  const hexForColor = (value) =>
+    attributeMeta?.colorDef?.options?.find((o) => o.value === value)?.swatchHex;
+  const VISIBLE_SWATCHES = 4;
+  const VISIBLE_SIZES = 5;
   const availabilityLabel =
-    product.availability === "preOrder" ? "Pre-order" : product.availability === "madeToOrder" ? "Made to order" : null;
+    product.availability === "preOrder"
+      ? t("product.preOrder")
+      : product.availability === "madeToOrder"
+        ? t("product.madeToOrder")
+        : null;
 
   const handleWishlist = async (e) => {
     e.preventDefault();
     if (!user) {
-      toast.error("Please sign in to save this pair");
+      toast.error(t("product.signInToSave"));
       return;
     }
     try {
       const res = await toggleWishlist(product._id).unwrap();
-      toast.success(res.added ? "Saved" : "Removed from saved");
+      toast.success(res.added ? t("product.saved") : t("product.removedFromSaved"));
     } catch {
-      toast.error("Could not update your saved pairs");
+      toast.error(t("product.saveFailed"));
     }
   };
 
@@ -79,7 +110,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
       return;
     }
     if (compareFull) {
-      toast.error("You can compare up to 4 pairs");
+      toast.error(t("product.compareLimitReached"));
       return;
     }
     dispatch(addToCompare(product._id));
@@ -97,7 +128,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
 
   const handleNotify = (e) => {
     e.preventDefault();
-    toast.success("We'll email you if this colorway restocks");
+    toast.success(t("product.notifySuccess"));
   };
 
   const href = `/product/${product.slug || product._id}`;
@@ -120,36 +151,37 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
           <div aria-hidden="true" className="absolute inset-0 glow" />
 
           <div
-            className="absolute inset-x-[10%] bottom-[16%] top-[12%] grid place-items-center transition-transform duration-[220ms]"
+            className="absolute inset-0 grid place-items-center transition-transform duration-[220ms]"
             style={{
-              transform:
-                hovered && !isUnavailable ? "rotate(-1.6deg) scale(1.04)" : "none",
+              transform: hovered && !isUnavailable ? "scale(1.045)" : "none",
               opacity: isUnavailable ? 0.45 : 1,
             }}
           >
-            <div
-              aria-hidden="true"
-              className="absolute inset-x-[6%] -bottom-[6%] h-[18%] contact-shadow"
-            />
             {product.images?.[0] && !imageFailed ? (
+              // Absolutely positioned rather than w-full/h-full on purpose:
+              // this wrapper is `grid place-items-center` for the
+              // text-fallback branches below, and a grid item sized only via
+              // w-full/h-full doesn't stretch under place-items:center — it
+              // falls back to its own intrinsic (natural photo) aspect ratio
+              // instead, leaving visible gaps. Taking the img out of grid
+              // flow with `absolute inset-0` sizes it from the box's own
+              // edges, independent of its natural ratio.
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 src={resolveImage(product.images[0], 640)}
                 alt={product.name}
-                width="640"
-                height="800"
                 decoding="async"
                 // Above-the-fold cards load eagerly so they don't cost LCP.
                 loading={index < 6 ? "eager" : "lazy"}
                 fetchPriority={index === 0 ? "high" : "auto"}
-                className="relative h-full w-full object-contain"
+                className="absolute inset-0 h-full w-full object-cover"
                 onError={() => setImageFailed(true)}
               />
             ) : imageFailed ? (
               <span className="relative flex flex-col items-center gap-2 px-4 text-center text-stone">
                 <ImageOff className="h-5 w-5" strokeWidth={1.6} />
                 <span className="font-mono text-[10.5px] uppercase leading-[1.7] tracking-[0.08em]">
-                  Image didn&rsquo;t load
+                  {t("product.imageDidntLoad")}
                   <br />
                   {product.name}
                 </span>
@@ -163,7 +195,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
 
           {isUnavailable ? (
             <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-ink/85 px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-canvas">
-              Sold out
+              {t("product.soldOut")}
             </span>
           ) : availabilityLabel ? (
             <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-ink/85 px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-canvas">
@@ -171,11 +203,11 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
             </span>
           ) : discounted ? (
             <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-verm px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-white">
-              −
-              {Math.round(
-                ((product.basePrice - product.discountPrice) / product.basePrice) * 100,
-              )}
-              %
+              {t("product.discountBadge", {
+                percent: Math.round(
+                  ((product.basePrice - product.discountPrice) / product.basePrice) * 100,
+                ),
+              })}
             </span>
           ) : null}
 
@@ -184,7 +216,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
             <button
               onClick={handleWishlist}
               disabled={wlLoading}
-              aria-label={isWished ? `Remove ${product.name} from saved` : `Save ${product.name}`}
+              aria-label={isWished ? t("product.removeSavedProduct", { name: product.name }) : t("product.saveProduct", { name: product.name })}
               aria-pressed={isWished}
               className={cn(
                 "grid h-[38px] w-[38px] place-items-center rounded-lg border border-line bg-elev transition-colors hover:border-ink focus-ring active:scale-95",
@@ -199,7 +231,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
             </button>
             <button
               onClick={handleCompare}
-              aria-label={isCompared ? `Remove ${product.name} from compare` : `Compare ${product.name}`}
+              aria-label={isCompared ? t("product.removeCompareProduct", { name: product.name }) : t("product.compareProduct", { name: product.name })}
               aria-pressed={isCompared}
               className={cn(
                 "grid h-[38px] w-[38px] place-items-center rounded-lg border border-line bg-elev opacity-0 transition-[opacity,color,border-color] hover:border-ink focus-ring focus-visible:opacity-100 group-hover:opacity-100",
@@ -219,7 +251,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
                 className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-elev text-sm font-semibold text-ink transition-colors hover:border-ink focus-ring active:scale-[0.985]"
               >
                 <BellRing className="h-4 w-4" strokeWidth={1.8} />
-                Notify me if it returns
+                {t("product.notifyIfReturns")}
               </button>
             </div>
           ) : (
@@ -235,7 +267,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
                 tabIndex={hovered ? 0 : -1}
                 className="h-11 w-full rounded-lg bg-ink text-sm font-semibold text-canvas transition-colors hover:bg-verm hover:text-white focus-ring active:scale-[0.985]"
               >
-                Quick add
+                {t("product.quickAdd")}
               </button>
             </div>
           )}
@@ -252,10 +284,38 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd 
               {product.name}
             </h3>
             <div className="mt-1.5 text-[13.5px] text-stone">
-              {[fabric, colorCount > 1 && `${colorCount} colors`, product.brand?.name]
+              {[fabric, colorCount > 1 && t("product.colorsCount", { count: colorCount }), product.brand?.name]
                 .filter(Boolean)
                 .join(" · ")}
             </div>
+            {(colorValues.length > 0 || sizeValues.length > 0) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                {colorValues.length > 0 && (
+                  <span className="flex items-center gap-1">
+                    {colorValues.slice(0, VISIBLE_SWATCHES).map((v) => (
+                      <span
+                        key={v}
+                        aria-hidden="true"
+                        title={v}
+                        className="h-3.5 w-3.5 flex-none rounded-full border border-line"
+                        style={{ backgroundColor: hexForColor(v) || "#d4d4d4" }}
+                      />
+                    ))}
+                    {colorValues.length > VISIBLE_SWATCHES && (
+                      <span className="font-mono text-[10px] text-stone">
+                        +{colorValues.length - VISIBLE_SWATCHES}
+                      </span>
+                    )}
+                  </span>
+                )}
+                {sizeValues.length > 0 && (
+                  <span className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-stone">
+                    {sizeLabel}: {sizeValues.slice(0, VISIBLE_SIZES).map((v) => attrValue(locale, "size", v)).join(" · ")}
+                    {sizeValues.length > VISIBLE_SIZES ? "…" : ""}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex flex-none flex-col items-end">
             <span data-tabular className="text-[16.5px] font-semibold text-ink">

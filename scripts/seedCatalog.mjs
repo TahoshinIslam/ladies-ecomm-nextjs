@@ -304,21 +304,32 @@ function buildProducts(categoryBySlug) {
     {
       name: "Saudi-Style Closed Burqa",
       description:
-        "A closed, pull-over burqa in premium Nida with full lining for opaque, structured coverage.",
+        "A closed, pull-over burqa with full lining for opaque, structured coverage — offered in premium Nida or lightweight Crepe.",
       category: cat("burqa-saudi-style"),
       basePrice: 65,
       images: [IMG("Burqa")],
       variants: [
         {
           variantName: "Black / Free Size / Nida",
-          sku: "BUR-SAU-BLK-FS",
+          sku: "BUR-SAU-BLK-FS-NIDA",
           attributes: { color: "black", size: "free-size", fabric: "nida" },
           stock: 20,
           images: [IMG("Burqa+Black")],
         },
         {
+          // Same color, same size, different fabric — the one axis
+          // combination the Phase 1-4 seed data never exercised. Priced
+          // higher: Crepe drapes lighter but costs more per yard than Nida.
+          variantName: "Black / Free Size / Crepe",
+          sku: "BUR-SAU-BLK-FS-CREPE",
+          attributes: { color: "black", size: "free-size", fabric: "crepe" },
+          price: 72,
+          stock: 8,
+          images: [IMG("Burqa+Black+Crepe")],
+        },
+        {
           variantName: "Navy / Free Size / Nida",
-          sku: "BUR-SAU-NVY-FS",
+          sku: "BUR-SAU-NVY-FS-NIDA",
           attributes: { color: "navy", size: "free-size", fabric: "nida" },
           stock: 15,
           images: [IMG("Burqa+Navy")],

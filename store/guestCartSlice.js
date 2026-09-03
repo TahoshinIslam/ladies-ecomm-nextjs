@@ -20,12 +20,23 @@ const snapshotProduct = (p) => ({
   images: p.images,
   basePrice: p.basePrice,
   discountPrice: p.discountPrice,
-  // `variants` is the modest-fashion schema; `sizes` is the legacy
-  // mock-catalog shape — snapshot whichever the product actually has.
-  sizes: p.sizes,
-  variants: p.variants,
   brand: p.brand,
-  colorway: p.colorway,
+});
+
+// Snapshot of the specific variant added — this is what makes a cart line
+// unique and correct (color/size/fabric, its own price override, its own
+// image) instead of the old bare size string that couldn't tell two
+// different-colored variants apart. See Phase 4 audit.
+const snapshotVariant = (v) => ({
+  variantId: v._id,
+  sku: v.sku,
+  variantName: v.variantName,
+  color: v.attributes?.color || "",
+  size: v.attributes?.size || "",
+  fabric: v.attributes?.fabric || "",
+  price: v.price ?? null,
+  discountPrice: v.discountPrice ?? null,
+  image: v.images?.[0] || "",
 });
 
 const guestCartSlice = createSlice({
@@ -38,31 +49,32 @@ const guestCartSlice = createSlice({
       s.items = load();
     },
     guestAdd: (s, { payload }) => {
-      const { product, size, quantity } = payload;
+      const { product, variant, quantity } = payload;
       const existing = s.items.find(
-        (i) => i.productId === product._id && i.size === size,
+        (i) => i.productId === product._id && i.variantId === variant._id,
       );
       if (existing) {
         existing.quantity += quantity;
       } else {
         s.items.push({
           productId: product._id,
-          size,
+          variantId: variant._id,
           quantity,
           product: snapshotProduct(product),
+          variant: snapshotVariant(variant),
         });
       }
       save(s.items);
     },
     guestUpdate: (s, { payload }) => {
-      const { productId, size, quantity } = payload;
+      const { productId, variantId, quantity } = payload;
       const item = s.items.find(
-        (i) => i.productId === productId && i.size === size,
+        (i) => i.productId === productId && i.variantId === variantId,
       );
       if (!item) return;
       if (quantity <= 0) {
         s.items = s.items.filter(
-          (i) => !(i.productId === productId && i.size === size),
+          (i) => !(i.productId === productId && i.variantId === variantId),
         );
       } else {
         item.quantity = quantity;
@@ -70,9 +82,9 @@ const guestCartSlice = createSlice({
       save(s.items);
     },
     guestRemove: (s, { payload }) => {
-      const { productId, size } = payload;
+      const { productId, variantId } = payload;
       s.items = s.items.filter(
-        (i) => !(i.productId === productId && i.size === size),
+        (i) => !(i.productId === productId && i.variantId === variantId),
       );
       save(s.items);
     },

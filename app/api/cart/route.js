@@ -1,8 +1,31 @@
 import { NextResponse } from "next/server";
 
-// Signed-out visitors use the localStorage guest cart (store/guestCartSlice.js).
-// A server cart needs the session middleware from the backend phase, so this
-// returns an empty cart rather than a 500 that would break the drawer.
-export async function GET() {
-  return NextResponse.json({ cart: { items: [] } });
-}
+import { requireUser } from "../../../lib/auth.js";
+import { getCart, addToCart, updateCartItem, clearCart } from "../../../services/cartService.js";
+import { withRoute } from "../../../lib/http.js";
+
+export const GET = withRoute(async (request) => {
+  const user = await requireUser(request);
+  const cart = await getCart(user._id);
+  return NextResponse.json({ success: true, cart });
+});
+
+export const POST = withRoute(async (request) => {
+  const user = await requireUser(request);
+  const { productId, variantId, quantity = 1 } = await request.json();
+  const cart = await addToCart(user._id, productId, variantId, quantity);
+  return NextResponse.json({ success: true, cart });
+});
+
+export const PUT = withRoute(async (request) => {
+  const user = await requireUser(request);
+  const { productId, variantId, quantity } = await request.json();
+  const cart = await updateCartItem(user._id, productId, variantId, quantity);
+  return NextResponse.json({ success: true, cart });
+});
+
+export const DELETE = withRoute(async (request) => {
+  const user = await requireUser(request);
+  const cart = await clearCart(user._id);
+  return NextResponse.json({ success: true, cart });
+});

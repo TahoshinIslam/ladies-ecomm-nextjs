@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
@@ -17,23 +17,13 @@ import { useRegisterMutation } from "../store/userApi.js";
 import { useAddToCartMutation } from "../store/shopApi.js";
 import { setCredentials, selectCurrentUser } from "../store/authSlice.js";
 import { mergeGuestCartAfterLogin } from "../hooks/useCart.js";
-
-const schema = z
-  .object({
-    name: z.string().min(2, "Name must be at least 2 characters"),
-    email: z.string().email("Enter a valid email"),
-    password: z.string().min(6, "Password must be at least 6 characters"),
-    confirmPassword: z.string(),
-  })
-  .refine((d) => d.password === d.confirmPassword, {
-    message: "Passwords don't match",
-    path: ["confirmPassword"],
-  });
+import { useLocale } from "../context/LocaleProvider.jsx";
 
 export default function RegisterPage() {
+  const { t } = useLocale();
   const dispatch = useDispatch();
   const router = useRouter();
-  const [register, { isLoading }] = useRegisterMutation();
+  const [registerUser, { isLoading }] = useRegisterMutation();
   const [addToCart] = useAddToCartMutation();
   const sp = useSearchParams();
   const redirectParam = sp.get("redirect");
@@ -45,6 +35,22 @@ export default function RegisterPage() {
     if (user) router.replace(redirectParam || "/");
   }, [user, redirectParam, router]);
 
+  const schema = useMemo(
+    () =>
+      z
+        .object({
+          name: z.string().min(2, t("auth.nameMinLength")),
+          email: z.string().email(t("auth.validEmail")),
+          password: z.string().min(6, t("auth.passwordMinLength")),
+          confirmPassword: z.string(),
+        })
+        .refine((d) => d.password === d.confirmPassword, {
+          message: t("auth.passwordsDontMatch"),
+          path: ["confirmPassword"],
+        }),
+    [t],
+  );
+
   const {
     register: rf,
     handleSubmit,
@@ -53,13 +59,13 @@ export default function RegisterPage() {
 
   const onSubmit = async ({ confirmPassword, ...data }) => {
     try {
-      const res = await register(data).unwrap();
+      const res = await registerUser(data).unwrap();
       dispatch(setCredentials({ user: res.user, token: res.token }));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
-      toast.success("Account created! Welcome aboard.");
+      toast.success(t("auth.accountCreated"));
       router.push(redirectParam || "/");
     } catch (err) {
-      toast.error(err?.data?.message || "Registration failed");
+      toast.error(err?.data?.message || t("auth.registrationFailed"));
     }
   };
 
@@ -75,56 +81,56 @@ export default function RegisterPage() {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md rounded-lg border border-border bg-background p-8 shadow-card"
       >
-        <h1 className="font-heading text-2xl font-black">Create your account</h1>
+        <h1 className="font-heading text-2xl font-black">{t("auth.createYourAccount")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Join and get 10% off your first order.
+          {t("auth.joinDiscount")}
         </p>
 
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
           <Input
-            label="Name"
+            label={t("auth.fullNameLabel")}
             icon={UserIcon}
-            placeholder="Your name"
+            placeholder={t("auth.namePlaceholder")}
             error={errors.name?.message}
             {...rf("name")}
           />
           <Input
-            label="Email"
+            label={t("auth.emailAddress")}
             type="email"
             icon={Mail}
-            placeholder="you@example.com"
+            placeholder={t("auth.emailPlaceholder")}
             error={errors.email?.message}
             {...rf("email")}
           />
           <Input
-            label="Password"
+            label={t("auth.passwordLabel")}
             type="password"
             icon={Lock}
-            placeholder="At least 6 characters"
+            placeholder={t("auth.passwordPlaceholder")}
             error={errors.password?.message}
             {...rf("password")}
           />
           <Input
-            label="Confirm password"
+            label={t("auth.confirmPasswordLabel")}
             type="password"
             icon={Lock}
-            placeholder="Repeat password"
+            placeholder={t("auth.repeatPassword")}
             error={errors.confirmPassword?.message}
             {...rf("confirmPassword")}
           />
           <Button type="submit" loading={isLoading} size="lg" className="w-full">
             <UserPlus className="h-4 w-4" />
-            Create account
+            {t("auth.createAccount")}
           </Button>
         </form>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          Already have one?{" "}
+          {t("auth.alreadyHaveOne")}{" "}
           <Link
             href={redirectParam ? `/login?redirect=${encodeURIComponent(redirectParam)}` : "/login"}
             className="font-semibold text-accent hover:underline"
           >
-            Sign in
+            {t("auth.signIn")}
           </Link>
         </p>
       </motion.div>

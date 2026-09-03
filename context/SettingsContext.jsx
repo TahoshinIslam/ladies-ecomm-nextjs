@@ -2,13 +2,16 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
 } from "react";
 
-import { sessionCache, storage } from "../lib/utils.js";
+import { sessionCache } from "../lib/utils.js";
+import { formatBdt, formatMoney, usdToBdt } from "../lib/currency.js";
+import { useLocale } from "./LocaleProvider.jsx";
 
 const SettingsContext = createContext(null);
 
@@ -26,25 +29,8 @@ const baseUrl = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
   : "/api";
 
-const STORAGE_KEY = "ss:currency";
 const SETTINGS_CACHE_KEY = "ss:settings";
 const SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Decide which currency to show:
- * 1. Manual user override (localStorage) — wins.
- * 2. Browser locale — bn/bn-BD/etc → BDT, else USD.
- * 3. Server default fallback.
- */
-const detectCurrency = (serverDefault) => {
-  if (typeof window === "undefined") return serverDefault;
-  const stored = storage.get(STORAGE_KEY);
-  if (stored === "BDT" || stored === "USD") return stored;
-
-  const lang = (navigator.language || "").toLowerCase();
-  if (lang.startsWith("bn") || lang.includes("-bd")) return "BDT";
-  return "USD";
-};
 
 const getCachedSettings = () => {
   try {
@@ -105,9 +91,7 @@ export const SettingsProvider = ({ children }) => {
   const cached = getCachedSettings();
   const [settings, setSettings] = useState(cached || DEFAULTS);
   const [loaded, setLoaded] = useState(!!cached);
-  const [activeCurrency, setActiveCurrencyState] = useState(
-    detectCurrency(cached?.currency?.defaultDisplay || "USD"),
-  );
+  const { locale } = useLocale();
 
   // Fetch the public settings payload. Used both on initial mount and when
   // an admin saves changes (via the exposed `refresh()` below) so their own
@@ -119,10 +103,6 @@ export const SettingsProvider = ({ children }) => {
         if (d.success) {
           setSettings(d.settings);
           setCachedSettings(d.settings);
-          setActiveCurrencyState((cur) =>
-            // Don't override an explicit user pick when the server default changes.
-            storage.get(STORAGE_KEY) ? cur : detectCurrency(d.settings.currency.defaultDisplay),
-          );
           return d.settings;
         }
       })
@@ -146,18 +126,55 @@ export const SettingsProvider = ({ children }) => {
     applyBranding(settings.store);
   }, [settings.store?.name, settings.store?.faviconUrl]);
 
-  const setActiveCurrency = (currency) => {
-    if (currency !== "BDT" && currency !== "USD") return;
-    storage.set(STORAGE_KEY, currency);
-    setActiveCurrencyState(currency);
-  };
+  const rate = settings.currency?.usdToBdt;
+
+  // The free-shipping threshold, as a raw Taka number — or null if the
+  // admin hasn't configured one. Prefers the Bangladesh zone (this
+  // storefront is BDT-only and BD-shipping-only); an INTL zone's threshold
+  // (see models/settingsModel.js — real, admin-configurable, but never
+  // customer-facing as $) is converted to Taka right here, so every caller
+  // downstream always receives a plain BDT number and can never
+  // accidentally treat a raw USD amount as if it were already Taka. The
+  // real Settings model nests freeAbove inside each zone's tiers[] (e.g.
+  // "Inside Dhaka" vs "Outside Dhaka" can differ), so this picks the
+  // lowest threshold among a zone's tiers as the headline number — the
+  // easiest one to actually hit. Single source of truth for both
+  // freeShippingThreshold() (raw, for cart math) and freeShippingPitch()
+  // (formatted, for display) below, so the cart's progress bar and every
+  // other page's free-shipping copy can never drift apart from the real,
+  // admin-configured value.
+  //
+  // Plain closures (not `this`-based methods) so these stay callable after
+  // being destructured off the context value — e.g.
+  // `const { freeShippingPitch } = useSettings()` — without losing their
+  // binding the way `freeShippingPitch() { this.freeShippingThreshold() }`
+  // would.
+  const freeShippingThreshold = useCallback(() => {
+    const zones = settings.shippingZones || [];
+    const thresholdFor = (zone) => {
+      const withThreshold = (zone.tiers || []).filter((t) => t.freeAbove > 0);
+      if (!withThreshold.length) return null;
+      return Math.min(...withThreshold.map((t) => t.freeAbove));
+    };
+    const zone =
+      zones.find((z) => z.currency === "BDT" && thresholdFor(z)) ||
+      zones.find((z) => thresholdFor(z));
+    const amount = zone && thresholdFor(zone);
+    if (!zone || !amount) return null;
+    return { amount: zone.currency === "USD" ? usdToBdt(amount, rate) : amount };
+  }, [settings.shippingZones, rate]);
+
+  // Formatted free-shipping pitch, e.g. "৳২,০০০".
+  const freeShippingPitch = useCallback(() => {
+    const threshold = freeShippingThreshold();
+    if (!threshold) return null;
+    return formatBdt(threshold.amount, locale);
+  }, [freeShippingThreshold, locale]);
 
   const value = useMemo(
     () => ({
       ...settings,
       loaded,
-      activeCurrency,
-      setActiveCurrency,
       // Re-fetch /settings/public after an admin save so the open tab sees
       // the change without a full reload.
       refresh: () => {
@@ -165,50 +182,31 @@ export const SettingsProvider = ({ children }) => {
         return fetchSettings();
       },
       /**
-       * Format a USD-priced product into the active display currency.
+       * Format a raw, USD-denominated catalog price (Product.basePrice,
+       * variant.price, etc.) as Taka in the current UI language.
        */
-      formatPrice: (usdPrice) => {
-        const cur = activeCurrency;
-        const value =
-          cur === "BDT"
-            ? Math.round(Number(usdPrice) * settings.currency.usdToBdt)
-            : Number(usdPrice);
-        try {
-          return new Intl.NumberFormat(cur === "BDT" ? "en-BD" : "en-US", {
-            style: "currency",
-            currency: cur,
-            maximumFractionDigits: 0,
-          }).format(value || 0);
-        } catch {
-          return `${cur} ${value}`;
-        }
-      },
+      formatPrice: (rawUsdValue) => formatMoney(rawUsdValue, locale, rate),
       /**
-       * Find the free-shipping threshold for the customer's display currency.
-       * Returns a pre-formatted string like "$200" or "৳2,000", or null if
-       * the admin hasn't configured one.
+       * Convert a raw USD-denominated catalog price to a Taka number (not
+       * formatted) — the same conversion formatPrice() applies, exposed
+       * separately so callers doing math (cart subtotal vs. free-shipping
+       * threshold, etc.) stay in Taka throughout instead of comparing a raw
+       * USD number against a BDT threshold.
        */
-      freeShippingPitch: () => {
-        const zones = settings.shippingZones || [];
-        // Match by the customer's active display currency (BDT viewers see
-        // the BD threshold, USD viewers see the INTL threshold). Falls back
-        // to the first zone with a configured threshold.
-        const zone =
-          zones.find((z) => z.currency === activeCurrency && z.freeAbove) ||
-          zones.find((z) => z.freeAbove);
-        if (!zone || !zone.freeAbove) return null;
-        try {
-          return new Intl.NumberFormat(zone.currency === "BDT" ? "en-BD" : "en-US", {
-            style: "currency",
-            currency: zone.currency,
-            maximumFractionDigits: 0,
-          }).format(zone.freeAbove);
-        } catch {
-          return `${zone.currency} ${zone.freeAbove}`;
-        }
-      },
+      toBdt: (rawUsdValue) => usdToBdt(rawUsdValue, rate),
+      /**
+       * Format a value that's already in Taka (e.g. the output of toBdt(),
+       * or an order/checkout total from the API — those are pre-converted
+       * server-side, see orderService.js's toRegionCurrency) — unlike
+       * formatPrice(), this applies no conversion. Running an
+       * already-converted value back through the exchange rate would be a
+       * real double-conversion bug, not a display nuance.
+       */
+      formatBdt: (alreadyBdtValue) => formatBdt(alreadyBdtValue, locale),
+      freeShippingThreshold,
+      freeShippingPitch,
     }),
-    [settings, loaded, activeCurrency],
+    [settings, loaded, locale, rate, freeShippingThreshold, freeShippingPitch],
   );
 
   return (
@@ -224,15 +222,11 @@ export const useSettings = () => {
     return {
       ...DEFAULTS,
       loaded: false,
-      activeCurrency: "USD",
-      setActiveCurrency: () => {},
       refresh: async () => {},
-      formatPrice: (v) =>
-        new Intl.NumberFormat("en-US", {
-          style: "currency",
-          currency: "USD",
-          maximumFractionDigits: 0,
-        }).format(Number(v) || 0),
+      formatPrice: (v) => formatMoney(v, "bn-BD", DEFAULTS.currency.usdToBdt),
+      toBdt: (v) => usdToBdt(v, DEFAULTS.currency.usdToBdt),
+      formatBdt: (v) => formatBdt(v, "bn-BD"),
+      freeShippingThreshold: () => null,
       freeShippingPitch: () => null,
     };
   }

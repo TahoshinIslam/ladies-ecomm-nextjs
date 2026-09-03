@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { requireAdmin } from "../../../../lib/auth.js";
+import { requirePermission } from "../../../../lib/auth.js";
+import { PERMISSIONS } from "../../../../lib/permissions.js";
 import { updateCategory, deleteCategory } from "../../../../services/categoryService.js";
 import { withRoute } from "../../../../lib/http.js";
 
 export const PUT = withRoute(async (request, { params }) => {
-  await requireAdmin(request);
+  await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
   const { id } = await params;
   const body = await request.json();
   const category = await updateCategory(id, body);
@@ -13,7 +14,7 @@ export const PUT = withRoute(async (request, { params }) => {
 });
 
 export const DELETE = withRoute(async (request, { params }) => {
-  await requireAdmin(request);
+  await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
   const { id } = await params;
   await deleteCategory(id);
   return NextResponse.json({ success: true, message: "Category deleted" });

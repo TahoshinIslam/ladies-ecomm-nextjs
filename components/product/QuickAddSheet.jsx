@@ -7,43 +7,68 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { closeQuickAdd } from "../../store/uiSlice.js";
+import { closeQuickAdd, setCartOpen } from "../../store/uiSlice.js";
 import { useCart } from "../../hooks/useCart.js";
+import { useGetAttributesQuery } from "../../store/shopApi.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
-import { cn, resolveImage } from "../../lib/utils.js";
+import { useLocale } from "../../context/LocaleProvider.jsx";
+import { attrLabel as translateAttrLabel, attrValue as translateAttrValue, departmentName } from "../../lib/i18n/catalog.js";
+import {
+  cn,
+  resolveImage,
+  getVariantAxes,
+  getAxisOptions,
+  resolveVariant,
+  getDefaultVariantSelection,
+  repairVariantSelection,
+  resolveVariantPricing,
+} from "../../lib/utils.js";
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * The board's size picker, mounted once (like CartDrawer/SearchModal) and
- * opened by any ProductCard via uiSlice's quickAddProduct. Four states live
- * in the CTA alone: no size picked (disabled, "Select a size"), a size picked
- * ("Add to bag"), a size whose last pairs are going ("Add to bag" — the
- * urgency reads through the size button itself, not the CTA), and adding
- * (spinner, disabled, "Adding…").
+ * The board's variant picker, mounted once (like CartDrawer/SearchModal) and
+ * opened by any ProductCard via uiSlice's quickAddProduct. Resolves a real
+ * selectedVariant (color/size/fabric) the same way ProductDetailPage.jsx
+ * does — not a bare size string, which collapsed different-colored variants
+ * into indistinguishable buttons (see Phase 4 audit).
  */
 export default function QuickAddSheet() {
   const product = useSelector((s) => s.ui.quickAddProduct);
   const dispatch = useDispatch();
   const cart = useCart();
   const settings = useSettings();
+  const { t, locale } = useLocale();
   const panelRef = useRef(null);
-  const [selectedSize, setSelectedSize] = useState(null);
+  const [selection, setSelection] = useState({});
   const [adding, setAdding] = useState(false);
 
   const open = !!product;
+  const variants = product?.variants ?? [];
+  const axes = getVariantAxes(variants);
+  const { data: attrData } = useGetAttributesQuery(product?.topCategory, {
+    skip: !product?.topCategory,
+  });
+  const attrDefs = attrData?.attributes ?? [];
+  // The DB always stores these in English — translateAttrLabel/Value
+  // overlay a Bangla translation for every known seeded key/value (see
+  // lib/i18n/catalog.js), same fix as ProductDetailPage.jsx.
+  const attrLabel = (key) => translateAttrLabel(locale, key, attrDefs.find((d) => d.key === key)?.label);
+  const attrOptions = (key) =>
+    (attrDefs.find((d) => d.key === key)?.options ?? []).map((o) => ({
+      ...o,
+      label: translateAttrValue(locale, key, o.value, o.label),
+    }));
 
-  // Clear the picked size the moment the sheet closes, computed during
-  // render rather than in an effect (React's "adjust state on prop change"
-  // shape) — see the same pattern in SearchModal/ProductFinder.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (!open) {
-      setSelectedSize(null);
-      setAdding(false);
-    }
+  // Reseed the selection whenever the open product changes (a new product,
+  // or closing back to none) — React's "adjust state on prop change" shape,
+  // same pattern already used for the sheet's open/close transitions.
+  const [lastProductId, setLastProductId] = useState(product?._id ?? null);
+  if ((product?._id ?? null) !== lastProductId) {
+    setLastProductId(product?._id ?? null);
+    setSelection(product ? getDefaultVariantSelection(product.variants ?? []) : {});
+    setAdding(false);
   }
 
   useEffect(() => {
@@ -82,29 +107,37 @@ export default function QuickAddSheet() {
   if (!product) return null;
 
   const close = () => dispatch(closeQuickAdd());
-  // `variants` is the modest-fashion schema; `sizes` is the legacy
-  // mock-catalog shape.
-  const sizes = product.variants?.length
-    ? product.variants.map((v) => ({ size: v.attributes?.size || v.variantName, stock: v.stock }))
-    : product.sizes ?? [];
-  const stockFor = (size) => sizes.find((s) => s.size === size)?.stock ?? 0;
-  const chosenStock = selectedSize ? stockFor(selectedSize) : 0;
+  const selectedVariant = resolveVariant(variants, selection);
+  const pricing = resolveVariantPricing(product, selectedVariant);
+
+  const setAxisValue = (axis, value) => {
+    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }));
+  };
 
   const confirm = async () => {
-    if (!selectedSize || adding) return;
+    if (!selectedVariant || adding) return;
     setAdding(true);
     try {
-      await cart.addItem({ product, size: selectedSize, quantity: 1 });
-      toast.success(`Added ${product.brand?.name ?? ""} ${product.name} · ${selectedSize}`.trim());
+      await cart.addItem({ product, variant: selectedVariant, quantity: 1 });
+      toast.success(t("quickAddSheet.addedToBag", { name: product.name, variant: selectedVariant.variantName }).trim());
       close();
+      dispatch(setCartOpen(true));
     } catch (e) {
-      toast.error(e?.data?.message || "Could not add to your bag");
+      toast.error(e?.data?.message || t("quickAddSheet.addToBagFailed"));
     } finally {
       setAdding(false);
     }
   };
 
-  const cta = adding ? "Adding…" : selectedSize ? "Add to bag" : "Select a size";
+  const missingAxisLabel = axes.find((a) => !selection[a]);
+  const cta = adding
+    ? t("quickAddSheet.adding")
+    : !selectedVariant
+      ? t("quickAddSheet.selectOption", { option: (attrLabel(missingAxisLabel) || missingAxisLabel || "").toLowerCase() })
+      : pricing.stock <= 0
+        ? t("quickAddSheet.outOfStock")
+        : t("quickAddSheet.addToBag");
+  const canAdd = !!selectedVariant && pricing.stock > 0 && !adding;
 
   return (
     <AnimatePresence>
@@ -124,7 +157,7 @@ export default function QuickAddSheet() {
             ref={panelRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Choose a size"
+            aria-label={t("quickAddSheet.chooseOptions")}
             onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -135,12 +168,12 @@ export default function QuickAddSheet() {
             <div className="relative hidden min-h-[340px] bg-media sm:block">
               <div aria-hidden="true" className="absolute inset-0 hatch" />
               <div aria-hidden="true" className="absolute inset-0 glow" />
-              {product.images?.[0] ? (
+              {(selectedVariant?.images?.[0] || product.images?.[0]) ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
-                  src={resolveImage(product.images[0], 480)}
+                  src={resolveImage(selectedVariant?.images?.[0] || product.images[0], 480)}
                   alt=""
-                  className="relative h-full w-full object-contain p-8"
+                  className="relative h-full w-full object-cover"
                 />
               ) : (
                 <span className="absolute bottom-[18px] left-5 font-mono text-[10.5px] uppercase tracking-[0.1em] text-stone">
@@ -152,103 +185,99 @@ export default function QuickAddSheet() {
             <div className="p-7 sm:p-[30px]">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  {product.brand?.name && (
+                  {product.category?.name && (
                     <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-stone">
-                      {product.brand.name}
+                      {departmentName(locale, product.category.slug, product.category.name)}
                     </div>
                   )}
                   <h2 className="mt-2 text-[26px] font-semibold tracking-[-0.025em]">
                     {product.name}
                   </h2>
-                  <div className="mt-1.5 text-[14.5px] text-stone">
-                    {[product.colorway, product.colors && `${product.colors} colors`]
-                      .filter(Boolean)
-                      .join(" · ")}
+                  <div data-tabular className="mt-1.5 text-[16px] font-semibold text-ink">
+                    {settings.formatPrice(pricing.displayPrice)}
                   </div>
                 </div>
                 <button
                   onClick={close}
-                  aria-label="Close size selector"
+                  aria-label={t("quickAddSheet.closeOptions")}
                   className="grid h-10 w-10 flex-none place-items-center rounded-lg transition-colors hover:bg-wash focus-ring"
                 >
                   <X className="h-4 w-4" strokeWidth={1.8} />
                 </button>
               </div>
 
-              <div className="mt-[22px] flex items-baseline justify-between">
-                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
-                  Select size
-                </span>
-                <Link
-                  href="/size-guide"
-                  className="text-[13.5px] text-stone underline underline-offset-[3px] hover:text-ink"
-                >
-                  Size guide
-                </Link>
-              </div>
-
-              <div
-                role="group"
-                aria-label="Available sizes"
-                className="mt-3 grid grid-cols-5 gap-2"
-              >
-                {sizes.map((s) => {
-                  const stock = s.stock ?? 0;
-                  const out = stock <= 0;
-                  const low = !out && stock <= 2;
-                  const active = selectedSize === s.size;
-                  return (
-                    <button
-                      key={s.size}
-                      disabled={out}
-                      aria-pressed={active}
-                      onClick={() => setSelectedSize(s.size)}
-                      className={cn(
-                        "relative h-[46px] rounded-lg border text-sm font-medium transition-colors focus-ring",
-                        out
-                          ? "cursor-not-allowed border-line text-stone/50 line-through"
-                          : active
-                            ? "border-ink bg-ink text-canvas"
-                            : "border-line text-ink hover:border-ink",
-                      )}
-                      title={
-                        out
-                          ? `${s.size} — out of stock`
-                          : low
-                            ? `${s.size} — only ${stock} left`
-                            : s.size
-                      }
-                    >
-                      <span data-tabular>{s.size.replace(/^US\s*/i, "")}</span>
-                      {low && (
-                        <span
-                          aria-hidden="true"
+              {axes.map((axis) => (
+                <div key={axis} className="mt-[18px]">
+                  <div className="flex items-baseline justify-between">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                      {attrLabel(axis) || axis}
+                    </span>
+                    {axis === "size" && (
+                      <Link
+                        href="/size-guide"
+                        className="text-[13.5px] text-stone underline underline-offset-[3px] hover:text-ink"
+                      >
+                        {t("quickAddSheet.sizeGuide")}
+                      </Link>
+                    )}
+                  </div>
+                  <div
+                    role="group"
+                    aria-label={t("quickAddSheet.availableOption", { option: attrLabel(axis) || axis })}
+                    className="mt-3 grid grid-cols-5 gap-2"
+                  >
+                    {getAxisOptions(variants, axis, selection).map((opt) => {
+                      const low = !opt.disabled && (() => {
+                        const v = resolveVariant(variants, { ...selection, [axis]: opt.value });
+                        return v && v.stock > 0 && v.stock <= 2;
+                      })();
+                      const active = selection[axis] === opt.value;
+                      const label = attrOptions(axis).find((o) => o.value === opt.value)?.label || opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          disabled={opt.disabled}
+                          aria-pressed={active}
+                          onClick={() => setAxisValue(axis, opt.value)}
                           className={cn(
-                            "absolute right-1 top-1 h-1.5 w-1.5 rounded-full",
-                            active ? "bg-canvas" : "bg-verm",
+                            "relative h-[46px] rounded-lg border text-sm font-medium transition-colors focus-ring",
+                            opt.disabled
+                              ? "cursor-not-allowed border-line text-stone/50 line-through"
+                              : active
+                                ? "border-ink bg-ink text-canvas"
+                                : "border-line text-ink hover:border-ink",
                           )}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              {selectedSize && chosenStock > 0 && chosenStock <= 2 && (
+                          title={opt.disabled ? t("quickAddSheet.outOfStockOption", { label }) : label}
+                        >
+                          <span data-tabular>{label}</span>
+                          {low && (
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                "absolute right-1 top-1 h-1.5 w-1.5 rounded-full",
+                                active ? "bg-canvas" : "bg-verm",
+                              )}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {selectedVariant && pricing.stock > 0 && pricing.stock <= 2 && (
                 <p className="mt-2.5 text-[13px] text-verm">
-                  Only {chosenStock} left in this size
+                  {t("product.lowStock", { count: pricing.stock })}
                 </p>
               )}
 
-              <p className="mt-3.5 font-mono text-[10.5px] tracking-[0.06em] text-stone">
-                Availability shown when live inventory is connected
-              </p>
-
               <button
                 onClick={confirm}
-                disabled={!selectedSize || adding}
+                disabled={!canAdd}
                 className={cn(
                   "mt-[22px] flex h-[54px] w-full items-center justify-center gap-2 rounded-[9px] text-base font-semibold transition-colors active:scale-[0.99]",
-                  selectedSize && !adding
+                  canAdd
                     ? "bg-verm text-white hover:bg-ink hover:text-canvas"
                     : "cursor-not-allowed bg-media text-stone",
                 )}
@@ -261,7 +290,7 @@ export default function QuickAddSheet() {
                 onClick={close}
                 className="mt-3.5 block text-center text-sm text-stone underline underline-offset-[3px] hover:text-ink"
               >
-                View full details
+                {t("quickAddSheet.viewFullDetails")}
               </Link>
             </div>
           </motion.div>

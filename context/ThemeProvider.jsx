@@ -17,6 +17,7 @@ import { hydrateUi } from "../store/uiSlice.js";
 import { hydrateAuth } from "../store/authSlice.js";
 import { hydrateGuestCart } from "../store/guestCartSlice.js";
 import { SettingsProvider } from "./SettingsContext.jsx";
+import { LocaleProvider } from "./LocaleProvider.jsx";
 import { storage } from "../lib/utils.js";
 
 /**
@@ -133,25 +134,27 @@ function StorageHydrator() {
  * the toast portal. Mounted once from the root layout so every route below it
  * stays a Server Component by default.
  */
-export default function AppProviders({ initialTheme = "light", children }) {
+export default function AppProviders({ initialTheme = "light", initialLocale, children }) {
   return (
-    <ReduxProvider store={store}>
-      <StorageHydrator />
-      <ThemeController initialTheme={initialTheme}>
-        <SettingsProvider>{children}</SettingsProvider>
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              background: "var(--elev)",
-              color: "var(--ink)",
-              border: "1px solid var(--line)",
-              borderRadius: "12px",
-              boxShadow: "var(--shadow-soft)",
-            },
-          }}
-        />
-      </ThemeController>
-    </ReduxProvider>
+    <LocaleProvider initialLocale={initialLocale}>
+      <ReduxProvider store={store}>
+        <StorageHydrator />
+        <ThemeController initialTheme={initialTheme}>
+          <SettingsProvider>{children}</SettingsProvider>
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: "var(--elev)",
+                color: "var(--ink)",
+                border: "1px solid var(--line)",
+                borderRadius: "12px",
+                boxShadow: "var(--shadow-soft)",
+              },
+            }}
+          />
+        </ThemeController>
+      </ReduxProvider>
+    </LocaleProvider>
   );
 }

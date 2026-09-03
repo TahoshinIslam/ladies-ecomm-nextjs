@@ -1,5 +1,9 @@
 import mongoose from "mongoose";
 
+// Snapshot at order-creation time — mirrors the cart item shape from
+// Phase 5A (models/cartModel.js), so an order line stays correct even if
+// the product/variant changes later. `variantId` (not a bare size string)
+// is what makes this line uniquely identifiable, same reasoning as cart.
 const orderItemSchema = new mongoose.Schema(
   {
     product: {
@@ -7,17 +11,25 @@ const orderItemSchema = new mongoose.Schema(
       ref: "products",
       required: [true, "Product is required"],
     },
-    name: { type: String, required: true },
-    image: { type: String, required: true },
-    size: { type: String, required: [true, "Size is required"] },
+    // Not a `ref` — variants are subdocuments inside Product.variants, not
+    // a top-level collection.
+    variantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: [true, "Variant is required"],
+    },
     quantity: {
       type: Number,
       required: [true, "Quantity is required"],
       min: [1, "Quantity must be at least 1"],
     },
-    price: {
-      type: Number,
-      required: [true, "Price is required"],
+    snapshot: {
+      name: { type: String, required: [true, "Product name is required"] },
+      sku: { type: String, default: "" },
+      color: { type: String, default: "" },
+      size: { type: String, default: "" },
+      fabric: { type: String, default: "" },
+      price: { type: Number, required: [true, "Price is required"] },
+      image: { type: String, default: "" },
     },
   },
   { _id: false },
@@ -89,5 +101,7 @@ const orderSchema = new mongoose.Schema(
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ user: 1, createdAt: -1 });
 
-const Order = mongoose.model("orders", orderSchema);
+// Guards against Next.js dev's hot-reload re-executing this module and
+// trying to re-register an already-compiled model.
+const Order = mongoose.models.orders || mongoose.model("orders", orderSchema);
 export default Order;
