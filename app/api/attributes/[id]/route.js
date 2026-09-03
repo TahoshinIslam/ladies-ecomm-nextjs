@@ -1,0 +1,20 @@
+import { NextResponse } from "next/server";
+
+import { requireAdmin } from "../../../../lib/auth.js";
+import { updateAttribute, deleteAttribute } from "../../../../services/attributeService.js";
+import { withRoute } from "../../../../lib/http.js";
+
+export const PUT = withRoute(async (request, { params }) => {
+  await requireAdmin(request);
+  const { id } = await params;
+  const body = await request.json();
+  const attribute = await updateAttribute(id, body);
+  return NextResponse.json({ success: true, attribute });
+});
+
+export const DELETE = withRoute(async (request, { params }) => {
+  await requireAdmin(request);
+  const { id } = await params;
+  await deleteAttribute(id);
+  return NextResponse.json({ success: true, message: "Attribute deleted" });
+});

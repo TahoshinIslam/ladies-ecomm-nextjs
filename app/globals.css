@@ -1,26 +1,402 @@
 @import "tailwindcss";
 
+/* Theme is driven by [data-theme] on <html> so it can be set from a cookie on
+   the server and toggled instantly on the client — no flash, no media query. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------------------------------------------------------------------------
+   Kinetic Editorial — raw palette
+   Source of truth for both themes. Utilities below reference these by var(),
+   so a [data-theme] swap re-themes the whole app without recompiling.
+--------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --canvas: #f3f0e8;
+  --surface: #fffdf8;
+  --elev: #ffffff;
+  --ink: #101012;
+  --stone: #67645e;
+  --line: #d8d3c9;
+  --media: #e9e6de;
+  --verm: #ff3d21;
+  --lime: #d4ff45;
+  --coral: #ffd9d1;
+  --lav: #ded9ff;
+
+  --stripe: rgba(16, 16, 18, 0.06);
+  --wash: rgba(16, 16, 18, 0.035);
+  --hair: rgba(16, 16, 18, 0.12);
+
+  --scrim: linear-gradient(
+    180deg,
+    rgba(243, 240, 232, 0) 0%,
+    rgba(243, 240, 232, 0.92) 78%
+  );
+  --contact: radial-gradient(
+    ellipse 50% 16% at 50% 96%,
+    rgba(16, 16, 18, 0.22),
+    rgba(16, 16, 18, 0) 70%
+  );
+  --glow: radial-gradient(
+    120% 90% at 62% 24%,
+    rgba(255, 255, 255, 0.85),
+    rgba(233, 230, 222, 0) 62%
+  );
+
+  --shadow-soft: 0 30px 70px -30px rgba(16, 16, 18, 0.3);
+  --shadow-hover: 0 40px 90px -34px rgba(16, 16, 18, 0.38);
+  --shadow-card: 0 1px 2px rgba(16, 16, 18, 0.05), 0 8px 24px -16px rgba(16, 16, 18, 0.25);
+  --shadow-sheet: 0 -10px 44px -14px rgba(16, 16, 18, 0.24);
+
+  /* Feedback colors — not in the reference board, tuned to sit beside --verm */
+  --danger: #d92d20;
+  --success: #12805c;
+  --warning: #b25e09;
+
+  --ease-in: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.7, 0, 0.84, 0);
 }
 
+[data-theme="dark"] {
+  --canvas: #0b0b0d;
+  --surface: #141416;
+  --elev: #1b1b1f;
+  --ink: #f5f2ea;
+  --stone: #a9a59c;
+  --line: #2c2c31;
+  --media: #191a1d;
+  --coral: #4a2e28;
+  --lav: #2e2b45;
+
+  --stripe: rgba(245, 242, 234, 0.07);
+  --wash: rgba(245, 242, 234, 0.04);
+  --hair: rgba(245, 242, 234, 0.14);
+
+  --scrim: linear-gradient(
+    180deg,
+    rgba(11, 11, 13, 0) 0%,
+    rgba(11, 11, 13, 0.94) 76%
+  );
+  --contact: radial-gradient(
+    ellipse 52% 15% at 50% 96%,
+    rgba(0, 0, 0, 0.7),
+    rgba(0, 0, 0, 0) 72%
+  );
+  --glow: radial-gradient(
+    120% 90% at 62% 22%,
+    rgba(255, 255, 255, 0.1),
+    rgba(25, 26, 29, 0) 60%
+  );
+
+  --shadow-soft: 0 30px 80px -28px rgba(0, 0, 0, 0.75);
+  --shadow-hover: 0 40px 96px -30px rgba(0, 0, 0, 0.85);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px -16px rgba(0, 0, 0, 0.7);
+  --shadow-sheet: 0 -10px 50px -12px rgba(0, 0, 0, 0.7);
+
+  --danger: #f0574a;
+  --success: #3fbf95;
+  --warning: #e0952f;
+}
+
+/* ---------------------------------------------------------------------------
+   Tailwind theme
+   `inline` keeps the var() reference in the generated utility rather than
+   resolving it at build time — required for runtime [data-theme] swapping.
+
+   Two naming layers, deliberately:
+     · editorial  (canvas/ink/stone/verm…) — reach for these in new markup
+     · semantic   (background/foreground/primary…) — the vocabulary the
+       existing components were already written against, remapped onto the
+       new palette so they restyle without a find-and-replace.
+--------------------------------------------------------------------------- */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-elev: var(--elev);
+  --color-ink: var(--ink);
+  --color-stone: var(--stone);
+  --color-line: var(--line);
+  --color-media: var(--media);
+  --color-verm: var(--verm);
+  --color-lime: var(--lime);
+  --color-coral: var(--coral);
+  --color-lav: var(--lav);
+  --color-wash: var(--wash);
+  --color-hair: var(--hair);
+
+  --color-background: var(--surface);
+  --color-foreground: var(--ink);
+  --color-card: var(--elev);
+  --color-muted: var(--media);
+  --color-muted-foreground: var(--stone);
+  --color-border: var(--line);
+  --color-ring: var(--verm);
+
+  --color-primary: var(--ink);
+  --color-primary-foreground: var(--canvas);
+  --color-accent: var(--verm);
+  --color-accent-foreground: #ffffff;
+
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --font-sans: var(--font-instrument-sans), -apple-system, "Helvetica Neue",
+    Helvetica, Arial, sans-serif;
+  --font-serif: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-hover: var(--shadow-hover);
+  --shadow-card: var(--shadow-card);
+  --shadow-sheet: var(--shadow-sheet);
+
+  --ease-kinetic: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-lace: lace 0.9s var(--ease-in) forwards;
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  --animate-rise: rise 0.26s var(--ease-in) both;
+  --animate-step: step 0.42s var(--ease-in);
+  --animate-pop: pop 0.28s var(--ease-in);
+  --animate-sheetin: sheetin 0.32s var(--ease-in);
+  --animate-slidein: slidein 0.32s var(--ease-in);
+  --animate-fade: fade 0.18s linear;
+  --animate-drift: drift 38s linear infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes lace {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes step {
+  0% {
+    opacity: 0;
+    transform: translateX(34px);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(-4px);
+  }
+  100% {
+    transform: none;
+  }
+}
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(0.82);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes sheetin {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes slidein {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ---------------------------------------------------------------------------
+   Utilities
+--------------------------------------------------------------------------- */
+
+/* The reference board focuses with a 2px vermillion ring, offset 3px. */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--verm);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+}
+
+/* Diagonal hatch used behind every media placeholder on the board. */
+@utility hatch {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--stripe) 0 1px,
+    transparent 1px 10px
+  );
+}
+
+@utility glow {
+  background-image: var(--glow);
+}
+
+/* Soft ellipse under a cutout product shot, so it sits on the surface. */
+@utility contact-shadow {
+  background-image: var(--contact);
+}
+
+@utility scrim {
+  background-image: var(--scrim);
+}
+
+/* Horizontal rails on the board hide their scrollbar but stay scrollable. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* The board's page shell: 1480px, with padding that opens up with the viewport. */
+@utility container-x {
+  width: 100%;
+  max-width: 1480px;
+  margin-inline: auto;
+  padding-inline: clamp(20px, 4vw, 56px);
+}
+
+/* Headings are the sans at tight tracking; the serif is an accent, applied
+   per-instance with `font-serif italic`, never as the default heading face. */
+@utility font-heading {
+  font-family: var(--font-sans);
+  letter-spacing: -0.03em;
+}
+
+/* Loading placeholder — a sweep across the media plate, 1.4s, off if reduced. */
+@utility skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--media);
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--elev) 55%, transparent) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.4s linear infinite;
+  }
+}
+
+/* Editorial eyebrow: mono, uppercase, wide tracking. Used ~20x on the board. */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--stone);
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: var(--verm);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--verm);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  /* Numeric UI (prices, quantities, totals) should not jitter as values change. */
+  [data-tabular] {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }
