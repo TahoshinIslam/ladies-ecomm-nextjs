@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { toast } from "sonner";
 
-import { selectAuthToken, selectCurrentUser } from "../store/authSlice.js";
+import { selectCurrentUser } from "../store/authSlice.js";
 import { shopApi } from "../store/shopApi.js";
 
 // Every type here needs a table to live-refresh (TAGS_BY_TYPE). Only the
@@ -44,14 +44,15 @@ const TAGS_BY_TYPE = {
  */
 export function useAdminEventStream() {
   const user = useSelector(selectCurrentUser);
-  const token = useSelector(selectAuthToken);
   const dispatch = useDispatch();
   const isStaff = user && ["admin", "employee"].includes(user.role);
 
   useEffect(() => {
-    if (!isStaff || !token) return;
+    if (!isStaff) return;
 
-    const source = new EventSource(`/api/admin/events?token=${encodeURIComponent(token)}`);
+    // Same-origin session cookie is sent automatically by EventSource — no
+    // token in the URL (Phase 2: the old ?token=<jwt> workaround is gone).
+    const source = new EventSource(`/api/admin/events`);
     const handleEvent = (e) => {
       let payload;
       try {
@@ -78,5 +79,5 @@ export function useAdminEventStream() {
       source.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isStaff, token]);
+  }, [isStaff]);
 }

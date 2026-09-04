@@ -35,7 +35,6 @@ const output = logPaths.map((p) => readFileSync(p, "utf8")).join("\n");
 const CRITICAL_SKIP_MARKERS = [
   "MONGO_URI_TEST not configured",
   "MONGO_URI_TEST not reachable",
-  "JWT_SECRET not set in the test environment",
   "module mocking unavailable",
   "test server not reachable",
 ];

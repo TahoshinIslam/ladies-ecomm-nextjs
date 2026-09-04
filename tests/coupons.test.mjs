@@ -21,14 +21,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
 describe("Coupon validation and claim behavior", { skip: !canRun && reason }, () => {
   let validatePOST, createOrderPOST;
@@ -67,7 +67,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
     const req = requestAs({
       method: "POST",
       url: "http://test/api/coupons/validate",
-      token: user ? signTestToken(user._id) : undefined,
+      session: user ? await createTestSession(user._id) : undefined,
       body: { code, subtotal },
     });
     const res = await validatePOST(req);
@@ -342,12 +342,12 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
     const coupon = await makeCoupon({ usageLimit: 1, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0 });
     try {
       const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
-      const place = (buyer) =>
+      const place = async (buyer) =>
         createOrderPOST(
           requestAs({
             method: "POST",
             url: "http://test/api/orders",
-            token: signTestToken(buyer._id),
+            session: await createTestSession(buyer._id),
             body: {
               items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
               shippingAddress: address,

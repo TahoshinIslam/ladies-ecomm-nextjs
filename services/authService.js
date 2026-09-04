@@ -2,7 +2,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 
 import User from "../models/userModel.js";
-import generateToken from "../utlis/generateToken.js";
+import { createSession, revokeSessionByToken } from "../lib/session.js";
 import { HttpError } from "../lib/http.js";
 
 // Dummy hash used to equalize login timing on non-existent users, so an
@@ -25,7 +25,14 @@ const publicUser = (user) => ({
   permissions: user.permissions || [],
 });
 
-export async function register({ name, email, password }) {
+// `presentedSessionToken` — the raw session token the caller presented, if
+// any (e.g. an anonymous visitor who happened to be carrying a stale/guest
+// session cookie when they submit the register form). Revoked before
+// issuing a new one, per the Phase 2 spec: authenticating must never let a
+// pre-existing cookie value continue to be valid afterward (session
+// fixation) — either it becomes the new session (never, here — a fresh
+// session is always minted) or it's dead.
+export async function register({ name, email, password }, presentedSessionToken, meta) {
   if (!name || !email || !password) {
     throw new HttpError(400, "Name, email, and password are required");
   }
@@ -36,12 +43,14 @@ export async function register({ name, email, password }) {
   }
 
   const user = await User.create({ name, email, password });
-  const token = generateToken(user._id);
 
-  return { token, user: publicUser(user) };
+  if (presentedSessionToken) await revokeSessionByToken(presentedSessionToken);
+  const { rawToken, rawCsrfToken } = await createSession(user._id, meta);
+
+  return { rawToken, rawCsrfToken, user: publicUser(user) };
 }
 
-export async function login({ email, password }) {
+export async function login({ email, password }, presentedSessionToken, meta) {
   const user = await User.findOne({ email }).select("+password +loginAttempts +lockUntil");
 
   if (!user) {
@@ -63,9 +72,11 @@ export async function login({ email, password }) {
   }
 
   await user.resetLoginAttempts();
-  const token = generateToken(user._id);
 
-  return { token, user: publicUser(user) };
+  if (presentedSessionToken) await revokeSessionByToken(presentedSessionToken);
+  const { rawToken, rawCsrfToken } = await createSession(user._id, meta);
+
+  return { rawToken, rawCsrfToken, user: publicUser(user) };
 }
 
 export function getMe(user) {

@@ -19,14 +19,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
 describe("GET /api/orders — limit parameter (documented, not fixed)", { skip: !canRun && reason }, () => {
   let GET;
@@ -73,7 +73,7 @@ describe("GET /api/orders — limit parameter (documented, not fixed)", { skip: 
     const params = new URLSearchParams({ search: buyer.name });
     if (limitParam !== undefined) params.set("limit", String(limitParam));
     const url = `http://test/api/orders?${params.toString()}`;
-    const req = requestAs({ method: "GET", url, token: signTestToken(admin._id) });
+    const req = requestAs({ method: "GET", url, session: await createTestSession(admin._id) });
     const res = await GET(req);
     const json = await res.json();
     return { res, json };

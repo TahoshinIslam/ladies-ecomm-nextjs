@@ -192,6 +192,7 @@ async function main() {
     const port = await findFreePort();
     log(`using free port ${port}`);
 
+    const baseUrl = `http://127.0.0.1:${port}`;
     const logFd = openSync(serverLog, "a");
     serverProcess = spawn("node_modules/.bin/next", ["start", "-p", String(port)], {
       cwd: ROOT,
@@ -200,11 +201,16 @@ async function main() {
         PORT: String(port),
         ALLOW_TEST_DB_OVERRIDE: "true",
         TEST_SERVER_MONGO_URI: process.env.MONGO_URI_TEST,
+        // The port is only known once findFreePort() resolves, so it can't
+        // come from a static .env.test value — set it explicitly here so
+        // this harness exercises the SAME explicit-APP_ORIGIN code path a
+        // real deployment uses (lib/csrf.js's canonicalOrigin()), not just
+        // the same-origin fallback meant for local single-process dev.
+        APP_ORIGIN: baseUrl,
       },
       stdio: ["ignore", logFd, logFd],
     });
 
-    const baseUrl = `http://127.0.0.1:${port}`;
     const readyTimeoutMs = 45_000;
     const start = Date.now();
     let ready = false;

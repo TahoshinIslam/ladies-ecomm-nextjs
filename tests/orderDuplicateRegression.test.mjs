@@ -33,14 +33,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
 describe("POST /api/orders — duplicate-submission characterization (known defect)", { skip: !canRun && reason }, () => {
   let POST;
@@ -94,11 +94,11 @@ describe("POST /api/orders — duplicate-submission characterization (known defe
     },
   });
 
-  const fireCreateOrder = () => {
+  const fireCreateOrder = async () => {
     const req = requestAs({
       method: "POST",
       url: "http://test/api/orders",
-      token: signTestToken(user._id),
+      session: await createTestSession(user._id),
       body: orderPayload(),
     });
     return POST(req);
@@ -158,11 +158,11 @@ describe("POST /api/orders — duplicate-submission characterization (known defe
     // tests/orderTransactions.test.mjs's own promo test.
     const cheapProduct = await createTestProduct({ stock: 10, basePrice: 1 });
     try {
-      const req = () =>
+      const buildReq = async () =>
         requestAs({
           method: "POST",
           url: "http://test/api/orders",
-          token: signTestToken(fresh._id),
+          session: await createTestSession(fresh._id),
           body: {
             items: [{ productId: cheapProduct._id.toString(), variantId: cheapProduct.variants[0]._id.toString(), quantity: 1 }],
             shippingAddress: {
@@ -171,7 +171,12 @@ describe("POST /api/orders — duplicate-submission characterization (known defe
           },
         });
 
-      const [res1, res2] = await Promise.all([POST(req()), POST(req())]);
+      // Both requests (including their own session creation) are fully
+      // built BEFORE either POST() call starts, so Promise.all below fires
+      // them genuinely concurrently — building would otherwise serialize
+      // ahead of the actual order-creation race this test exists to prove.
+      const [req1, req2] = await Promise.all([buildReq(), buildReq()]);
+      const [res1, res2] = await Promise.all([POST(req1), POST(req2)]);
       const [json1, json2] = await Promise.all([res1.json(), res2.json()]);
 
       assert.equal(res1.status, 201);

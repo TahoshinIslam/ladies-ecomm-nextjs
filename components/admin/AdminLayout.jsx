@@ -30,12 +30,16 @@ const COLLAPSE_KEY = "tahos:adminSidebarCollapsed";
  * horizontally; the sidebar's own width is fixed and never contributes to
  * that overflow.
  *
- * This app has no NextAuth/server session — auth is a Redux-held bearer
- * token hydrated from localStorage (see store/authSlice.js's
- * hydrateAuth()), so the gates below are unchanged from before this
- * refactor: they're what actually keeps someone off a page they can't
- * use. A hidden sidebar link never was, and still isn't, a security
- * boundary — findRequiredPermission()'s page-level check below is.
+ * Phase 2: auth is a real server-side session behind an HttpOnly cookie —
+ * Redux only mirrors the sanitized user object GET /api/users/me returns
+ * (see hooks/useAuthBoot.js), it never holds a credential. The gates below
+ * are still what actually keeps someone off a page they can't use, exactly
+ * as before this migration: they're a UX convenience, not the real
+ * boundary. A hidden sidebar link never was, and still isn't, a security
+ * boundary — findRequiredPermission()'s page-level check below isn't
+ * either, for that matter; the real boundary is every Route Handler's own
+ * requireUser()/requireAdmin()/requirePermission() call, enforced
+ * server-side regardless of what this component renders.
  */
 export default function AdminLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -54,9 +58,10 @@ export default function AdminLayout({ children }) {
   const shouldReduceMotion = useReducedMotion();
   useAdminEventStream();
 
-  // Redirect only after the localStorage session check has actually run —
-  // `hydrated` is what tells "genuinely logged out" apart from "haven't
-  // checked yet," so a real admin never gets bounced on a hard refresh.
+  // Redirect only after GET /api/users/me has actually resolved — `hydrated`
+  // (state.auth.status !== "loading") is what tells "genuinely logged out"
+  // apart from "haven't checked yet," so a real admin never gets bounced on
+  // a hard refresh while that request is still in flight.
   useEffect(() => {
     if (hydrated && !user) {
       router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
@@ -83,7 +88,7 @@ export default function AdminLayout({ children }) {
     });
   };
 
-  // Still reading localStorage — render nothing conclusive either way yet.
+  // GET /api/users/me hasn't resolved yet — render nothing conclusive either way.
   if (!hydrated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/20">

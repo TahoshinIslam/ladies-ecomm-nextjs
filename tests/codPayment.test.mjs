@@ -11,14 +11,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
 describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order/[orderId]", { skip: !canRun && reason }, () => {
   let codPOST, orderPaymentGET, createOrderPOST;
@@ -44,7 +44,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: {
           items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
           shippingAddress: {
@@ -63,7 +63,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const order = await makeOrder(buyer, product);
       assert.equal(order.status, "pending");
 
-      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, token: signTestToken(buyer._id) });
+      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, session: await createTestSession(buyer._id) });
       const res = await codPOST(req, { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 200);
       const json = await res.json();
@@ -83,7 +83,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     const product = await createTestProduct({ stock: 10 });
     try {
       const order = await makeOrder(buyer, product);
-      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, token: signTestToken(stranger._id) });
+      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, session: await createTestSession(stranger._id) });
       const res = await codPOST(req, { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 403);
 
@@ -102,7 +102,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     const buyer = await createTestUser({ role: "customer" });
     try {
       const fakeId = "507f1f77bcf86cd799439011";
-      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${fakeId}`, token: signTestToken(buyer._id) });
+      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${fakeId}`, session: await createTestSession(buyer._id) });
       const res = await codPOST(req, { params: Promise.resolve({ orderId: fakeId }) });
       assert.equal(res.status, 404);
     } finally {
@@ -117,7 +117,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const order = await makeOrder(buyer, product);
       await Order.updateOne({ _id: order._id }, { $set: { status: "delivered" } });
 
-      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, token: signTestToken(buyer._id) });
+      const req = requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, session: await createTestSession(buyer._id) });
       const res = await codPOST(req, { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(
         res.status,
@@ -139,8 +139,8 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     const product = await createTestProduct({ stock: 10 });
     try {
       const order = await makeOrder(buyer, product);
-      const fire = () =>
-        codPOST(requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, token: signTestToken(buyer._id) }), {
+      const fire = async () =>
+        codPOST(requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, session: await createTestSession(buyer._id) }), {
           params: Promise.resolve({ orderId: order._id }),
         });
 
@@ -164,22 +164,22 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     const product = await createTestProduct({ stock: 10 });
     try {
       const order = await makeOrder(buyer, product);
-      await codPOST(requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, token: signTestToken(buyer._id) }), {
+      await codPOST(requestAs({ method: "POST", url: `http://test/api/payments/cod/${order._id}`, session: await createTestSession(buyer._id) }), {
         params: Promise.resolve({ orderId: order._id }),
       });
 
-      const ownerRes = await orderPaymentGET(requestAs({ method: "GET", url: `http://test/api/payments/order/${order._id}`, token: signTestToken(buyer._id) }), {
+      const ownerRes = await orderPaymentGET(requestAs({ method: "GET", url: `http://test/api/payments/order/${order._id}`, session: await createTestSession(buyer._id) }), {
         params: Promise.resolve({ orderId: order._id }),
       });
       assert.equal(ownerRes.status, 200);
 
       const strangerRes = await orderPaymentGET(
-        requestAs({ method: "GET", url: `http://test/api/payments/order/${order._id}`, token: signTestToken(stranger._id) }),
+        requestAs({ method: "GET", url: `http://test/api/payments/order/${order._id}`, session: await createTestSession(stranger._id) }),
         { params: Promise.resolve({ orderId: order._id }) },
       );
       assert.equal(strangerRes.status, 403);
 
-      const adminRes = await orderPaymentGET(requestAs({ method: "GET", url: `http://test/api/payments/order/${order._id}`, token: signTestToken(admin._id) }), {
+      const adminRes = await orderPaymentGET(requestAs({ method: "GET", url: `http://test/api/payments/order/${order._id}`, session: await createTestSession(admin._id) }), {
         params: Promise.resolve({ orderId: order._id }),
       });
       assert.equal(adminRes.status, 200);

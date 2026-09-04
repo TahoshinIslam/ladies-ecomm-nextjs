@@ -11,7 +11,7 @@
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, signTestToken, createTestUser } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, sessionCookieHeader, createTestUser } from "./helpers/testDb.mjs";
 
 let moduleMockUsable = false;
 try {
@@ -29,10 +29,10 @@ if (moduleMockUsable) {
   });
 }
 
-const canRun = moduleMockUsable && dbReady && !!process.env.JWT_SECRET;
+const canRun = moduleMockUsable && dbReady;
 const reason = !moduleMockUsable
   ? "node:test module mocking unavailable — run with --experimental-test-module-mocks"
-  : skipReason || (dbReady ? undefined : "JWT_SECRET not set");
+  : skipReason;
 
 describe("POST /api/upload — Cloudinary unconfigured (503, no credential/stack leakage)", { skip: !canRun && reason }, () => {
   let uploadPOST, User;
@@ -53,9 +53,10 @@ describe("POST /api/upload — Cloudinary unconfigured (503, no credential/stack
     try {
       const fd = new FormData();
       fd.append("image", new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" }));
+      const session = await createTestSession(admin._id);
       const req = new Request("http://test/api/upload", {
         method: "POST",
-        headers: { authorization: `Bearer ${signTestToken(admin._id)}` },
+        headers: { cookie: sessionCookieHeader(session), "x-csrf-token": session.rawCsrfToken, origin: "http://test" },
         body: fd,
       });
       const res = await uploadPOST(req);

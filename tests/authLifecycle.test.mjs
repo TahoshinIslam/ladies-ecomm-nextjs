@@ -1,34 +1,30 @@
-// Phase 1: authentication lifecycle — the CURRENT bearer-token system only.
-// No migration to cookie-based auth happens here or is implied by these
-// tests passing; they exist to lock in today's behavior as a regression
-// baseline before any future auth work touches it.
+// Phase 2: authentication lifecycle — opaque, server-side session cookies,
+// replacing the Phase 1 bearer-JWT baseline this file used to test.
 //
 // Traced directly from services/authService.js (register/login),
-// lib/auth.js (getSessionUser/requireUser/requirePermission),
-// lib/http.js (JWT error → HTTP status mapping), and
-// models/userModel.js (lockout fields/methods) — see the Phase 0B/0
-// investigation for the file:line citations behind each assertion below.
+// lib/auth.js (getSessionUser/requireUser/requirePermission), lib/session.js
+// (create/validate/revoke), and models/userModel.js (lockout fields/methods).
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import jwt from "jsonwebtoken";
 
 import {
   dbReady,
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
+  sessionCookieHeader,
   requestAs,
   createTestUser,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
-describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !canRun && reason }, () => {
+describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && reason }, () => {
   let registerPOST, loginPOST, mePOST_GET, couponsGET;
-  let User;
+  let User, Session;
 
   before(async () => {
     await connectTestDb();
@@ -37,15 +33,23 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
     ({ GET: mePOST_GET } = await import("../app/api/users/me/route.js"));
     ({ GET: couponsGET } = await import("../app/api/coupons/route.js"));
     ({ default: User } = await import("../models/userModel.js"));
+    ({ default: Session } = await import("../models/sessionModel.js"));
   });
 
   after(async () => {
     await disconnectTestDb();
   });
 
+  function sessionCookieFromResponse(res) {
+    // NextResponse can carry multiple Set-Cookie headers; getSetCookie()
+    // (standard Fetch API on Headers) returns them all individually —
+    // res.headers.get("set-cookie") would incorrectly join them with a comma.
+    return res.headers.getSetCookie().find((c) => c.startsWith("tahos_session="));
+  }
+
   // ===================== Registration & login =====================
 
-  test("successful registration returns a token and a public (password-free) user object", async () => {
+  test("successful registration sets a session cookie, no token in the response body", async () => {
     const email = `authtest-${Date.now()}@example.invalid`;
     const req = requestAs({
       method: "POST",
@@ -55,13 +59,15 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
     const res = await registerPOST(req);
     assert.equal(res.status, 201);
     const json = await res.json();
-    assert.ok(json.token);
+    assert.equal(json.token, undefined, "no raw session token in the JSON body");
+    assert.equal(json.rawToken, undefined);
     assert.equal(json.user.email, email);
     assert.equal(json.user.password, undefined, "password must never appear in the response");
+    assert.ok(sessionCookieFromResponse(res), "Set-Cookie: tahos_session=... must be present");
     await User.deleteOne({ email });
   });
 
-  test("successful login returns a token", async () => {
+  test("successful login sets a session cookie, no token in the response body", async () => {
     const user = await createTestUser({ role: "customer" });
     try {
       // createTestUser sets the raw password "TestPassword123!" before the
@@ -70,14 +76,26 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
       const res = await loginPOST(req);
       assert.equal(res.status, 200);
       const json = await res.json();
-      assert.ok(json.token);
+      assert.equal(json.token, undefined);
       assert.equal(json.user.email, user.email);
+      assert.ok(sessionCookieFromResponse(res));
+
+      // The database stores only the hash — never the raw cookie value.
+      const setCookie = sessionCookieFromResponse(res);
+      const rawValue = setCookie.split(";")[0].split("=")[1];
+      // tokenHash is select:false by default (models/sessionModel.js) — a
+      // normal find() without this explicit opt-in confirms the field-level
+      // protection itself, tested separately in tests/session.test.mjs;
+      // here we opt in specifically to verify the STORED VALUE is a hash.
+      const stored = await Session.findOne({ user: user._id }).select("+tokenHash");
+      assert.notEqual(stored.tokenHash, rawValue, "the stored value must be a hash, not the raw token itself");
+      assert.equal(stored.tokenHash.length, 64, "SHA-256 hex digest is 64 characters");
     } finally {
       await User.deleteOne({ _id: user._id });
     }
   });
 
-  test("incorrect password is rejected with a generic message (401)", async () => {
+  test("incorrect password is rejected with a generic message (401), no cookie set", async () => {
     const user = await createTestUser({ role: "customer" });
     try {
       const req = requestAs({ method: "POST", url: "http://test/api/users/login", body: { email: user.email, password: "WrongPassword!" } });
@@ -85,6 +103,7 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
       assert.equal(res.status, 401);
       const json = await res.json();
       assert.equal(json.message, "Invalid credentials");
+      assert.equal(sessionCookieFromResponse(res), undefined);
     } finally {
       await User.deleteOne({ _id: user._id });
     }
@@ -102,7 +121,7 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
     assert.equal(json.message, "Invalid credentials", "must be indistinguishable from the wrong-password case");
   });
 
-  // ===================== Account lockout =====================
+  // ===================== Account lockout (unchanged by the session migration) =====================
 
   test("5 failed attempts locks the account; the 6th attempt is rejected with 423 even with the CORRECT password", async () => {
     const user = await createTestUser({ role: "customer" });
@@ -146,43 +165,70 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
     }
   });
 
-  // ===================== Token validation =====================
+  // ===================== Session cookie validation =====================
+  // Cookie-attribute assertions (HttpOnly/Secure/SameSite/__Host-/etc.) and
+  // the full CSRF matrix live in tests/session.test.mjs — this section
+  // covers the authentication OUTCOME (401 vs 200) for each session state.
 
-  test("missing token is rejected (401) on a protected route", async () => {
+  test("missing session cookie is rejected (401) on a protected route", async () => {
     const req = requestAs({ method: "GET", url: "http://test/api/users/me" });
     const res = await mePOST_GET(req);
     assert.equal(res.status, 401);
   });
 
-  test("malformed token is rejected (401), mapped from JsonWebTokenError", async () => {
-    const req = requestAs({ method: "GET", url: "http://test/api/users/me", token: "not-a-real-jwt-at-all" });
+  test("malformed/garbage session cookie value is rejected (401) — no bearer-header fallback exists", async () => {
+    const req = new Request("http://test/api/users/me", { headers: { cookie: "tahos_session=not-a-real-session-token-at-all" } });
     const res = await mePOST_GET(req);
     assert.equal(res.status, 401);
-    const json = await res.json();
-    assert.equal(json.message, "Invalid token");
+
+    // Confirms there is no bearer-header fallback: an Authorization header
+    // alone, with no cookie, must also be rejected.
+    const bearerOnlyReq = new Request("http://test/api/users/me", { headers: { authorization: "Bearer some-old-jwt-shaped-string" } });
+    const bearerRes = await mePOST_GET(bearerOnlyReq);
+    assert.equal(bearerRes.status, 401, "confirmed: Authorization headers are never read anymore");
   });
 
-  test("expired token is rejected (401), mapped from TokenExpiredError with a distinct message", async () => {
+  test("expired session is rejected (401)", async () => {
     const user = await createTestUser({ role: "customer" });
     try {
-      const expiredToken = jwt.sign({ id: user._id.toString() }, process.env.JWT_SECRET, { expiresIn: -10 });
-      const req = requestAs({ method: "GET", url: "http://test/api/users/me", token: expiredToken });
+      const session = await createTestSession(user._id);
+      // Force the stored session into the past directly — lib/session.js's
+      // validateSessionToken() must catch this itself, not rely on the TTL
+      // index's own background sweep (which runs on its own ~60s cycle).
+      const crypto = await import("node:crypto");
+      const tokenHash = crypto.createHash("sha256").update(session.rawToken).digest("hex");
+      await Session.updateOne({ tokenHash }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+
+      const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
-      const json = await res.json();
-      assert.equal(json.message, "Session expired, please log in again");
     } finally {
       await User.deleteOne({ _id: user._id });
     }
   });
 
-  test("a token signed for a user that no longer exists is rejected (401) — no server-side session to fall back on", async () => {
+  test("revoked session is rejected (401)", async () => {
     const user = await createTestUser({ role: "customer" });
-    const token = signTestToken(user._id);
-    await User.deleteOne({ _id: user._id }); // delete AFTER signing — the token itself is still validly signed
-    const req = requestAs({ method: "GET", url: "http://test/api/users/me", token });
+    try {
+      const { revokeSessionByToken } = await import("../lib/session.js");
+      const session = await createTestSession(user._id);
+      await revokeSessionByToken(session.rawToken);
+
+      const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
+      const res = await mePOST_GET(req);
+      assert.equal(res.status, 401);
+    } finally {
+      await User.deleteOne({ _id: user._id });
+    }
+  });
+
+  test("a session for a user that no longer exists is rejected (401) — no server-side session to fall back on", async () => {
+    const user = await createTestUser({ role: "customer" });
+    const session = await createTestSession(user._id);
+    await User.deleteOne({ _id: user._id }); // delete AFTER creating the session — the session record itself is still otherwise valid
+    const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
     const res = await mePOST_GET(req);
-    assert.equal(res.status, 401, "lib/auth.js's userFromToken() returns null when User.findById() finds nothing, even for a well-formed, unexpired, correctly-signed token");
+    assert.equal(res.status, 401, "lib/session.js's validateSessionToken() returns null when the referenced user no longer exists, even for an otherwise well-formed, unexpired, unrevoked session");
   });
 
   // ===================== Authorization on a permission-gated route =====================
@@ -192,7 +238,7 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
   test("admin permission enforcement: an admin (bypasses granular permissions entirely) can access a permission-gated route", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", token: signTestToken(admin._id) });
+      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(admin._id) });
       const res = await couponsGET(req);
       assert.equal(res.status, 200);
     } finally {
@@ -204,10 +250,10 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
     const withPerm = await createTestUser({ role: "employee", permissions: ["coupons.manage"] });
     const withoutPerm = await createTestUser({ role: "employee", permissions: [] });
     try {
-      const okReq = requestAs({ method: "GET", url: "http://test/api/coupons", token: signTestToken(withPerm._id) });
+      const okReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withPerm._id) });
       assert.equal((await couponsGET(okReq)).status, 200);
 
-      const forbiddenReq = requestAs({ method: "GET", url: "http://test/api/coupons", token: signTestToken(withoutPerm._id) });
+      const forbiddenReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withoutPerm._id) });
       assert.equal((await couponsGET(forbiddenReq)).status, 403);
     } finally {
       await User.deleteMany({ _id: { $in: [withPerm._id, withoutPerm._id] } });
@@ -217,7 +263,7 @@ describe("Authentication lifecycle (bearer-token system, unchanged)", { skip: !c
   test("a normal customer is rejected (403) from a permission-gated admin endpoint, regardless of the permission checked", async () => {
     const customer = await createTestUser({ role: "customer" });
     try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", token: signTestToken(customer._id) });
+      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(customer._id) });
       const res = await couponsGET(req);
       assert.equal(res.status, 403);
     } finally {

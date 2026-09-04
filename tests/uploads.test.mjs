@@ -12,7 +12,7 @@
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, signTestToken, createTestUser } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, sessionCookieHeader, createTestUser } from "./helpers/testDb.mjs";
 
 let moduleMockUsable = false;
 try {
@@ -55,10 +55,10 @@ if (moduleMockUsable) {
   });
 }
 
-const canRun = moduleMockUsable && dbReady && !!process.env.JWT_SECRET;
+const canRun = moduleMockUsable && dbReady;
 const reason = !moduleMockUsable
   ? "node:test module mocking unavailable — run with --experimental-test-module-mocks"
-  : skipReason || (dbReady ? undefined : "JWT_SECRET not set");
+  : skipReason;
 
 describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked)", { skip: !canRun && reason }, () => {
   let uploadPOST, uploadMultiplePOST, User;
@@ -77,11 +77,15 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
 
   const png = (bytes = 1024) => new Uint8Array(bytes).fill(1);
 
-  function uploadRequest({ token, fileName = "photo.png", mimeType = "image/png", bytes = png(), field = "image", noFile = false } = {}) {
+  function uploadRequest({ session, fileName = "photo.png", mimeType = "image/png", bytes = png(), field = "image", noFile = false } = {}) {
     const fd = new FormData();
     if (!noFile) fd.append(field, new File([bytes], fileName, { type: mimeType }));
     const headers = {};
-    if (token) headers.authorization = `Bearer ${token}`;
+    const cookie = sessionCookieHeader(session);
+    if (cookie) headers.cookie = cookie;
+    if (session) headers["x-csrf-token"] = session.rawCsrfToken;
+    // Origin validation (lib/csrf.js Layer 1) applies to this POST too.
+    headers.origin = "http://test";
     return new Request("http://test/api/upload", { method: "POST", headers, body: fd });
   }
 
@@ -93,7 +97,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("authenticated customer WITHOUT admin role is rejected (403)", async () => {
     const customer = await createTestUser({ role: "customer" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(customer._id) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(customer._id) }));
       assert.equal(res.status, 403);
     } finally {
       await User.deleteOne({ _id: customer._id });
@@ -103,7 +107,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("a properly authorized admin succeeds (201) with the mocked Cloudinary URL", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id) }));
       assert.equal(res.status, 201);
       const json = await res.json();
       assert.equal(json.url, "https://res.cloudinary.com/mock/image/upload/mock-id.png");
@@ -115,7 +119,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("missing file is rejected (400)", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), noFile: true }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), noFile: true }));
       assert.equal(res.status, 400);
       const json = await res.json();
       assert.match(json.message, /No file uploaded/i);
@@ -127,7 +131,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("DOCUMENTED LIMITATION: a zero-byte file passes validation (no minimum-size check exists)", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), bytes: new Uint8Array(0) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: new Uint8Array(0) }));
       assert.equal(
         res.status,
         201,
@@ -141,7 +145,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("a valid allowed MIME type (image/webp) succeeds", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), mimeType: "image/webp", fileName: "photo.webp" }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/webp", fileName: "photo.webp" }));
       assert.equal(res.status, 201);
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -151,7 +155,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("an unsupported MIME type is rejected (415)", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), mimeType: "application/pdf", fileName: "doc.pdf" }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "application/pdf", fileName: "doc.pdf" }));
       assert.equal(res.status, 415);
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -161,7 +165,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("a file exceeding 5 MB is rejected (413)", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), bytes: png(5 * 1024 * 1024 + 1) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: png(5 * 1024 * 1024 + 1) }));
       assert.equal(res.status, 413);
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -171,7 +175,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("a file at EXACTLY the 5 MB boundary is accepted — the check is strictly-greater-than, not greater-or-equal", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), bytes: png(5 * 1024 * 1024) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: png(5 * 1024 * 1024) }));
       assert.equal(res.status, 201, "services/uploadService.js: `file.size > MAX_BYTES` — exactly MAX_BYTES is not rejected");
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -184,9 +188,10 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const fd = new FormData();
       fd.append("images", new File([png()], "a.png", { type: "image/png" }));
       fd.append("images", new File([png()], "b.jpg", { type: "image/jpeg" }));
+      const session = await createTestSession(admin._id);
       const req = new Request("http://test/api/upload/multiple", {
         method: "POST",
-        headers: { authorization: `Bearer ${signTestToken(admin._id)}` },
+        headers: { cookie: sessionCookieHeader(session), "x-csrf-token": session.rawCsrfToken, origin: "http://test" },
         body: fd,
       });
       const res = await uploadMultiplePOST(req);
@@ -203,9 +208,10 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     try {
       const fd = new FormData();
       for (let i = 0; i < 9; i++) fd.append("images", new File([png()], `f${i}.png`, { type: "image/png" }));
+      const session = await createTestSession(admin._id);
       const req = new Request("http://test/api/upload/multiple", {
         method: "POST",
-        headers: { authorization: `Bearer ${signTestToken(admin._id)}` },
+        headers: { cookie: sessionCookieHeader(session), "x-csrf-token": session.rawCsrfToken, origin: "http://test" },
         body: fd,
       });
       const res = await uploadMultiplePOST(req);
@@ -219,7 +225,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     const admin = await createTestUser({ role: "admin" });
     cloudinaryMockState.shouldReject = true;
     try {
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id) }));
       assert.equal(res.status, 502, "services/uploadService.js's formatCloudinaryError() maps an unrecognized gateway error to 502");
       const json = await res.json();
       assert.match(json.message, /Cloudinary upload failed/i);
@@ -233,11 +239,11 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("safe generic error response contract: no stack trace, no filesystem path, consistent JSON shape on both success and failure", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const okRes = await uploadPOST(uploadRequest({ token: signTestToken(admin._id) }));
+      const okRes = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id) }));
       const okJson = await okRes.json();
       assert.equal(okJson.success, true);
 
-      const badRes = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), mimeType: "text/plain", fileName: "x.txt" }));
+      const badRes = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "text/plain", fileName: "x.txt" }));
       const badJson = await badRes.json();
       assert.equal(badJson.success, false);
       assert.ok(!("stack" in badJson));
@@ -251,7 +257,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     const admin = await createTestUser({ role: "admin" });
     try {
       const res = await uploadPOST(
-        uploadRequest({ token: signTestToken(admin._id), fileName: '../../etc/passwd<script>alert(1)</script>.png' }),
+        uploadRequest({ session: await createTestSession(admin._id), fileName: '../../etc/passwd<script>alert(1)</script>.png' }),
       );
       // services/uploadService.js's validateAndBuffer() never reads or
       // validates `file.name` at all — only `file.type` and `file.size`.
@@ -274,7 +280,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       // FormData part) against ALLOWED_TYPES — it never inspects the
       // buffer's actual magic bytes/signature.
       const notReallyAnImage = new TextEncoder().encode("this is not image data at all");
-      const res = await uploadPOST(uploadRequest({ token: signTestToken(admin._id), bytes: notReallyAnImage, mimeType: "image/png" }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: notReallyAnImage, mimeType: "image/png" }));
       assert.equal(
         res.status,
         201,

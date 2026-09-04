@@ -1,26 +1,31 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSelector } from "react-redux";
 import { toast } from "sonner";
 import { Save, Plus, Trash2, Gift, Image as ImageIcon, Upload, X } from "lucide-react";
 import { useSettings } from "../../context/SettingsContext.jsx";
-import { selectAuthToken } from "../../store/authSlice.js";
+import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
   : "/api";
 
-// Auth is Bearer-token only — the JWT lives in the auth slice and must be
-// sent on every admin request (see backend utils/generateToken.js). CSRF was
-// removed backend-side (app.js) once there were no auth cookies to protect.
-const authHeaders = (token) =>
-  token ? { Authorization: `Bearer ${token}` } : {};
+// Phase 2: auth is the HttpOnly session cookie, sent automatically by
+// `credentials: "include"` below — nothing to attach by hand anymore. The
+// CSRF cookie is deliberately NOT HttpOnly (see lib/cookies.js), so it can
+// be read here and echoed back as a header on unsafe (PUT/POST) requests —
+// same pattern store/apiSlice.js uses for the rest of the app.
+const csrfHeaders = () => {
+  if (typeof document === "undefined") return {};
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE_NAME}=([^;]*)`));
+  const token = match ? decodeURIComponent(match[1]) : null;
+  return token ? { "X-CSRF-Token": token } : {};
+};
 
 // Upload a single image file via the existing /api/upload endpoint and
 // return the resulting Cloudinary URL. We POST FormData so multer sees it —
 // no Content-Type header, the browser sets the multipart boundary itself.
-const uploadImage = async (file, token, folder = "branding") => {
+const uploadImage = async (file, folder = "branding") => {
   const fd = new FormData();
   fd.append("image", file);
   const res = await fetch(
@@ -28,7 +33,7 @@ const uploadImage = async (file, token, folder = "branding") => {
     {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeaders(token) },
+      headers: { ...csrfHeaders() },
       body: fd,
     },
   );
@@ -91,7 +96,7 @@ const Toggle = ({ checked, onChange, label, help }) => (
  * admin paste a URL OR upload a file. The "uploading" state is local so
  * each picker spins independently when fired in parallel.
  */
-const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }) => {
+const ImagePicker = ({ value, onChange, label, help, accept = "image/*" }) => {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
 
@@ -100,7 +105,7 @@ const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }
     if (!file) return;
     setUploading(true);
     try {
-      const url = await uploadImage(file, token, "branding");
+      const url = await uploadImage(file, "branding");
       onChange(url);
       toast.success(`${label} uploaded`);
     } catch (err) {
@@ -167,7 +172,6 @@ const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }
 };
 
 export default function SettingsPage() {
-  const token = useSelector(selectAuthToken);
   const [settings, setSettings] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -178,7 +182,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`${baseUrl}/settings`, {
         credentials: "include",
-        headers: { Accept: "application/json", ...authHeaders(token) },
+        headers: { Accept: "application/json" },
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d.success) {
@@ -190,7 +194,7 @@ export default function SettingsPage() {
       setLoadError(msg);
       toast.error(msg);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     // loadSettings() is also wired directly to the retry button's onClick
@@ -287,7 +291,7 @@ export default function SettingsPage() {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...authHeaders(token),
+          ...csrfHeaders(),
         },
         body: JSON.stringify({
           store: settings.store,
@@ -361,21 +365,18 @@ export default function SettingsPage() {
           help="Shown in the site header. Recommended ~200×60px PNG/SVG."
           value={settings.store.logoUrl}
           onChange={(v) => update("store.logoUrl", v)}
-          token={token}
         />
         <ImagePicker
           label="Logo (dark mode)"
           help="Optional. Used when the site is in dark mode. Falls back to the regular logo if blank."
           value={settings.store.logoDarkUrl}
           onChange={(v) => update("store.logoDarkUrl", v)}
-          token={token}
         />
         <ImagePicker
           label="Favicon"
           help="Shown in browser tabs and bookmarks. Recommended 32×32 or 64×64 PNG/ICO."
           value={settings.store.faviconUrl}
           onChange={(v) => update("store.faviconUrl", v)}
-          token={token}
           accept="image/png,image/x-icon,image/svg+xml,image/jpeg,image/webp"
         />
       </Section>

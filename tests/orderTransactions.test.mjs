@@ -20,14 +20,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
 describe("Order transactions: creation, stock, cart, promo, cancellation, ownership", { skip: !canRun && reason }, () => {
   let createOrderPOST, getOrderGET, cancelOrderPOST;
@@ -78,7 +78,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: {
           items: [
             { productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 2 },
@@ -108,7 +108,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: {
           items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 1, price: 1 }],
           shippingAddress: address(),
@@ -136,7 +136,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 3 }], shippingAddress: address() },
       });
       const res = await createOrderPOST(req);
@@ -154,7 +154,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 999 }], shippingAddress: address() },
       });
       const res = await createOrderPOST(req);
@@ -181,7 +181,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: {
           items: [
             { productId: productA._id.toString(), variantId, quantity: 6 },
@@ -215,7 +215,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 1 }], shippingAddress: address() },
       });
       const res = await createOrderPOST(req);
@@ -236,7 +236,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(buyer._id),
+        session: await createTestSession(buyer._id),
         body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 999 }], shippingAddress: address() },
       });
       const res = await createOrderPOST(req);
@@ -263,12 +263,12 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
     settings.promotions.firstOrderFreeShipping = true;
     await settings.save();
     try {
-      const place = () =>
+      const place = async () =>
         createOrderPOST(
           requestAs({
             method: "POST",
             url: "http://test/api/orders",
-            token: signTestToken(buyer._id),
+            session: await createTestSession(buyer._id),
             body: { items: [{ productId: cheapProduct._id.toString(), variantId: cheapProduct.variants[0]._id.toString(), quantity: 1 }], shippingAddress: address() },
           }),
         );
@@ -295,7 +295,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
           requestAs({
             method: "POST",
             url: "http://test/api/orders",
-            token: signTestToken(buyer._id),
+            session: await createTestSession(buyer._id),
             body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 4 }], shippingAddress: address() },
           }),
         )
@@ -303,7 +303,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const afterOrder = await Product.findById(productA._id);
       assert.equal(afterOrder.variants[0].stock, 6, "10 - 4");
 
-      const cancelReq = requestAs({ method: "POST", url: `http://test/api/orders/${created.order._id}/cancel`, token: signTestToken(buyer._id) });
+      const cancelReq = requestAs({ method: "POST", url: `http://test/api/orders/${created.order._id}/cancel`, session: await createTestSession(buyer._id) });
       const cancelRes = await cancelOrderPOST(cancelReq, { params: Promise.resolve({ id: created.order._id }) });
       assert.equal(cancelRes.status, 200);
 
@@ -322,14 +322,14 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
           requestAs({
             method: "POST",
             url: "http://test/api/orders",
-            token: signTestToken(buyer._id),
+            session: await createTestSession(buyer._id),
             body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 2 }], shippingAddress: address() },
           }),
         )
       ).json();
 
-      const cancelOnce = () =>
-        cancelOrderPOST(requestAs({ method: "POST", url: `http://test/api/orders/${created.order._id}/cancel`, token: signTestToken(buyer._id) }), {
+      const cancelOnce = async () =>
+        cancelOrderPOST(requestAs({ method: "POST", url: `http://test/api/orders/${created.order._id}/cancel`, session: await createTestSession(buyer._id) }), {
           params: Promise.resolve({ id: created.order._id }),
         });
 
@@ -354,24 +354,24 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
           requestAs({
             method: "POST",
             url: "http://test/api/orders",
-            token: signTestToken(buyer._id),
+            session: await createTestSession(buyer._id),
             body: { items: [{ productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 1 }], shippingAddress: address() },
           }),
         )
       ).json();
       const orderId = created.order._id;
 
-      const ownerRes = await getOrderGET(requestAs({ method: "GET", url: `http://test/api/orders/${orderId}`, token: signTestToken(buyer._id) }), {
+      const ownerRes = await getOrderGET(requestAs({ method: "GET", url: `http://test/api/orders/${orderId}`, session: await createTestSession(buyer._id) }), {
         params: Promise.resolve({ id: orderId }),
       });
       assert.equal(ownerRes.status, 200);
 
-      const strangerRes = await getOrderGET(requestAs({ method: "GET", url: `http://test/api/orders/${orderId}`, token: signTestToken(stranger._id) }), {
+      const strangerRes = await getOrderGET(requestAs({ method: "GET", url: `http://test/api/orders/${orderId}`, session: await createTestSession(stranger._id) }), {
         params: Promise.resolve({ id: orderId }),
       });
       assert.equal(strangerRes.status, 403);
 
-      const adminRes = await getOrderGET(requestAs({ method: "GET", url: `http://test/api/orders/${orderId}`, token: signTestToken(admin._id) }), {
+      const adminRes = await getOrderGET(requestAs({ method: "GET", url: `http://test/api/orders/${orderId}`, session: await createTestSession(admin._id) }), {
         params: Promise.resolve({ id: orderId }),
       });
       assert.equal(adminRes.status, 200);

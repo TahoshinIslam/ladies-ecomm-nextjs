@@ -1,4 +1,4 @@
-import { getSessionUserFromQuery } from "../../../../../lib/auth.js";
+import { requireUser } from "../../../../../lib/auth.js";
 import { HttpError, withRoute } from "../../../../../lib/http.js";
 import { eventBus, orderChannel } from "../../../../../lib/events.js";
 import Order from "../../../../../models/orderModel.js";
@@ -14,12 +14,14 @@ const sseLine = (event, data) => encoder.encode(`event: ${event}\ndata: ${JSON.s
 // Server-sent events for one order's status — the customer's order-success
 // and order-detail pages subscribe here so a status change made in admin
 // reaches them immediately instead of waiting for a manual refresh.
-// EventSource can't send the Authorization header, so auth travels as
-// ?token= (see getSessionUserFromQuery) — everything else in this app stays
-// header-only.
+//
+// Phase 2: authenticates via the same-origin session cookie — EventSource
+// sends cookies automatically same-origin, so the old ?token=<jwt>
+// workaround (needed only because EventSource can't set a custom
+// Authorization header) no longer exists. Ownership is still checked
+// below before the stream opens.
 export const GET = withRoute(async (request, { params }) => {
-  const user = await getSessionUserFromQuery(request);
-  if (!user) throw new HttpError(401, "Not authorized, no token");
+  const user = await requireUser(request);
 
   const { id } = await params;
   const order = await Order.findById(id).select("user").lean();

@@ -53,7 +53,11 @@ export default function LoginPage() {
   const onSubmit = async (data) => {
     try {
       const res = await login(data).unwrap();
-      dispatch(setCredentials({ user: res.user, token: res.token }));
+      // Phase 2: no token in the response body — the server already set
+      // the session cookie on this same response before the client sees
+      // it, so the cart-merge mutation just below authenticates via the
+      // cookie automatically.
+      dispatch(setCredentials(res.user));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
       toast.success(t("auth.welcomeBackName", { name: res.user.name.split(" ")[0] }));
       const isAdmin = res.user?.role === "admin";

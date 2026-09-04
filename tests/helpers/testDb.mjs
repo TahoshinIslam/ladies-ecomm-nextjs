@@ -18,7 +18,6 @@
 //     safe outside of a real Next.js request lifecycle.
 
 import crypto from "node:crypto";
-import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 
 export const dbReady = process.env.NODE_ENV === "test" && !!process.env.MONGO_URI_TEST;
@@ -64,24 +63,59 @@ export async function disconnectTestDb() {
   connectPromise = undefined;
 }
 
-// A JWT_SECRET must exist for lib/auth.js's userFromToken() to verify
-// anything. Tests never invent their own secret — they rely on whatever
-// the test environment has configured (.env.test), exactly like production
-// code does, so a signing/verification mismatch here would be a real bug,
-// not a test-only shortcut.
-export function signTestToken(userId) {
-  if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET not set in the test environment");
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: "1h" });
+// Phase 2: creates a REAL session via lib/session.js — the same function
+// login/register use — against the test database, and returns the raw
+// {rawToken, rawCsrfToken} pair a real client would receive via Set-Cookie.
+// Deliberately not a shortcut/mock: this exercises the actual hashing,
+// expiry, and storage logic every real session goes through, not a
+// reimplementation of it.
+export async function createTestSession(userId) {
+  const { createSession } = await import("../../lib/session.js");
+  return createSession(userId, { userAgent: "phase2-test-suite" });
 }
 
-export function requestAs({ method = "GET", url, token, body } = {}) {
+// Builds the `Cookie` header a browser would send for a given session —
+// shared by requestAs() below and any test file that needs to construct a
+// Request by hand (e.g. tests/uploads.test.mjs's multipart/form-data
+// requests, which can't go through requestAs()'s JSON-body shape).
+export function sessionCookieHeader(session) {
+  if (!session) return null;
+  return `tahos_session=${session.rawToken}; tahos_csrf=${session.rawCsrfToken}`;
+}
+
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * `session` is the {rawToken, rawCsrfToken} object from createTestSession()
+ * (or undefined/null for an unauthenticated request). For unsafe methods,
+ * the X-CSRF-Token header is attached automatically from the session's own
+ * CSRF value, matching what store/apiSlice.js's real client code does —
+ * pass `omitCsrfHeader: true` to deliberately test the CSRF-rejection path
+ * instead. `originOverride` lets a test simulate a cross-origin request by
+ * setting a different Origin header than the request's own URL.
+ */
+export function requestAs({ method = "GET", url, session, body, omitCsrfHeader = false, originOverride, signal } = {}) {
   const headers = new Headers();
-  if (token) headers.set("authorization", `Bearer ${token}`);
+  const cookie = sessionCookieHeader(session);
+  if (cookie) headers.set("cookie", cookie);
   if (body !== undefined) headers.set("content-type", "application/json");
+  if (session && UNSAFE_METHODS.has(method) && !omitCsrfHeader) {
+    headers.set("x-csrf-token", session.rawCsrfToken);
+  }
+  // lib/csrf.js's Origin-validation Layer 1 needs an Origin (or
+  // Sec-Fetch-Site) header on unsafe requests to pass — a real browser
+  // always sends one for a same-origin fetch/XHR. Defaults to matching the
+  // request's own URL (same-origin), which is what canonicalOrigin()'s
+  // no-APP_ORIGIN-configured fallback also expects in this test
+  // environment (see lib/csrf.js).
+  if (UNSAFE_METHODS.has(method)) {
+    headers.set("origin", originOverride ?? new URL(url).origin);
+  }
   return new Request(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
 }
 

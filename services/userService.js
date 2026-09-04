@@ -4,6 +4,7 @@ import User from "../models/userModel.js";
 import { sendEmail, buildPasswordResetEmail } from "../utlis/sendEmail.js";
 import { HttpError } from "../lib/http.js";
 import { PERMISSIONS } from "../lib/permissions.js";
+import { revokeAllSessionsForUser } from "../lib/session.js";
 
 // ========== SELF-SERVICE ==========
 
@@ -89,6 +90,12 @@ export async function resetPassword(token, password) {
   user.loginAttempts = 0;
   user.lockUntil = undefined;
   await user.save();
+
+  // Every session this user had — on any device, any browser — must stop
+  // working the moment their password changes via reset. A previously
+  // issued session cookie is rejected the next time it's used (see
+  // lib/session.js's validateSessionToken, which checks revokedAt).
+  await revokeAllSessionsForUser(user._id);
 
   return { message: "Password updated. Please log in." };
 }

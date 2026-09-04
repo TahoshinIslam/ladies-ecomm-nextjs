@@ -19,14 +19,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
-  signTestToken,
+  createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
 } from "./helpers/testDb.mjs";
 
-const canRun = dbReady && !!process.env.JWT_SECRET;
-const reason = skipReason || (canRun ? undefined : "JWT_SECRET not set in the test environment");
+const canRun = dbReady;
+const reason = skipReason;
 
 describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { skip: !canRun && reason }, () => {
   let loginPOST, registerPOST, ordersPOST, orderGET, reviewsPUT, couponsGET;
@@ -56,9 +56,13 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
   }
 
   test("malformed JSON body -> caught, not an unhandled crash", async () => {
+    // Origin must match, or Phase 2's Layer 1 CSRF/Origin check (applied to
+    // every unsafe request, including this public auth endpoint — see
+    // lib/http.js's withRoute()) rejects the request with 403 before the
+    // handler ever calls request.json() at all.
     const req = new Request("http://test/api/users/login", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "http://test" },
       body: "{not valid json,,,",
     });
     const res = await loginPOST(req);
@@ -74,7 +78,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
   test("invalid ObjectId (malformed) -> 404, not 500 (CastError+kind=='ObjectId' mapping)", async () => {
     const user = await createTestUser();
     try {
-      const req = requestAs({ method: "GET", url: "http://test/api/orders/not-a-valid-id", token: signTestToken(user._id) });
+      const req = requestAs({ method: "GET", url: "http://test/api/orders/not-a-valid-id", session: await createTestSession(user._id) });
       const res = await orderGET(req, { params: Promise.resolve({ id: "not-a-valid-id" }) });
       assert.equal(res.status, 404);
       const json = await res.json();
@@ -89,7 +93,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     const user = await createTestUser();
     try {
       const fakeId = "507f1f77bcf86cd799439011";
-      const req = requestAs({ method: "GET", url: `http://test/api/orders/${fakeId}`, token: signTestToken(user._id) });
+      const req = requestAs({ method: "GET", url: `http://test/api/orders/${fakeId}`, session: await createTestSession(user._id) });
       const res = await orderGET(req, { params: Promise.resolve({ id: fakeId }) });
       assert.equal(res.status, 404);
       const json = await res.json();
@@ -116,7 +120,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(user._id),
+        session: await createTestSession(user._id),
         body: {
           items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: "not-a-number" }],
           shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
@@ -184,7 +188,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
   test("authenticated but unauthorized (forbidden) -> 403, consistent shape", async () => {
     const customer = await createTestUser({ role: "customer" });
     try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", token: signTestToken(customer._id) });
+      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(customer._id) });
       const res = await couponsGET(req);
       assert.equal(res.status, 403);
       const json = await res.json();
@@ -202,7 +206,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const req = requestAs({
         method: "POST",
         url: "http://test/api/orders",
-        token: signTestToken(user._id),
+        session: await createTestSession(user._id),
         body: {
           items: [
             { productId: product._id.toString(), variantId, quantity: 4 },
@@ -254,17 +258,17 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     assert.equal(json.message, rawMessage, "CONFIRMED: the raw thrown Error's .message reaches the client unmodified on an unmapped 500 — this is not sanitized to a generic string");
   });
 
-  test("JWT error (malformed token) -> 401, consistent shape (see tests/authLifecycle.test.mjs for the full token-lifecycle matrix)", async () => {
-    const req = requestAs({ method: "GET", url: "http://test/api/coupons", token: "not-a-real-jwt" });
+  test("malformed session cookie -> 401, consistent shape (see tests/authLifecycle.test.mjs and tests/session.test.mjs for the full session-lifecycle matrix)", async () => {
+    const req = new Request("http://test/api/coupons", { headers: { cookie: "tahos_session=not-a-real-session-token" } });
     const res = await couponsGET(req);
     assert.equal(res.status, 401);
     const json = await res.json();
     assertErrorShape(json);
-    assert.equal(json.message, "Invalid token");
+    assert.equal(json.message, "Not authorized, no session");
   });
 
   test("no database-connection detail (Mongo URI, host, port) ever appears in an error response", async () => {
-    const req = requestAs({ method: "GET", url: "http://test/api/orders/not-a-valid-id", token: signTestToken((await createTestUser())._id) });
+    const req = requestAs({ method: "GET", url: "http://test/api/orders/not-a-valid-id", session: await createTestSession((await createTestUser())._id) });
     const res = await orderGET(req, { params: Promise.resolve({ id: "not-a-valid-id" }) });
     const json = await res.json();
     assert.ok(!/mongodb(\+srv)?:\/\//i.test(json.message), "no connection string in the error message");

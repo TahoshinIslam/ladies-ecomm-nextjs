@@ -1,5 +1,5 @@
-import { getSessionUserFromQuery } from "../../../../lib/auth.js";
-import { HttpError, withRoute } from "../../../../lib/http.js";
+import { requireStaff } from "../../../../lib/auth.js";
+import { withRoute } from "../../../../lib/http.js";
 import { eventBus, ADMIN_CHANNEL } from "../../../../lib/events.js";
 
 // Route Handlers can be statically evaluated/buffered by default; an SSE
@@ -15,10 +15,15 @@ const sseLine = (event, data) => encoder.encode(`event: ${event}\ndata: ${JSON.s
 // learned about on its next 30s poll. Any admin/employee can subscribe;
 // this isn't gated by a specific permission (see requireStaff) since it's
 // general team awareness, not a protected admin action.
+//
+// Phase 2: authenticates via the same-origin session cookie, same as every
+// other route — EventSource sends cookies automatically for same-origin
+// requests, so the old ?token=<jwt> workaround (needed because EventSource
+// can't set a custom Authorization header) no longer exists. The 401/403
+// checks below run BEFORE the stream opens, so an unauthorized request
+// never gets a live connection at all.
 export const GET = withRoute(async (request) => {
-  const user = await getSessionUserFromQuery(request);
-  if (!user) throw new HttpError(401, "Not authorized, no token");
-  if (!["admin", "employee"].includes(user.role)) throw new HttpError(403, "Staff access only");
+  const user = await requireStaff(request);
 
   const stream = new ReadableStream({
     start(controller) {

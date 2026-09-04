@@ -14,11 +14,11 @@ import { Toaster } from "sonner";
 import store from "../store/index.js";
 import { useGetActiveThemeQuery } from "../store/themeApi.js";
 import { hydrateUi } from "../store/uiSlice.js";
-import { hydrateAuth } from "../store/authSlice.js";
 import { hydrateGuestCart } from "../store/guestCartSlice.js";
 import { SettingsProvider } from "./SettingsContext.jsx";
 import { LocaleProvider } from "./LocaleProvider.jsx";
 import { storage } from "../lib/utils.js";
+import useAuthBoot from "../hooks/useAuthBoot.js";
 
 /**
  * Light/dark is an attribute on <html>, not a class: the Kinetic Editorial
@@ -119,10 +119,17 @@ function ThemeController({ initialTheme = "light", children }) {
  * Slices that persist to Web Storage start empty so the server's markup and
  * the client's first render agree. This pulls the saved values in immediately
  * after mount, in one pass, before paint.
+ *
+ * Auth is different: there's nothing to read from Web Storage for it
+ * anymore (Phase 2 — the session lives only in an HttpOnly cookie, invisible
+ * to JS), so useAuthBoot() instead asks the server directly via GET
+ * /api/users/me on every mount. This is the one live call site for that
+ * hook in the whole app.
  */
 function StorageHydrator() {
+  useAuthBoot();
+
   useEffect(() => {
-    store.dispatch(hydrateAuth());
     store.dispatch(hydrateUi());
     store.dispatch(hydrateGuestCart());
   }, []);

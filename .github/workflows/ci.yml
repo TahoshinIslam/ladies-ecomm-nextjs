@@ -48,10 +48,11 @@ jobs:
       # deliberately contains "test" — scripts/assertTestDbSafety.mjs
       # refuses to run against a database whose name doesn't.
       MONGO_URI_TEST: mongodb://127.0.0.1:27017/tahos_test_ci?replicaSet=test-rs&directConnection=true
-      # Throwaway signing secret, valid only for this job's process lifetime
-      # — not a repository secret, generated fresh from the run id.
-      JWT_SECRET: ci-only-test-secret-${{ github.run_id }}
-      JWT_EXPIRES_IN: 1h
+      # JWT_SECRET/JWT_EXPIRES_IN were removed here as of the Phase 2
+      # session-cookie migration (jsonwebtoken is uninstalled; nothing in
+      # this codebase signs or verifies a JWT anymore) — no test file's
+      # gate reads them anymore either, so they are no longer an executable
+      # requirement, only a historical artifact of the old bearer-JWT setup.
       CLIENT_URL: http://localhost:3000
 
     steps:
