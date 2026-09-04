@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/.phase1-http-test-logs/
 
 # next.js
 /.next/
@@ -32,6 +33,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except checked-in example/template files, which contain placeholders
+# only and are meant to be committed and shared.
+!.env.example
+!.env.*.example
 
 # vercel
 .vercel

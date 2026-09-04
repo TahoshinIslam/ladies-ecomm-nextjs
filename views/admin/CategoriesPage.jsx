@@ -80,7 +80,10 @@ export default function AdminCategoriesPage() {
 
 function CategoryTree() {
   const { data, isLoading } = useGetCategoriesQuery();
-  const categories = data?.categories ?? [];
+  // Stable reference across renders when `data` is undefined/loading —
+  // `data?.categories ?? []` would otherwise create a new array every
+  // render, invalidating the departments useMemo below for no real reason.
+  const categories = useMemo(() => data?.categories ?? [], [data]);
   const departments = useMemo(() => categories.filter((c) => !c.parent), [categories]);
   const childrenOf = (deptId) => categories.filter((c) => String(c.parent) === String(deptId));
 

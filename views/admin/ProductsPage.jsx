@@ -382,7 +382,11 @@ function ProductFormModal({ product, onClose }) {
   const [createProduct, { isLoading: creating }] = useCreateProductMutation();
   const [updateProduct, { isLoading: updating }] = useUpdateProductMutation();
 
-  const categories = catsData?.categories ?? [];
+  // Stable reference across renders when `catsData` is undefined/loading —
+  // `catsData?.categories ?? []` would otherwise create a new array every
+  // render, invalidating the useMemo at the bottom of this component that
+  // depends on `categories` for no real reason.
+  const categories = useMemo(() => catsData?.categories ?? [], [catsData]);
   const departments = categories.filter((c) => !c.parent);
 
   // Editing an existing product: resolve its department from the leaf

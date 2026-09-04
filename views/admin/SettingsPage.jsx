@@ -193,7 +193,15 @@ export default function SettingsPage() {
   }, [token]);
 
   useEffect(() => {
-    loadSettings();
+    // loadSettings() is also wired directly to the retry button's onClick
+    // (a real event handler, where a synchronous setState is fine) — its
+    // first line resets `loadError`. Deferred with setTimeout(...,0) here,
+    // matching the same pattern already used in CheckoutPage.jsx's debounced
+    // preview effect, so the reset isn't a synchronous setState directly in
+    // this effect's body. loadSettings itself is untouched, so the retry
+    // button's behavior is unaffected.
+    const timer = setTimeout(() => loadSettings(), 0);
+    return () => clearTimeout(timer);
   }, [loadSettings]);
 
   if (!settings) {

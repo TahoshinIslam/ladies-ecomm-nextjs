@@ -21,9 +21,31 @@ const connectDB = async () => {
 
   if (!cache.promise) {
     mongoose.set("strictQuery", true);
-    const uri = process.env.NODE_ENV === "test" ? process.env.MONGO_URI_TEST : process.env.MONGO_URI;
+
+    // Phase 1 HTTP-integration test harness only (scripts/httpTestServer.mjs):
+    // a running `next start`/`next dev` process forces its own NODE_ENV
+    // ("production"/"development"), so the NODE_ENV==="test" branch below
+    // can never select MONGO_URI_TEST for a real Next.js server process —
+    // this is a second, independent path for that one case. It requires
+    // BOTH of two unusual, non-NODE_ENV-derived flags to be set together
+    // (never true by accident, and never set by anything other than the
+    // test harness itself), so it cannot silently activate in a real
+    // deployment the way trusting NODE_ENV alone could.
+    const useTestServerOverride =
+      process.env.ALLOW_TEST_DB_OVERRIDE === "true" && !!process.env.TEST_SERVER_MONGO_URI;
+
+    const uri = useTestServerOverride
+      ? process.env.TEST_SERVER_MONGO_URI
+      : process.env.NODE_ENV === "test"
+        ? process.env.MONGO_URI_TEST
+        : process.env.MONGO_URI;
     if (!uri) {
-      throw new Error(`${process.env.NODE_ENV === "test" ? "MONGO_URI_TEST" : "MONGO_URI"} is not set`);
+      const missingVar = useTestServerOverride
+        ? "TEST_SERVER_MONGO_URI"
+        : process.env.NODE_ENV === "test"
+          ? "MONGO_URI_TEST"
+          : "MONGO_URI";
+      throw new Error(`${missingVar} is not set`);
     }
     cache.promise = mongoose.connect(uri).then((m) => {
       console.log(`MongoDB connected: ${m.connection.host}`);

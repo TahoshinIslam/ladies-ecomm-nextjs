@@ -28,7 +28,7 @@ export function NotFoundPage() {
     <div className="container-x py-20 text-center">
       <h1 className="font-heading text-6xl font-black text-accent">404</h1>
       <p className="mt-3 text-lg text-muted-foreground">
-        This page doesn't exist.
+        This page doesn&apos;t exist.
       </p>
       <Link href="/" className="mt-6 inline-block">
         <Button size="lg">Go home</Button>

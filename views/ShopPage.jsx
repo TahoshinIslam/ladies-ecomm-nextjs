@@ -84,9 +84,15 @@ export default function ShopPage() {
     return next.toString();
   }, [sp]);
 
-  useEffect(() => {
+  // Computed during render (React's documented "adjust state when a prop
+  // changes" pattern, same idiom AdminLayout.jsx uses for its own
+  // pathname-driven reset) instead of in an effect, so this can't cause an
+  // extra synchronous-setState render pass.
+  const [lastFilterKey, setLastFilterKey] = useState(filterKey);
+  if (lastFilterKey !== filterKey) {
+    setLastFilterKey(filterKey);
     setVisibleCount(PAGE_SIZE);
-  }, [filterKey]);
+  }
 
   const query = useMemo(() => {
     const o = {};

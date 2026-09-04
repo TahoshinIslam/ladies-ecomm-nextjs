@@ -65,10 +65,18 @@ export default function PriceHistogramSlider({
   const [lo, setLo] = useState(value?.[0] ?? min);
   const [hi, setHi] = useState(value?.[1] ?? safeMax);
 
-  useEffect(() => {
+  // Re-sync local thumb state when the incoming value/range actually
+  // changes — computed during render (React's documented "adjust state
+  // when a prop changes" pattern, same idiom AdminLayout.jsx already uses
+  // for its own pathname-driven reset) instead of in an effect, so this
+  // can't cause an extra render pass the way a synchronous setState-in-
+  // effect would.
+  const [trackedDeps, setTrackedDeps] = useState([value, min, safeMax]);
+  if (trackedDeps[0] !== value || trackedDeps[1] !== min || trackedDeps[2] !== safeMax) {
+    setTrackedDeps([value, min, safeMax]);
     setLo(value?.[0] ?? min);
     setHi(value?.[1] ?? safeMax);
-  }, [value, min, safeMax]);
+  }
 
   const pct = (v) => ((v - min) / (safeMax - min)) * 100;
 

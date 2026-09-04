@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "node --env-file=.env scripts/seedCatalog.mjs",
-    "test": "node --env-file=.env --test tests/**/*.test.mjs"
+    "pretest": "NODE_ENV=test node --env-file-if-exists=.env.test scripts/assertTestDbSafety.mjs",
+    "test": "NODE_ENV=test node --experimental-test-module-mocks --import ./tests/helpers/nextResolveHook.mjs --env-file-if-exists=.env.test --test --test-concurrency=1 tests/*.test.mjs",
+    "test:core": "npm run test",
+    "pretest:http": "npm run build && NODE_ENV=test node --env-file-if-exists=.env.test scripts/assertTestDbSafety.mjs",
+    "test:http": "node --env-file-if-exists=.env.test scripts/httpTestServer.mjs run",
+    "test:all": "npm run test:core && npm run test:http"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

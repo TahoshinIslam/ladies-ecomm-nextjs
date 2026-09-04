@@ -62,7 +62,7 @@ export default function OrderDetailPage() {
       const qs = next.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     }
-  }, [order, sp, router, pathname]);
+  }, [order, sp, router, pathname, locale]);
 
   if (isLoading) {
     return (

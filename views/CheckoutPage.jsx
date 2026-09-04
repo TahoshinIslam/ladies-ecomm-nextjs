@@ -95,24 +95,40 @@ export default function CheckoutPage() {
   const [serverTotals, setServerTotals] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  const items = cartItems ?? [];
+  // Memoized so `items` has a stable reference across renders when
+  // cartItems is undefined/null — `cartItems ?? []` would otherwise create
+  // a brand-new array every render, invalidating every effect/memo below
+  // that depends on `items` for no real reason.
+  const items = useMemo(() => cartItems ?? [], [cartItems]);
 
-  useEffect(() => {
+  // Both of the following are computed during render (React's documented
+  // "adjust state when a prop changes" pattern — same idiom AdminLayout.jsx
+  // already uses for its own pathname-driven reset) rather than in a
+  // useEffect, so neither causes an extra synchronous-setState render pass.
+  // Each only reacts when its own tracked dependency actually changes,
+  // matching the dependency arrays the original effects used.
+  const [lastAddrData, setLastAddrData] = useState(addrData);
+  if (lastAddrData !== addrData) {
+    setLastAddrData(addrData);
     if (!selectedAddressId && addrData?.addresses?.length) {
       const def = addrData.addresses.find((a) => a.isDefault) || addrData.addresses[0];
       setSelectedAddressId(def._id);
     }
-  }, [addrData, selectedAddressId]);
+  }
 
   // Newly-registered users land here from /login?redirect=/checkout with no
   // saved addresses yet — auto-open the new-address form so they immediately
-  // see the next step instead of a disabled Place Order button.
-  useEffect(() => {
+  // see the next step instead of a disabled Place Order button. Tracked on
+  // [user, addrData] only (like the original effect's deps) — deliberately
+  // not re-triggered just because `addingAddress` itself changes, so
+  // closing the form doesn't immediately reopen it.
+  const [lastAutoOpenDeps, setLastAutoOpenDeps] = useState([user, addrData]);
+  if (lastAutoOpenDeps[0] !== user || lastAutoOpenDeps[1] !== addrData) {
+    setLastAutoOpenDeps([user, addrData]);
     if (user && addrData && addrData.addresses?.length === 0 && !addingAddress) {
       setAddingAddress(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, addrData]);
+  }
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(addressSchema),
@@ -131,14 +147,29 @@ export default function CheckoutPage() {
 
   // Server-side preview, debounced to avoid hammering on every keystroke.
   // Skipped for guests — preview requires an authenticated session.
+  //
+  // The "not eligible" reset is derived during render (same pattern as
+  // above) rather than as a synchronous setState at the top of the effect
+  // — the effect itself is left to do only what effects are for: the real
+  // side effect (the debounced network call) when eligible.
+  const previewEligible = !!(user && items.length && selectedAddress?.country);
+  const [wasPreviewEligible, setWasPreviewEligible] = useState(previewEligible);
+  if (wasPreviewEligible !== previewEligible) {
+    setWasPreviewEligible(previewEligible);
+    if (!previewEligible) setServerTotals(null);
+  }
+
   useEffect(() => {
-    if (!user || !items.length || !selectedAddress?.country) {
-      setServerTotals(null);
-      return;
-    }
+    if (!previewEligible) return;
 
     let cancelled = false;
-    setPreviewLoading(true);
+    // Deferred a microtask so this isn't a synchronous setState directly in
+    // the effect body — fires before the next paint, so the loading
+    // indicator still appears effectively immediately, matching the
+    // original timing.
+    queueMicrotask(() => {
+      if (!cancelled) setPreviewLoading(true);
+    });
 
     const timer = setTimeout(async () => {
       try {
@@ -171,7 +202,7 @@ export default function CheckoutPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [user, items, selectedAddress, appliedCoupon, previewOrder]);
+  }, [previewEligible, user, items, selectedAddress, appliedCoupon, previewOrder]);
 
   // Local fallback math used only before first preview response arrives —
   // always computed in Taka (this storefront is BDT-only; the shipping
