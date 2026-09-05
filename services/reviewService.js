@@ -80,7 +80,12 @@ export async function deleteReview(reviewId, actingUser) {
   if (review.user.toString() !== actingUser._id.toString() && actingUser.role !== "admin") {
     throw new HttpError(403, "Not authorized");
   }
+  const productId = review.product.toString();
   await review.deleteOne();
+  // Callers that only cared about "did this succeed" (the pre-Phase-8
+  // behavior) can keep ignoring this — it's new, additive information,
+  // not a changed contract for anyone already awaiting this call.
+  return { productId };
 }
 
 export async function markHelpful(reviewId) {

@@ -1,32 +1,37 @@
 import OverviewCharts from "./OverviewCharts.jsx";
 import {
-  getOverview,
-  getSalesSeries,
-  getTopProducts,
-  getStatusBreakdown,
-  getRevenueByMethod,
-} from "../../services/analyticsService.js";
+  getCachedOverview,
+  getCachedSalesSeries,
+  getCachedTopProducts,
+  getCachedStatusBreakdown,
+  getCachedRevenueByMethod,
+} from "../../lib/serverDataCache.js";
 import { requireServerPermission } from "../../lib/serverPageAuth.js";
-import { serializeForClient } from "../../lib/serialize.js";
 import { PERMISSIONS } from "../../lib/permissions.js";
 
 // Phase 7 — real, protected Server Component: enforces the actual
 // dashboard.view permission server-side (requireServerPermission —
 // redirects home if the session is missing or under-permissioned, the
 // same rule GET /api/analytics/* already enforces via requirePermission())
-// before any analytics query runs, then fetches all five independent
+// BEFORE any analytics query runs, then fetches all five independent
 // reads in parallel. Only OverviewCharts (Recharts genuinely needs a
 // browser) is a Client Component; everything above it, including the
 // permission check, runs on the server.
+//
+// Phase 8 — the five reads are now cached (lib/serverDataCache.js, 45s
+// TTL + mutation invalidation) since the values are identical for every
+// authorized administrator. The permission check above still runs first,
+// unconditionally, on every request — only the DATA is shared-cached,
+// never the authorization decision itself.
 export default async function AdminOverviewPage() {
   await requireServerPermission(PERMISSIONS.DASHBOARD_VIEW, "/admin");
 
   const [overview, series, topProducts, statusBreakdown, revenueByMethod] = await Promise.all([
-    getOverview(),
-    getSalesSeries(30),
-    getTopProducts(5),
-    getStatusBreakdown(),
-    getRevenueByMethod(),
+    getCachedOverview(),
+    getCachedSalesSeries(30),
+    getCachedTopProducts(5),
+    getCachedStatusBreakdown(),
+    getCachedRevenueByMethod(),
   ]);
 
   return (
@@ -38,11 +43,11 @@ export default async function AdminOverviewPage() {
         </p>
       </div>
       <OverviewCharts
-        overview={serializeForClient(overview)}
-        series={serializeForClient(series.series)}
-        topProducts={serializeForClient(topProducts)}
-        statusBreakdown={serializeForClient(statusBreakdown)}
-        revenueByMethod={serializeForClient(revenueByMethod)}
+        overview={overview}
+        series={series.series}
+        topProducts={topProducts}
+        statusBreakdown={statusBreakdown}
+        revenueByMethod={revenueByMethod}
       />
     </div>
   );

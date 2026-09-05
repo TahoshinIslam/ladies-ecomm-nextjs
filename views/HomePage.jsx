@@ -10,7 +10,8 @@ import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
 import NewsletterPoster from "./home/NewsletterPoster.jsx";
 import SectionHead from "./home/SectionHead.jsx";
 
-import { listCategories } from "../services/categoryService.js";
+import { getCachedCategories, getCachedProductList } from "../lib/serverDataCache.js";
+import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import { listProducts } from "../services/productService.js";
 import { serializeForClient } from "../lib/serialize.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
@@ -59,8 +60,8 @@ const OCCASIONS = [
 // plain, pre-fetched props — none of them re-fetches this page's initial
 // data itself.
 export default async function HomePage() {
-  const [t, locale, rawCategories] = await Promise.all([getT(), getServerLocale(), listCategories()]);
-  const categories = localizeCategoryList(serializeForClient(rawCategories), locale);
+  const [t, locale, rawCategories] = await Promise.all([getT(), getServerLocale(), getCachedCategories()]);
+  const categories = localizeCategoryList(rawCategories, locale);
   const departments = categories.filter((c) => !c.parent);
 
   const burqa = departments.find((d) => d.slug === "burqa");
@@ -69,9 +70,16 @@ export default async function HomePage() {
   const khimar = departments.find((d) => d.slug === "khimar");
   const bothIds = [burqa?._id, hijab?._id].filter(Boolean).join(",");
 
+  // Phase 8 — every one of this page's product queries below is a fixed,
+  // low-cardinality shape (limit + sort, or limit + one/two department
+  // ids + featured/discount) that always passes lib/shopCacheEligibility
+  // .js's policy — cached accordingly, same as the shop page.
   const fetchProducts = async (query) => {
-    const result = await listProducts(query, { isAdmin: false });
-    return localizeProductList(serializeForClient(result.products), locale);
+    const cacheKey = getShopCacheKey(query, { isAdmin: false });
+    const result = cacheKey
+      ? await getCachedProductList(query, cacheKey)
+      : serializeForClient(await listProducts(query, { isAdmin: false }));
+    return localizeProductList(result.products, locale);
   };
 
   const [

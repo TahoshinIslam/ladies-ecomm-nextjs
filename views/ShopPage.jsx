@@ -3,6 +3,8 @@ import { listProducts, parseProductListQuery } from "../services/productService.
 import { assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../lib/validation.js";
 import { parseQueryParams, HttpError } from "../lib/http.js";
 import { serializeForClient } from "../lib/serialize.js";
+import { getCachedProductList } from "../lib/serverDataCache.js";
+import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import EmptyState from "../components/ui/EmptyState.jsx";
 import { AlertCircle } from "lucide-react";
 
@@ -41,7 +43,15 @@ export default async function ShopPage({ searchParams }) {
     assertNoDangerousQueryKeys(usp);
     const rawQuery = parseQueryParams(usp);
     const query = await parseProductListQuery(rawQuery);
-    result = await listProducts(query, { isAdmin: false });
+    // Phase 8 — only a bounded, low-cardinality subset of the (Phase 5)
+    // validated query space is cached at all (see lib/shopCacheEligibility
+    // .js's own header comment for why: free-text search and dynamic
+    // attribute facets are excluded to avoid unbounded cache-key growth).
+    // An ineligible query still works correctly — it just calls the same
+    // real, uncached listProducts() this page always called before
+    // Phase 8.
+    const cacheKey = getShopCacheKey(query, { isAdmin: false });
+    result = cacheKey ? await getCachedProductList(query, cacheKey) : await listProducts(query, { isAdmin: false });
   } catch (err) {
     if (err instanceof HttpError && err.status === 400) {
       invalid = true;

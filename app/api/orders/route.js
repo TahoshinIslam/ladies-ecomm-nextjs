@@ -7,6 +7,8 @@ import { withRoute } from "../../../lib/http.js";
 import { readIdempotencyKey } from "../../../lib/idempotency.js";
 import { parseJsonBody, parseQuery } from "../../../lib/validation.js";
 import { adminOrderListQuerySchema, createOrderSchema } from "../../../schemas/orderSchemas.js";
+import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
+import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 // Admin list — GET /api/orders?status=&search=&sortBy=&sortOrder=&page=&limit=
 export const GET = withRoute(async (request) => {
@@ -33,6 +35,11 @@ export const POST = withRoute(async (request) => {
   // any idempotency lookup/creation ever runs.
   const body = await parseJsonBody(request, createOrderSchema);
   const { order, replayed } = await createOrder(user._id, body, idempotencyKey);
+  // Only a genuinely NEW order actually decremented stock (the sequential-
+  // replay fast path inside createOrder() returns before touching stock at
+  // all) — invalidate only then, after the real transaction has already
+  // committed, never for a replay.
+  if (!replayed) invalidateCacheTags([CACHE_TAGS.CATALOG, CACHE_TAGS.ADMIN_ANALYTICS]);
   return NextResponse.json(
     { success: true, order },
     {

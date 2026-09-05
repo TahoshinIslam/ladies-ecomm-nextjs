@@ -8,6 +8,8 @@ import { getServerLocale } from "../../../lib/i18n/server.js";
 import { localizeProductList } from "../../../lib/i18n/localize.js";
 import { parseJsonBody, assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../../../lib/validation.js";
 import { createProductSchema } from "../../../schemas/catalogSchemas.js";
+import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
+import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 export const GET = withRoute(async (request) => {
   const user = await getSessionUser(request).catch(() => null);
@@ -40,5 +42,9 @@ export const POST = withRoute(async (request) => {
   await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
   const body = await parseJsonBody(request, createProductSchema);
   const product = await createProduct(body);
+  // A newly created product can change every product-list-shaped cached
+  // read (home sections, shop listing) — invalidated only after the
+  // write above has actually committed.
+  invalidateCacheTags([CACHE_TAGS.CATALOG]);
   return NextResponse.json({ success: true, product }, { status: 201 });
 });

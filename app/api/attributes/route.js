@@ -12,6 +12,8 @@ import { getServerLocale } from "../../../lib/i18n/server.js";
 import { localizeAttributeDefinitionList } from "../../../lib/i18n/localize.js";
 import { parseJsonBody, requireObjectIdFormat } from "../../../lib/validation.js";
 import { createAttributeSchema } from "../../../schemas/catalogSchemas.js";
+import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
+import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 // GET /api/attributes           -> full raw list (Attributes admin page —
 //                                   never localized, the admin form needs
@@ -51,5 +53,6 @@ export const POST = withRoute(async (request) => {
   await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
   const body = await parseJsonBody(request, createAttributeSchema);
   const attribute = await createAttribute(body);
+  invalidateCacheTags([CACHE_TAGS.ATTRIBUTES, CACHE_TAGS.CATALOG]);
   return NextResponse.json({ success: true, attribute }, { status: 201 });
 });

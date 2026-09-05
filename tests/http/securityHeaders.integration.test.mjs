@@ -148,4 +148,45 @@ describe("Phase 3 closure — real HTTP: security headers and Content-Security-P
   // Rate-limiting / client-IP-trust behavior over real HTTP is covered
   // comprehensively in tests/http/clientIpTrust.integration.test.mjs
   // (Phase 3B) — this file stays focused on headers/CSP.
+
+  // ===================== Phase 8: cache layer does not weaken the nonce CSP =====================
+  //
+  // The whole reason Phase 8 uses unstable_cache()/revalidateTag() instead
+  // of "use cache"/cacheComponents is that this app's CSP requires a
+  // genuinely fresh nonce on every HTML response — enabling PPR would
+  // break that. These tests prove the cache layer landed WITHOUT
+  // regressing that contract: caching the underlying DATA never caches
+  // (or reuses) the HTML/nonce itself.
+
+  test("Phase 8: three requests to a page whose data IS cached still get three different nonces", async () => {
+    // Warm the shop page's product-list cache first (same URL, repeated).
+    await fetch(`${BASE_URL}/shop?limit=5`);
+    const [a, b, c] = await Promise.all([
+      fetch(`${BASE_URL}/shop?limit=5`),
+      fetch(`${BASE_URL}/shop?limit=5`),
+      fetch(`${BASE_URL}/shop?limit=5`),
+    ]);
+    const nonces = [a, b, c].map((res) => parseCsp(res.headers.get("content-security-policy") || "")["script-src"].find((v) => v.startsWith("'nonce-")));
+    assert.equal(new Set(nonces).size, 3, "cached product data must not cause the per-request nonce to be reused");
+  });
+
+  test("Phase 8: cacheComponents/PPR remain disabled — every HTML response is request-dynamic, never a public/shared cache", async () => {
+    const res = await fetch(`${BASE_URL}/shop?limit=5`);
+    assert.equal(res.status, 200);
+    // Next.js's own default for a fully dynamic (non-PPR, non-static) page
+    // — no CDN/browser may cache this response at all, public or private.
+    // If cacheComponents/PPR were ever enabled, a static shell could be
+    // served instead and this header would no longer say `no-store`.
+    const cacheControl = res.headers.get("cache-control") || "";
+    assert.match(cacheControl, /no-store/);
+    assert.ok(!/\bpublic\b/.test(cacheControl), "no page response may carry a public cache directive");
+  });
+
+  test("Phase 8: an authenticated/private redirect response is never marked publicly cacheable", async () => {
+    const res = await fetch(`${BASE_URL}/orders`, { redirect: "manual" });
+    assert.ok([307, 302, 303].includes(res.status));
+    const cacheControl = res.headers.get("cache-control") || "";
+    assert.match(cacheControl, /no-store/);
+    assert.ok(!/\bpublic\b/.test(cacheControl));
+  });
 });
