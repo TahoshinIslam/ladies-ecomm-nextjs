@@ -59,7 +59,6 @@ const orderEndpoints = (b) => ({
     }),
     invalidatesTags: ["Order", "Cart"],
   }),
-  getMyOrders: b.query({ query: () => "/orders/my", providesTags: ["Order"] }),
   getOrder: b.query({
     query: (id) => `/orders/${id}`,
     providesTags: (r, e, a) => [{ type: "Order", id: a }],
@@ -194,29 +193,11 @@ const paymentEndpoints = (b) => ({
   }),
 });
 
-// ====== Analytics ======
-const analyticsEndpoints = (b) => ({
-  getOverview: b.query({
-    query: () => "/analytics/overview",
-    providesTags: ["Analytics"],
-  }),
-  getSalesSeries: b.query({
-    query: (days = 30) => `/analytics/sales-series?days=${days}`,
-    providesTags: ["Analytics"],
-  }),
-  getTopProducts: b.query({
-    query: (limit = 10) => `/analytics/top-products?limit=${limit}`,
-    providesTags: ["Analytics"],
-  }),
-  getStatusBreakdown: b.query({
-    query: () => "/analytics/status-breakdown",
-    providesTags: ["Analytics"],
-  }),
-  getRevenueByMethod: b.query({
-    query: () => "/analytics/revenue-by-method",
-    providesTags: ["Analytics"],
-  }),
-});
+// Analytics — no RTK Query endpoints here: the one consumer
+// (views/admin/OverviewPage.jsx) became a Server Component in Phase 7 and
+// now calls services/analyticsService.js directly. Kept as real, tested
+// Route Handlers (app/api/analytics/*) independent of this client — this
+// only removes the now-zero-consumer client-side wrapper.
 
 // ====== Upload ======
 const uploadEndpoints = (b) => ({
@@ -330,7 +311,6 @@ export const shopApi = apiSlice.injectEndpoints({
     ...couponEndpoints(b),
     ...addressEndpoints(b),
     ...paymentEndpoints(b),
-    ...analyticsEndpoints(b),
     ...uploadEndpoints(b),
     ...categoryBrandEndpoints(b),
     ...notificationEndpoints(b),
@@ -349,7 +329,6 @@ export const {
   useClearWishlistMutation,
   usePreviewOrderMutation,
   useCreateOrderMutation,
-  useGetMyOrdersQuery,
   useGetOrderQuery,
   useLazyGetOrderQuery,
   useCancelOrderMutation,
@@ -373,11 +352,6 @@ export const {
   useDeleteAddressMutation,
   useCodCreateMutation,
   useGetPaymentByOrderQuery,
-  useGetOverviewQuery,
-  useGetSalesSeriesQuery,
-  useGetTopProductsQuery,
-  useGetStatusBreakdownQuery,
-  useGetRevenueByMethodQuery,
   useUploadImageMutation,
   useUploadMultipleMutation,
   useGetCategoriesQuery,

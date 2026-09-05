@@ -4,8 +4,8 @@ export const metadata = {
   title: "Product",
 };
 
-export default function Page() {
+export default function Page({ params }) {
   return (
-    <ProductDetailPage />
+    <ProductDetailPage params={params} />
   );
 }

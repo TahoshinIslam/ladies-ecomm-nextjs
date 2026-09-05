@@ -1,18 +1,17 @@
-"use client";
-
 import Link from "next/link";
-import { Home, Package, ChevronRight, AlertCircle } from "lucide-react";
+import { Home, Package, ChevronRight } from "lucide-react";
 
 import Badge from "../components/ui/Badge.jsx";
 import Button from "../components/ui/Button.jsx";
 import EmptyState from "../components/ui/EmptyState.jsx";
-import Skeleton from "../components/ui/Skeleton.jsx";
 import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 
-import { useGetMyOrdersQuery } from "../store/shopApi.js";
+import { getMyOrders } from "../services/orderService.js";
+import { requireServerUser } from "../lib/serverPageAuth.js";
+import { serializeForClient } from "../lib/serialize.js";
 import { formatCurrency } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT, getServerLocale } from "../lib/i18n/server.js";
 
 const statusVariant = {
   pending: "warning",
@@ -34,10 +33,19 @@ const statusLabelKey = {
   refunded: "orders.statusRefunded",
 };
 
-export default function OrdersPage() {
-  const { t, locale } = useLocale();
-  const { data, isLoading, isError, error } = useGetMyOrdersQuery();
-  const orders = data?.orders ?? [];
+// Phase 7 — real Server Component: authenticates via the cookie session,
+// queries only the authenticated user's own orders (services/orderService
+// .js's getMyOrders() already scopes by user id), and renders the full
+// list in the initial HTML. No client fetch (RTK Query's useGetMyOrdersQuery
+// is gone) is needed to see this page's data; this page has no interactive
+// state of its own (no pagination/filter controls exist on it today), so
+// it needed no client island at all.
+export default async function OrdersPage() {
+  const user = await requireServerUser("/orders");
+  const [t, locale] = await Promise.all([getT(), getServerLocale()]);
+
+  const rawOrders = await getMyOrders(user._id);
+  const orders = serializeForClient(rawOrders);
 
   return (
     <div className="container-x py-10">
@@ -53,19 +61,7 @@ export default function OrdersPage() {
       </p>
 
       <div className="mt-8">
-        {isLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 w-full rounded-lg" />
-            ))}
-          </div>
-        ) : isError ? (
-          <EmptyState
-            icon={AlertCircle}
-            title={t("errors.loadOrders")}
-            message={error?.data?.message || t("orders.pleaseTryAgain")}
-          />
-        ) : orders.length === 0 ? (
+        {orders.length === 0 ? (
           <EmptyState
             icon={Package}
             title={t("orders.noOrdersYet")}
