@@ -275,6 +275,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       origin: BASE_URL,
       csrf: jar.get("tahos_csrf"),
       body: previewBody,
+      extraHeaders: { "idempotency-key": crypto.randomBytes(16).toString("hex") },
     });
     assert.equal(orderRes.status, 201, "order creation succeeds with cookie + Origin + correct CSRF over real HTTP");
     const orderJson = await orderRes.json();
@@ -555,6 +556,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
           items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
           shippingAddress: { fullName: "SSE Owner", phone: "0100000000", street: "1 Test St", city: "Dhaka", postalCode: "1200", country: "Bangladesh" },
         },
+        extraHeaders: { "idempotency-key": crypto.randomBytes(16).toString("hex") },
       });
       const orderJson = await orderRes.json();
       orderId = orderJson.order._id;

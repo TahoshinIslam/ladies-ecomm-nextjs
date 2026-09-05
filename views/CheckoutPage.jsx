@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -46,6 +46,15 @@ import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
 import { downloadReceipt } from "../lib/receipt.js";
 import { useSettings } from "../context/SettingsContext.jsx";
 import { useLocale } from "../context/LocaleProvider.jsx";
+import {
+  computeCheckoutFingerprint,
+  resolveCheckoutIntent,
+  markOrderCreated,
+  clearStoredIntent,
+  readStoredIntent,
+  getBrowserSessionStorage,
+  createSubmitLock,
+} from "../lib/checkoutIntent.js";
 
 const addressSchema = z.object({
   fullName: z.string().min(2, "Required"),
@@ -101,6 +110,43 @@ export default function CheckoutPage() {
   // that depends on `items` for no real reason.
   const items = useMemo(() => cartItems ?? [], [cartItems]);
 
+  // Defense in depth only — server-side idempotency (the Idempotency-Key
+  // header + database unique index, and paymentModel's unique `order`
+  // index for COD) is what's actually authoritative. `submitLockRef` is a
+  // REF, not state — checked and set synchronously at the very top of
+  // handlePlaceOrder, before any `await` and before React has had a chance
+  // to re-render — so two clicks fired in the same event turn (before
+  // `submitting` state has actually committed) still can't both proceed.
+  // `submitting` state exists only to drive the button's own disabled/
+  // loading UI, which needs a rendered value, not a ref.
+  const submitLockRef = useRef(null);
+  if (submitLockRef.current === null) submitLockRef.current = createSubmitLock();
+  const [submitting, setSubmitting] = useState(false);
+
+  // Set once on mount/user-change purely so the "Place Order" button isn't
+  // stuck disabled by an empty cart when there's actually a pending order
+  // waiting on COD to be resumed (e.g. after a reload mid-checkout, once
+  // the order's own creation already cleared the server cart). This is
+  // display-only — handlePlaceOrder resolves the authoritative intent
+  // itself, synchronously, every time it runs; this state never gates
+  // correctness, only whether the button LOOKS clickable.
+  const [resumableOrderId, setResumableOrderId] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (!user) {
+        setResumableOrderId(null);
+        return;
+      }
+      const stored = readStoredIntent(getBrowserSessionStorage(), user._id);
+      setResumableOrderId(stored?.orderId || null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
   // Both of the following are computed during render (React's documented
   // "adjust state when a prop changes" pattern — same idiom AdminLayout.jsx
   // already uses for its own pathname-driven reset) rather than in a
@@ -143,6 +189,23 @@ export default function CheckoutPage() {
   const selectedAddress = useMemo(
     () => addrData?.addresses?.find((a) => a._id === selectedAddressId),
     [addrData, selectedAddressId],
+  );
+
+  // Phase 4B: a pure fingerprint of "what this order would actually be" —
+  // no I/O, safe to compute during render. The decision of whether this
+  // means reusing or minting an Idempotency-Key happens synchronously
+  // inside handlePlaceOrder itself (lib/checkoutIntent.js's
+  // resolveCheckoutIntent), NOT here — correctness must not depend on an
+  // effect having already run before the first click.
+  const checkoutFingerprint = useMemo(
+    () =>
+      computeCheckoutFingerprint({
+        items,
+        shippingAddress: selectedAddress,
+        couponCode: appliedCoupon?.coupon?.code,
+        notes,
+      }),
+    [items, selectedAddress, appliedCoupon, notes],
   );
 
   // Server-side preview, debounced to avoid hammering on every keystroke.
@@ -286,41 +349,86 @@ export default function CheckoutPage() {
       router.push("/login?redirect=/checkout");
       return;
     }
-    if (!selectedAddressId) {
-      toast.error(t("checkout.selectShippingAddress"));
-      return;
-    }
-    if (items.length === 0) {
-      toast.error(t("checkout.cartEmptyError"));
-      return;
-    }
-    const address = addrData.addresses.find((a) => a._id === selectedAddressId);
-    if (!address) {
-      toast.error(t("checkout.invalidAddress"));
-      return;
-    }
 
+    // Synchronous lock, checked and set BEFORE any state read/await — two
+    // clicks fired in the same event turn (before React has re-rendered
+    // with `submitting: true`) still can't both pass this. Released in the
+    // `finally` below on every path (validation failure or a completed
+    // attempt), never left acquired.
+    if (!submitLockRef.current.tryAcquire()) return;
+
+    setSubmitting(true);
     try {
-      const orderRes = await createOrder({
-        items: items.map((i) => ({
-          productId: i.productId,
-          variantId: i.variantId,
-          quantity: i.quantity,
-        })),
-        shippingAddress: {
-          fullName: address.fullName,
-          phone: address.phone,
-          street: address.street,
-          city: address.city,
-          state: address.state || "",
-          postalCode: address.postalCode,
-          country: address.country,
-        },
-        couponCode: appliedCoupon?.coupon?.code,
-        notes,
-      }).unwrap();
+      // Resolve (reuse or mint) the checkout intent synchronously, right
+      // here in the click handler — never inside a useEffect. If a PRIOR
+      // attempt already got as far as creating the Order but never
+      // finished COD (network failure, an ambiguous 5xx, or the page was
+      // reloaded), `intent.orderId` will already be set and this resumes
+      // that exact order instead of building a new intent/key.
+      const storage = getBrowserSessionStorage();
+      const intent = resolveCheckoutIntent({
+        storage,
+        userId: user._id,
+        fingerprint: checkoutFingerprint,
+      });
 
-      const orderId = orderRes.order._id;
+      let address = null;
+      if (!intent?.orderId) {
+        // Only validate address/cart when we're actually about to CREATE a
+        // new order — resuming COD for an already-created order doesn't
+        // need either (the order already has its own snapshot of both).
+        if (!selectedAddressId) {
+          toast.error(t("checkout.selectShippingAddress"));
+          return;
+        }
+        if (items.length === 0) {
+          toast.error(t("checkout.cartEmptyError"));
+          return;
+        }
+        address = addrData.addresses.find((a) => a._id === selectedAddressId);
+        if (!address) {
+          toast.error(t("checkout.invalidAddress"));
+          return;
+        }
+      }
+      if (!intent) {
+        // No resumable order AND no fingerprint yet (e.g. address just
+        // hasn't resolved this render) — nothing to submit.
+        toast.error(t("checkout.placeOrderFailed"));
+        return;
+      }
+
+      let orderId = intent.orderId;
+      let createdOrder = null;
+
+      if (!orderId) {
+        const orderRes = await createOrder({
+          idempotencyKey: intent.idempotencyKey,
+          items: items.map((i) => ({
+            productId: i.productId,
+            variantId: i.variantId,
+            quantity: i.quantity,
+          })),
+          shippingAddress: {
+            fullName: address.fullName,
+            phone: address.phone,
+            street: address.street,
+            city: address.city,
+            state: address.state || "",
+            postalCode: address.postalCode,
+            country: address.country,
+          },
+          couponCode: appliedCoupon?.coupon?.code,
+          notes,
+        }).unwrap();
+
+        orderId = orderRes.order._id;
+        createdOrder = orderRes.order;
+        // Persisted BEFORE the COD call below — if COD now fails, the
+        // order is never re-created on retry, only resumed.
+        markOrderCreated(storage, intent, orderId);
+        setResumableOrderId(orderId);
+      }
 
       // Stripe / bKash / Nagad disabled until gateways are reworked.
       // if (paymentMethod === "stripe") {
@@ -341,13 +449,22 @@ export default function CheckoutPage() {
       // }
       if (paymentMethod === "cod") {
         await codCreate(orderId).unwrap();
+        // COD's own natural idempotency (orderId, backstopped by
+        // paymentModel's unique `order` index) means this call is itself
+        // safe to resend — only clear the intent once it has actually
+        // succeeded.
+        clearStoredIntent(storage, user._id);
+        setResumableOrderId(null);
         toast.success(t("checkout.orderPlacedCod"));
-        downloadReceipt(orderRes.order, locale);
+        if (createdOrder) downloadReceipt(createdOrder, locale);
         router.push(`/order-success/${orderId}`);
         return;
       }
     } catch (e) {
       toast.error(e?.data?.message || t("checkout.placeOrderFailed"));
+    } finally {
+      submitLockRef.current.release();
+      setSubmitting(false);
     }
   };
 
@@ -650,8 +767,17 @@ export default function CheckoutPage() {
             )}
             <Button
               onClick={handlePlaceOrder}
-              loading={placing}
-              disabled={items.length === 0 || (!!user && (!selectedAddressId || previewLoading))}
+              loading={placing || submitting}
+              disabled={
+                // A pending order already waiting on COD (resumableOrderId)
+                // bypasses the empty-cart/no-address checks below — those
+                // describe "not ready to CREATE an order", not "nothing to
+                // resume". handlePlaceOrder re-derives this itself; this is
+                // only the button's own display gate.
+                (!resumableOrderId &&
+                  (items.length === 0 || (!!user && (!selectedAddressId || previewLoading)))) ||
+                submitting
+              }
               size="lg"
               className="mt-5 w-full"
             >

@@ -10,6 +10,7 @@ import Payment from "../models/paymentModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
 import { emitOrderEvent, emitAdminEvent } from "../lib/events.js";
+import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
 
 // Matches the "danger" row-highlight threshold ProductsPage.jsx already
 // uses for total stock — reusing the same number so "low stock" means the
@@ -229,80 +230,141 @@ export async function previewOrder(userId, { items, shippingAddress, shippingTie
   };
 }
 
-export async function createOrder(userId, { items, shippingAddress, shippingTier, couponCode, notes }) {
+// Strips the two internal idempotency fields from an in-memory order doc
+// before it's ever handed back to a route/response. Setting a path to
+// `undefined` (rather than deleting it) is enough — JSON.stringify/
+// NextResponse.json omit undefined-valued keys, and this doesn't fight
+// Mongoose's own change-tracking the way `delete doc.field` can.
+function redactIdempotencyFields(order) {
+  order.idempotencyKeyHash = undefined;
+  order.idempotencyRequestHash = undefined;
+  return order;
+}
+
+// Looks up a previous order for this (user, key) pair. Needs
+// `+idempotencyRequestHash` explicitly since that field is select:false by
+// default — the caller must redact it again before this doc is ever
+// serialized back to a client (see redactIdempotencyFields above).
+async function findByIdempotencyKey(userId, keyHash) {
+  return Order.findOne({ user: userId, idempotencyKeyHash: keyHash }).select("+idempotencyRequestHash");
+}
+
+export async function createOrder(
+  userId,
+  { items, shippingAddress, shippingTier, couponCode, notes },
+  idempotencyKey,
+) {
   if (!items?.length) throw new HttpError(400, "Order must contain items");
   if (!shippingAddress) throw new HttpError(400, "Shipping address required");
+  if (!idempotencyKey) throw new HttpError(400, "Idempotency-Key header is required");
+
+  const keyHash = hashToken(idempotencyKey);
+  const requestHash = fingerprintOrderRequest({ items, shippingAddress, shippingTier, couponCode, notes });
+
+  // Sequential-replay fast path: if a prior request already used this exact
+  // key for this user, resolve from it directly — no transaction, no total
+  // recalculation (which would otherwise run against an already-emptied
+  // cart), no stock/promo/cart mutation, no new notification/SSE event.
+  const priorOrder = await findByIdempotencyKey(userId, keyHash);
+  if (priorOrder) {
+    if (priorOrder.idempotencyRequestHash !== requestHash) {
+      throw new HttpError(422, "Idempotency-Key was already used with a different request");
+    }
+    return { order: redactIdempotencyFields(priorOrder), replayed: true };
+  }
 
   const session = await mongoose.startSession();
-  let createdOrder;
   try {
-    await session.withTransaction(async () => {
-      const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, session, {
-        commitPromo: true,
-      });
+    let createdOrder;
+    try {
+      await session.withTransaction(async () => {
+        const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, session, {
+          commitPromo: true,
+        });
 
-      for (const it of t.lineItems) {
-        const result = await Product.updateOne(
-          {
-            _id: it.product,
-            variants: { $elemMatch: { _id: it.variantId, stock: { $gte: it.quantity } } },
-          },
-          { $inc: { "variants.$.stock": -it.quantity } },
+        for (const it of t.lineItems) {
+          const result = await Product.updateOne(
+            {
+              _id: it.product,
+              variants: { $elemMatch: { _id: it.variantId, stock: { $gte: it.quantity } } },
+            },
+            { $inc: { "variants.$.stock": -it.quantity } },
+            { session },
+          );
+          if (result.modifiedCount !== 1) {
+            throw new HttpError(409, `Insufficient stock for ${it.snapshot.sku || "an item"}`);
+          }
+        }
+
+        if (t.couponDoc) {
+          await Coupon.updateOne({ _id: t.couponDoc._id }, { $inc: { usedCount: 1 } }, { session });
+        }
+
+        const [order] = await Order.create(
+          [
+            {
+              user: userId,
+              items: t.lineItems,
+              shippingAddress,
+              coupon: t.couponDoc?._id || null,
+              subtotal: t.subtotal,
+              tax: t.tax,
+              taxLabel: t.taxLabel,
+              shippingCost: t.shippingCost,
+              shippingTier: t.shippingTier,
+              discount: t.discount,
+              total: t.total,
+              currency: t.currency,
+              region: t.region,
+              notes: notes || "",
+              status: "pending",
+              idempotencyKeyHash: keyHash,
+              idempotencyRequestHash: requestHash,
+            },
+          ],
           { session },
         );
-        if (result.modifiedCount !== 1) {
-          throw new HttpError(409, `Insufficient stock for ${it.snapshot.sku || "an item"}`);
+
+        await Cart.updateOne({ userId }, { $set: { items: [] } }, { session });
+
+        createdOrder = order;
+      });
+    } catch (err) {
+      // Concurrent replay: another request with the same key committed
+      // first (the transaction above aborted on the unique-index conflict,
+      // so nothing from THIS attempt — stock, promo, cart, order — was
+      // persisted). Resolve to the winner instead of surfacing a raw
+      // duplicate-key 500.
+      if (isDuplicateKeyError(err, "idempotencyKeyHash")) {
+        const winner = await findByIdempotencyKey(userId, keyHash);
+        if (winner) {
+          if (winner.idempotencyRequestHash !== requestHash) {
+            throw new HttpError(422, "Idempotency-Key was already used with a different request");
+          }
+          return { order: redactIdempotencyFields(winner), replayed: true };
         }
       }
+      throw err;
+    }
 
-      if (t.couponDoc) {
-        await Coupon.updateOne({ _id: t.couponDoc._id }, { $inc: { usedCount: 1 } }, { session });
-      }
+    // Fire-and-forget admin notification (don't block the response). Only
+    // reached when THIS request is the one that actually created the
+    // order — a replay returns above and never runs any of this again.
+    const orderNumber = createdOrder._id.toString().slice(-6);
+    createAdminNotification({
+      message: `New order #${orderNumber} received`,
+      url: `/admin/orders`,
+    }).catch(() => {});
+    emitAdminEvent({ type: "NEW_ORDER", orderId: createdOrder._id.toString(), orderNumber });
 
-      const [order] = await Order.create(
-        [
-          {
-            user: userId,
-            items: t.lineItems,
-            shippingAddress,
-            coupon: t.couponDoc?._id || null,
-            subtotal: t.subtotal,
-            tax: t.tax,
-            taxLabel: t.taxLabel,
-            shippingCost: t.shippingCost,
-            shippingTier: t.shippingTier,
-            discount: t.discount,
-            total: t.total,
-            currency: t.currency,
-            region: t.region,
-            notes: notes || "",
-            status: "pending",
-          },
-        ],
-        { session },
-      );
+    // Low-stock check happens after the transaction commits — this reads the
+    // post-decrement stock, it doesn't need to be part of the atomic write.
+    checkLowStock(createdOrder.items).catch(() => {});
 
-      await Cart.updateOne({ userId }, { $set: { items: [] } }, { session });
-
-      createdOrder = order;
-    });
+    return { order: redactIdempotencyFields(createdOrder), replayed: false };
   } finally {
     await session.endSession();
   }
-
-  // Fire-and-forget admin notification (don't block the response).
-  const orderNumber = createdOrder._id.toString().slice(-6);
-  createAdminNotification({
-    message: `New order #${orderNumber} received`,
-    url: `/admin/orders`,
-  }).catch(() => {});
-  emitAdminEvent({ type: "NEW_ORDER", orderId: createdOrder._id.toString(), orderNumber });
-
-  // Low-stock check happens after the transaction commits — this reads the
-  // post-decrement stock, it doesn't need to be part of the atomic write.
-  checkLowStock(createdOrder.items).catch(() => {});
-
-  return createdOrder;
 }
 
 async function checkLowStock(items) {

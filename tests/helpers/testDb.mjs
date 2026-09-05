@@ -94,13 +94,36 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * instead. `originOverride` lets a test simulate a cross-origin request by
  * setting a different Origin header than the request's own URL.
  */
-export function requestAs({ method = "GET", url, session, body, omitCsrfHeader = false, originOverride, signal } = {}) {
+export function requestAs({
+  method = "GET",
+  url,
+  session,
+  body,
+  omitCsrfHeader = false,
+  originOverride,
+  signal,
+  idempotencyKey,
+} = {}) {
   const headers = new Headers();
   const cookie = sessionCookieHeader(session);
   if (cookie) headers.set("cookie", cookie);
   if (body !== undefined) headers.set("content-type", "application/json");
   if (session && UNSAFE_METHODS.has(method) && !omitCsrfHeader) {
     headers.set("x-csrf-token", session.rawCsrfToken);
+  }
+  // Phase 4: POST /api/orders requires an Idempotency-Key header. Tests that
+  // don't care about idempotency (the vast majority) get a fresh random one
+  // per call for free, so each call still creates its own independent
+  // order exactly like before this header existed. A test that DOES care
+  // (replay/dedup/conflict scenarios) passes `idempotencyKey` explicitly —
+  // the same string across calls to exercise replay, or `idempotencyKey:
+  // null` to deliberately test the missing-header (400) path.
+  if (method === "POST" && new URL(url).pathname === "/api/orders") {
+    if (idempotencyKey !== null) {
+      headers.set("idempotency-key", idempotencyKey || crypto.randomBytes(16).toString("hex"));
+    }
+  } else if (idempotencyKey) {
+    headers.set("idempotency-key", idempotencyKey);
   }
   // lib/csrf.js's Origin-validation Layer 1 needs an Origin (or
   // Sec-Fetch-Site) header on unsafe requests to pass — a real browser

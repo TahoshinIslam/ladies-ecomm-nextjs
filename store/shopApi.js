@@ -46,8 +46,17 @@ const orderEndpoints = (b) => ({
   previewOrder: b.mutation({
     query: (body) => ({ url: "/orders/preview", method: "POST", body }),
   }),
+  // Phase 4: `idempotencyKey` is pulled out of the payload and sent as the
+  // Idempotency-Key header (never in the body/query string) — the rest of
+  // `body` is exactly what CheckoutPage.jsx already sent. The header
+  // itself is generated/persisted client-side; see views/CheckoutPage.jsx.
   createOrder: b.mutation({
-    query: (body) => ({ url: "/orders", method: "POST", body }),
+    query: ({ idempotencyKey, ...body }) => ({
+      url: "/orders",
+      method: "POST",
+      body,
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    }),
     invalidatesTags: ["Order", "Cart"],
   }),
   getMyOrders: b.query({ query: () => "/orders/my", providesTags: ["Order"] }),
