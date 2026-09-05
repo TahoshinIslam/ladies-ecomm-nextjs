@@ -7,6 +7,7 @@
 // Server Component (views/HomePage.jsx) — no client fetch is needed to
 // see the real department names/photos.
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useDispatch } from "react-redux";
 import { motion } from "framer-motion";
@@ -121,11 +122,24 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                 className="absolute inset-x-[4%] bottom-[8%] top-[6%] overflow-hidden rounded-3xl bg-media"
               >
                 {slide.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  // Deliberately plain `loading="lazy"` (the next/image
+                  // default), never "eager": this decorative desktop-only
+                  // backdrop sits inside a `hidden lg:block` section, and
+                  // per Next's own docs (the CSS-toggled light/dark-image
+                  // pattern), lazy + a hidden ancestor is what actually
+                  // stops the browser from fetching it at all on
+                  // mobile/tablet — "eager" would force the fetch
+                  // unconditionally regardless of which breakpoint is
+                  // active. See the crisp foreground image below for the
+                  // full reasoning; this backdrop carries no
+                  // fetchPriority since it's decorative, not this route's
+                  // LCP candidate.
+                  <Image
                     src={resolveImage(slide.image, 700)}
                     alt=""
-                    className="h-full w-full scale-125 object-cover opacity-90 blur-2xl"
+                    fill
+                    sizes="50vw"
+                    className="scale-125 object-cover opacity-90 blur-2xl"
                   />
                 ) : (
                   <div className="absolute inset-0 hatch" />
@@ -147,11 +161,36 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                 />
                 <div className="absolute inset-0 overflow-hidden rounded-2xl border border-hair bg-wash">
                   {slide.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    // This file renders THREE breakpoint variants of the
+                    // same hero photo (desktop here, plus MobileHero/
+                    // TabletHero below) inside CSS-media-query-toggled
+                    // sections (`hidden lg:block` / `md:hidden` / `hidden
+                    // md:block lg:hidden`) — never more than one is
+                    // actually visible at once, but a naive `loading=
+                    // "eager"` on all three would force the browser to
+                    // fetch all three regardless of which is visible.
+                    // Per Next's own docs (the CSS-toggled light/dark-
+                    // image guidance: "You cannot use ... loading='eager'
+                    // because that would cause both images to load.
+                    // Instead, you can use fetchPriority='high'"), the
+                    // fix is the default `loading="lazy"` on every
+                    // variant — a lazy image inside a `display:none`
+                    // ancestor is never fetched at all, while the one
+                    // variant whose section is actually visible is
+                    // "near-viewport" from the very first paint and loads
+                    // immediately regardless of the lazy attribute. All
+                    // three variants below independently carry
+                    // `fetchPriority="high"`, since each is the genuine
+                    // LCP candidate for ITS OWN breakpoint, and marking
+                    // all three high causes no real contention — only the
+                    // one that's actually visible ever fetches.
+                    <Image
                       src={resolveImage(slide.image, 900)}
                       alt={slide.name}
-                      className="h-full w-full object-cover"
+                      fill
+                      sizes="50vw"
+                      fetchPriority="high"
+                      className="object-cover"
                     />
                   ) : (
                     <div className="grid h-full w-full place-items-center">
@@ -192,11 +231,13 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                     )}
                   >
                     {heroImageBySlug[slug] ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <Image
                         src={resolveImage(heroImageBySlug[slug], 132)}
                         alt=""
-                        className="absolute inset-0 h-full w-full object-cover"
+                        fill
+                        sizes="66px"
+                        loading="lazy"
+                        className="object-cover"
                       />
                     ) : (
                       <span aria-hidden="true" className="absolute inset-0 hatch" />
@@ -267,8 +308,19 @@ function MobileHero({ slide, dispatch }) {
       >
         <div className="absolute inset-0 overflow-hidden rounded-2xl bg-media">
           {slide.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={resolveImage(slide.image, 700)} alt={slide.name} className="h-full w-full object-cover" />
+            // See the desktop hero's own comment above: plain
+            // `loading="lazy"` (default) + `fetchPriority="high"`, never
+            // "eager" — this section is `md:hidden`, so lazy is what
+            // actually stops this variant from being fetched once the
+            // viewport is >=768px.
+            <Image
+              src={resolveImage(slide.image, 700)}
+              alt={slide.name}
+              fill
+              sizes="100vw"
+              fetchPriority="high"
+              className="object-cover"
+            />
           ) : (
             <>
               <div aria-hidden="true" className="absolute inset-0 hatch" />
@@ -368,8 +420,19 @@ function TabletHero({ slide, dispatch }) {
 
         <div className="relative mt-10 aspect-[2/1] w-full overflow-hidden rounded-3xl bg-media">
           {slide.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={resolveImage(slide.image, 1200)} alt={slide.name} className="h-full w-full object-cover" />
+            // Same reasoning as the desktop/mobile hero variants above:
+            // plain `loading="lazy"` (default) + `fetchPriority="high"`,
+            // never "eager" — this section is `hidden md:block lg:hidden`,
+            // so lazy is what stops this variant from fetching outside
+            // the 768–1023px range.
+            <Image
+              src={resolveImage(slide.image, 1200)}
+              alt={slide.name}
+              fill
+              sizes="100vw"
+              fetchPriority="high"
+              className="object-cover"
+            />
           ) : (
             <>
               <div aria-hidden="true" className="absolute inset-0 hatch" />

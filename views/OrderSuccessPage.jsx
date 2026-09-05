@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { motion } from "framer-motion";
@@ -9,7 +10,7 @@ import Button from "../components/ui/Button.jsx";
 import Skeleton from "../components/ui/Skeleton.jsx";
 import OrderTimeline from "../components/order/OrderTimeline.jsx";
 import { useGetOrderQuery } from "../store/shopApi.js";
-import { formatCurrency } from "../lib/utils.js";
+import { formatCurrency, resolveImage } from "../lib/utils.js";
 import { useOrderStatusStream } from "../hooks/useOrderStatusStream.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
 
@@ -114,9 +115,16 @@ export default function OrderSuccessPage() {
         <ul className="divide-y divide-border">
           {order.items.map((it, i) => (
             <li key={i} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-              <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+              <div className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-md bg-muted">
                 {it.snapshot?.image && (
-                  <img src={it.snapshot.image} alt={it.snapshot?.name} className="h-full w-full object-cover" />
+                  <Image
+                    src={resolveImage(it.snapshot.image, 96)}
+                    alt={it.snapshot?.name || ""}
+                    fill
+                    sizes="48px"
+                    loading="lazy"
+                    className="object-cover"
+                  />
                 )}
               </div>
               <div className="min-w-0 flex-1">

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { Home, Package, MapPin, CreditCard, Gift } from "lucide-react";
 
@@ -14,7 +15,7 @@ import { requireServerUser } from "../lib/serverPageAuth.js";
 import { serializeForClient } from "../lib/serialize.js";
 import { HttpError } from "../lib/http.js";
 import { isObjectIdFormat } from "../lib/validation.js";
-import { formatCurrency, cn } from "../lib/utils.js";
+import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
 
@@ -117,13 +118,17 @@ export default async function OrderDetailPage({ params }) {
               {order.items.map((it, i) => (
                 <li key={i} className="py-4 first:pt-0 last:pb-0">
                   <div className="flex gap-4">
-                    <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-md bg-muted">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={it.snapshot?.image}
-                        alt={it.snapshot?.name}
-                        className="h-full w-full object-cover"
-                      />
+                    <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+                      {it.snapshot?.image && (
+                        <Image
+                          src={resolveImage(it.snapshot.image, 160)}
+                          alt={it.snapshot?.name || ""}
+                          fill
+                          sizes="80px"
+                          loading="lazy"
+                          className="object-cover"
+                        />
+                      )}
                     </div>
                     <div className="flex-1">
                       <p className="font-semibold">{it.snapshot?.name}</p>

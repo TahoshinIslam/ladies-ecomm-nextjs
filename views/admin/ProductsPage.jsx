@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Image from "next/image";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -178,10 +179,16 @@ export default function AdminProductsPage() {
       width: 260,
       render: (p) => (
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+          <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
             {p.images?.[0] && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={resolveImage(p.images[0], 80)} alt="" loading="lazy" className="h-full w-full object-cover" />
+              <Image
+                src={resolveImage(p.images[0], 80)}
+                alt={p.name}
+                fill
+                sizes="40px"
+                loading="lazy"
+                className="object-cover"
+              />
             )}
           </div>
           <div className="min-w-0">

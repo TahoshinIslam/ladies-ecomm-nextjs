@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { BellRing, Heart, ImageOff, Scale } from "lucide-react";
@@ -24,7 +25,7 @@ import { cn, resolveImage } from "../../lib/utils.js";
  * contact shadow under the shoe, and a 1.6° tilt on hover; the quick-add bar
  * rises into the plate rather than covering the whole image.
  */
-export default function ProductCard({ product, className, index = 0, onQuickAdd, attributeMeta }) {
+export default function ProductCard({ product, className, index = 0, onQuickAdd, attributeMeta, priority = false }) {
   const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const settings = useSettings();
@@ -166,15 +167,21 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               // instead, leaving visible gaps. Taking the img out of grid
               // flow with `absolute inset-0` sizes it from the box's own
               // edges, independent of its natural ratio.
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
+              <Image
                 src={resolveImage(product.images[0], 640)}
                 alt={product.name}
-                decoding="async"
-                // Above-the-fold cards load eagerly so they don't cost LCP.
-                loading={index < 6 ? "eager" : "lazy"}
-                fetchPriority={index === 0 ? "high" : "auto"}
-                className="absolute inset-0 h-full w-full object-cover"
+                fill
+                sizes="(max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                // `priority` is only ever passed by the ONE grid on a page
+                // that's genuinely this route's above-the-fold, no-hero
+                // content (see ShopPageClient.jsx) — every other call site
+                // (Home's secondary sections, product-detail's related/
+                // recently-viewed rails, wishlist) renders below other
+                // priority content or below the fold, so it must stay
+                // plain lazy/auto regardless of its own local index.
+                loading={priority && index < 6 ? "eager" : "lazy"}
+                fetchPriority={priority && index === 0 ? "high" : "auto"}
+                className="object-cover"
                 onError={() => setImageFailed(true)}
               />
             ) : imageFailed ? (

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Banknote, RefreshCw, Sparkles, Gem } from "lucide-react";
 
@@ -184,11 +185,12 @@ export default async function HomePage() {
                 {copy.tone === "media" && (
                   <>
                     {heroImageBySlug[d.slug] ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <Image
                         src={resolveImage(heroImageBySlug[d.slug], 700)}
                         alt=""
-                        className="absolute inset-0 h-full w-full object-cover"
+                        fill
+                        sizes="(max-width: 1024px) 100vw, 33vw"
+                        className="object-cover"
                       />
                     ) : (
                       <div aria-hidden="true" className="absolute inset-0 hatch" />

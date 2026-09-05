@@ -398,7 +398,12 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
                 )}
               >
                 {products.map((p, i) => (
-                  <ProductCard key={p._id} product={p} index={i} attributeMeta={cardAttributeMeta} />
+                  // `priority` is deliberately only passed here: /shop has
+                  // no hero image, so this grid's own first card is this
+                  // route's genuine LCP candidate (see ProductCard.jsx's
+                  // own comment on why every other grid on the site omits
+                  // this prop).
+                  <ProductCard key={p._id} product={p} index={i} attributeMeta={cardAttributeMeta} priority />
                 ))}
               </div>
 

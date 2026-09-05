@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
@@ -281,12 +282,13 @@ export default function SearchModal() {
                       >
                         <span className="relative h-[62px] w-[62px] flex-none overflow-hidden rounded-[10px] bg-media">
                           {p.images?.[0] ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
+                            <Image
                               src={resolveImage(p.images[0], 124)}
-                              alt=""
+                              alt={p.name}
+                              fill
+                              sizes="62px"
                               loading="lazy"
-                              className="h-full w-full object-cover"
+                              className="object-cover"
                             />
                           ) : (
                             <span aria-hidden="true" className="absolute inset-0 hatch" />

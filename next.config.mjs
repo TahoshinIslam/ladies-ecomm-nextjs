@@ -52,9 +52,32 @@ const nextConfig = {
     root: path.resolve(import.meta.dirname),
   },
   images: {
+    // Phase 9 — HTTPS-only, minimally scoped to the two remote origins
+    // this app actually serves images from. `images.unsplash.com` was
+    // removed: grep across app/views/components/lib/services/models
+    // found zero references to it in live code or seed data — an unused
+    // allowlist entry only widens the image-proxy's attack surface for
+    // no benefit.
+    //
+    // `res.cloudinary.com` is where an admin's own image uploads land
+    // (services/uploadService.js). It can't be narrowed further to a
+    // specific cloud-name path segment here: config/cloudinary.js
+    // resolves the cloud name from CLOUDINARY_URL/CLOUDINARY_CLOUD_NAME
+    // at runtime (it differs between local dev, CI/test, and
+    // production), so a hostname-only pattern is the narrowest one that
+    // stays correct in every environment without hardcoding an
+    // environment-specific value into version-controlled config.
+    //
+    // `placehold.co` is the actual, current image host for this
+    // project's seed/demo catalog (see IMG() in scripts/seedCatalog.mjs)
+    // and is what every product-image test fixture across tests/http/*
+    // and tests/helpers/testDb.mjs already uses — confirmed via a
+    // repo-wide grep for every `https://` host literal in
+    // tests/scripts/models/services. Both are real, currently-served
+    // image origins, not speculative allowlisting.
     remotePatterns: [
       { protocol: "https", hostname: "res.cloudinary.com" },
-      { protocol: "https", hostname: "images.unsplash.com" },
+      { protocol: "https", hostname: "placehold.co" },
     ],
   },
   async headers() {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Image from "next/image";
 import { motion, Reorder } from "framer-motion";
 import { UploadCloud, Upload, X, GripVertical, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -10,7 +11,7 @@ import {
   useUploadImageMutation,
   useUploadMultipleMutation,
 } from "../../store/shopApi.js";
-import { cn } from "../../lib/utils.js";
+import { cn, resolveImage } from "../../lib/utils.js";
 
 /**
  * Image dropzone with:
@@ -185,11 +186,13 @@ export default function ImageDropzone({
                 }}
                 className="group relative h-20 w-20 flex-shrink-0 cursor-grab overflow-hidden rounded-md border border-border bg-muted touch-none active:cursor-grabbing"
               >
-                <img
-                  src={img}
+                <Image
+                  src={resolveImage(img, 160)}
                   alt=""
-                  draggable={false}
-                  className="pointer-events-none h-full w-full select-none object-cover"
+                  fill
+                  sizes="80px"
+                  loading="lazy"
+                  className="pointer-events-none select-none object-cover"
                 />
                 {i === 0 && (
                   <span className="pointer-events-none absolute bottom-0 left-0 right-0 bg-accent/90 px-1 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider text-accent-foreground">

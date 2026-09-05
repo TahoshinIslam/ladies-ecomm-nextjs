@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { Home, Minus, Plus, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
@@ -114,12 +115,13 @@ export default function CartPage() {
                 >
                   <div aria-hidden="true" className="absolute inset-0 hatch" />
                   {(item.variant?.image || p.images?.[0]) && (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
+                    <Image
                       src={resolveImage(item.variant?.image || p.images[0], 240)}
                       alt={p.name}
+                      fill
+                      sizes="(max-width: 640px) 88px, 112px"
                       loading="lazy"
-                      className="relative h-full w-full object-cover"
+                      className="object-cover"
                     />
                   )}
                 </Link>

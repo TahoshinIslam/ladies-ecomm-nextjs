@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useSelector } from "react-redux";
 import { ThumbsUp, BadgeCheck, Pencil, Trash2, X, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import {
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { formatDhakaDate } from "../../lib/date.js";
+import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
 
 export default function ReviewList({ productId }) {
   const user = useSelector(selectCurrentUser);
@@ -119,14 +121,22 @@ function ReviewItem({ review, isOwn }) {
   return (
     <li className="rounded-lg border border-border bg-background p-4">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-bold">
-          {review.user?.avatar ? (
-            <img
+        <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-bold">
+          {review.user?.avatar && isApprovedImageSource(review.user.avatar) ? (
+            <Image
               src={review.user.avatar}
               alt={review.user.name}
-              className="h-full w-full rounded-full object-cover"
+              fill
+              sizes="40px"
+              className="rounded-full object-cover"
             />
           ) : (
+            // Same reasoning as views/admin/UsersPage.jsx — a reviewer's
+            // `avatar` is an arbitrary, unrestricted-origin URL that
+            // proxy.js's production CSP already blocks the browser from
+            // loading directly unless it's res.cloudinary.com/placehold.co;
+            // the initials fallback is what an unapproved-origin avatar
+            // actually renders as today.
             review.user?.name?.[0]?.toUpperCase() || "?"
           )}
         </div>

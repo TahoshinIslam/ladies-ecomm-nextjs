@@ -10,6 +10,7 @@
 // for genuinely interactive, user-owned state (wishlist membership/toggle,
 // cart).
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useSelector, useDispatch } from "react-redux";
 import { motion } from "framer-motion";
@@ -218,14 +219,18 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
             <div aria-hidden="true" className="absolute inset-0 hatch" />
             <div aria-hidden="true" className="absolute inset-0 glow" />
             {hasArtwork && !imageFailed ? (
-              <img
+              // The product-detail page's genuine LCP candidate — the only
+              // high-fetch-priority image on this route (thumbnails below
+              // stay default/lazy, per this phase's "thumbnails must not be
+              // priority" rule).
+              <Image
                 src={resolveImage(galleryImages[selectedImage], 800)}
                 alt={product.name}
-                width="800"
-                height="800"
+                fill
+                sizes="(max-width: 1024px) 100vw, 50vw"
+                loading="eager"
                 fetchPriority="high"
-                decoding="async"
-                className="relative h-full w-full object-cover"
+                className="object-cover"
                 onError={() => setImageFailed(true)}
               />
             ) : imageFailed ? (
@@ -255,7 +260,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                     i === selectedImage ? "border-accent" : "border-transparent"
                   )}
                 >
-                  <img src={resolveImage(src, 160)} alt="" width="80" height="80" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                  <Image src={resolveImage(src, 160)} alt="" width={80} height={80} loading="lazy" className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

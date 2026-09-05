@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -658,12 +659,13 @@ export default function CheckoutPage() {
                       <div className="relative h-14 w-14 flex-none overflow-hidden rounded-md bg-media">
                         <div aria-hidden="true" className="absolute inset-0 hatch" />
                         {(it.variant?.image || p.images?.[0]) && (
-                          <img
+                          <Image
                             src={resolveImage(it.variant?.image || p.images[0], 112)}
                             alt={p.name}
+                            fill
+                            sizes="56px"
                             loading="lazy"
-                            decoding="async"
-                            className="relative h-full w-full object-cover"
+                            className="object-cover"
                           />
                         )}
                       </div>

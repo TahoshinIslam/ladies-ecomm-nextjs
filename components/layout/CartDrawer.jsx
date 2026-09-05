@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Minus, Plus, ShoppingBag } from "lucide-react";
@@ -137,12 +138,13 @@ export default function CartDrawer() {
                   >
                     <div aria-hidden="true" className="absolute inset-0 hatch" />
                     {(item.variant?.image || p.images?.[0]) && (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
+                      <Image
                         src={resolveImage(item.variant?.image || p.images[0], 180)}
-                        alt=""
+                        alt={p.name}
+                        fill
+                        sizes="88px"
                         loading="lazy"
-                        className="relative h-full w-full object-cover"
+                        className="object-cover"
                       />
                     )}
                   </Link>

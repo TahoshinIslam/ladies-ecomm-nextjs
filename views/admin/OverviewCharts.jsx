@@ -7,6 +7,7 @@
 // OverviewPage.jsx), not from RTK Query. No loading states are needed
 // here (there's nothing left to load); the existing EmptyState fallbacks
 // for a genuinely empty array are preserved as-is.
+import Image from "next/image";
 import { motion } from "framer-motion";
 import {
   AreaChart,
@@ -33,7 +34,7 @@ import {
 } from "lucide-react";
 
 import EmptyState from "../../components/ui/EmptyState.jsx";
-import { formatCurrency, cn } from "../../lib/utils.js";
+import { formatCurrency, cn, resolveImage } from "../../lib/utils.js";
 
 const PIE_COLORS = [
   "rgb(var(--color-accent))",
@@ -159,10 +160,16 @@ export default function OverviewCharts({ overview, series, topProducts, statusBr
                   <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-accent/10 text-sm font-bold text-accent">
                     {i + 1}
                   </span>
-                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+                  <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
                     {p.image && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
+                      <Image
+                        src={resolveImage(p.image, 80)}
+                        alt={p.name}
+                        fill
+                        sizes="40px"
+                        loading="lazy"
+                        className="object-cover"
+                      />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">

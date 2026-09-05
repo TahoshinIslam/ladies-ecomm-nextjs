@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
@@ -240,12 +241,13 @@ export default function ProductFinder() {
                         >
                           <span className="relative h-[60px] w-[60px] flex-none overflow-hidden rounded-[10px] bg-media">
                             {p.images?.[0] ? (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img
+                              <Image
                                 src={resolveImage(p.images[0], 120)}
-                                alt=""
+                                alt={p.name}
+                                fill
+                                sizes="60px"
                                 loading="lazy"
-                                className="h-full w-full object-cover"
+                                className="object-cover"
                               />
                             ) : (
                               <span aria-hidden="true" className="absolute inset-0 hatch" />

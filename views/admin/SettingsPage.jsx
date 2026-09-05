@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { toast } from "sonner";
 import { Save, Plus, Trash2, Gift, Image as ImageIcon, Upload, X } from "lucide-react";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
+import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
@@ -120,13 +122,26 @@ const ImagePicker = ({ value, onChange, label, help, accept = "image/*" }) => {
   return (
     <Field label={label} help={help}>
       <div className="flex items-start gap-3">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
-          {value ? (
-            <img
+        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
+          {value && isApprovedImageSource(value) ? (
+            <Image
               src={value}
               alt={label}
-              className="h-full w-full object-contain"
+              fill
+              sizes="64px"
+              className="object-contain"
             />
+          ) : value ? (
+            // `value` is a free-text branding URL (see the text input
+            // right below — placeholder "https://… (or upload)") that an
+            // admin can paste directly, not only a Cloudinary URL from
+            // the upload button. An unapproved host isn't just ineligible
+            // for next/image — proxy.js's production CSP `img-src`
+            // ('self' https://res.cloudinary.com data: blob:) already
+            // blocks the browser from ever loading it directly, so a raw
+            // <img> here would silently fail in production anyway. The
+            // icon fallback below is what actually renders for that case.
+            <ImageIcon className="h-6 w-6 text-muted-foreground" />
           ) : (
             <ImageIcon className="h-6 w-6 text-muted-foreground" />
           )}

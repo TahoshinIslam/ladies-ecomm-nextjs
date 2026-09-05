@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Star, MessageSquare, Trash2, Send, X, Search, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
@@ -24,7 +25,7 @@ import {
   useDeleteReviewMutation,
   useUpdateReviewMutation,
 } from "../../store/shopApi.js";
-import { formatDateTime } from "../../lib/utils.js";
+import { formatDateTime, resolveImage } from "../../lib/utils.js";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 
 // Reviews stay a card list rather than a <table> — a comment/reply is
@@ -130,11 +131,16 @@ export default function AdminReviewsPage() {
 
                   <div className="mt-2 flex items-center gap-2">
                     {r.product?.images?.[0] && (
-                      <img
-                        src={r.product.images[0]}
-                        alt={r.product.name}
-                        className="h-8 w-8 flex-shrink-0 rounded object-cover"
-                      />
+                      <span className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded">
+                        <Image
+                          src={resolveImage(r.product.images[0], 64)}
+                          alt={r.product.name}
+                          fill
+                          sizes="32px"
+                          loading="lazy"
+                          className="object-cover"
+                        />
+                      </span>
                     )}
                     <p className="truncate text-sm font-semibold">
                       {r.product?.name || "Unknown product"}

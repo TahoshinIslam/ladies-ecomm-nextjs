@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
@@ -169,11 +170,12 @@ export default function QuickAddSheet() {
               <div aria-hidden="true" className="absolute inset-0 hatch" />
               <div aria-hidden="true" className="absolute inset-0 glow" />
               {(selectedVariant?.images?.[0] || product.images?.[0]) ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
+                <Image
                   src={resolveImage(selectedVariant?.images?.[0] || product.images[0], 480)}
-                  alt=""
-                  className="relative h-full w-full object-cover"
+                  alt={product.name}
+                  fill
+                  sizes="380px"
+                  className="object-cover"
                 />
               ) : (
                 <span className="absolute bottom-[18px] left-5 font-mono text-[10.5px] uppercase tracking-[0.1em] text-stone">
