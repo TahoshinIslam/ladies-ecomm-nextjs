@@ -2,6 +2,7 @@ import { requireUser } from "../../../../../lib/auth.js";
 import { HttpError, withRoute } from "../../../../../lib/http.js";
 import { eventBus, orderChannel } from "../../../../../lib/events.js";
 import Order from "../../../../../models/orderModel.js";
+import { requireObjectIdFormat } from "../../../../../lib/validation.js";
 
 // Route Handlers can be statically evaluated/buffered by default; an SSE
 // stream needs to run fresh per-request and never get cached or closed
@@ -24,6 +25,7 @@ export const GET = withRoute(async (request, { params }) => {
   const user = await requireUser(request);
 
   const { id } = await params;
+  requireObjectIdFormat(id, "id");
   const order = await Order.findById(id).select("user").lean();
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user.toString() === String(user._id);

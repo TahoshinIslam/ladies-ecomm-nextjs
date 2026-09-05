@@ -55,6 +55,10 @@ import {
   getBrowserSessionStorage,
   createSubmitLock,
 } from "../lib/checkoutIntent.js";
+// A genuinely shared enum (not the full server address schema — this
+// form's field-level messages stay its own) — see
+// schemas/addressSchemas.js's ADDRESS_LABELS.
+import { ADDRESS_LABELS } from "../schemas/addressSchemas.js";
 
 const addressSchema = z.object({
   fullName: z.string().min(2, "Required"),
@@ -64,7 +68,7 @@ const addressSchema = z.object({
   state: z.string().optional(),
   postalCode: z.string().min(2, "Required"),
   country: z.string().min(2, "Required"),
-  label: z.enum(["home", "work", "other"]).default("home"),
+  label: z.enum(ADDRESS_LABELS).default("home"),
 });
 
 // Stripe / bKash / Nagad are temporarily disabled until the gateway

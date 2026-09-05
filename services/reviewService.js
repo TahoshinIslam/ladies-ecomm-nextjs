@@ -3,6 +3,7 @@ import Order from "../models/orderModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
 import { emitAdminEvent } from "../lib/events.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 export async function getProductReviews(productId, { page = 1, limit = 10 } = {}) {
   const skip = (Number(page) - 1) * Number(limit);
@@ -20,6 +21,7 @@ export async function getProductReviews(productId, { page = 1, limit = 10 } = {}
 }
 
 export async function createReview(userId, productId, { rating, title, comment, images = [] }) {
+  requireObjectIdFormat(productId, "productId");
   // Hard block: must have a delivered order containing this product.
   const hasDelivered = await Order.exists({
     user: userId,
@@ -55,6 +57,7 @@ export async function createReview(userId, productId, { rating, title, comment, 
 }
 
 export async function updateReview(reviewId, actingUser, { rating, title, comment, images }) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 
@@ -70,6 +73,7 @@ export async function updateReview(reviewId, actingUser, { rating, title, commen
 }
 
 export async function deleteReview(reviewId, actingUser) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 
@@ -80,6 +84,7 @@ export async function deleteReview(reviewId, actingUser) {
 }
 
 export async function markHelpful(reviewId) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findByIdAndUpdate(reviewId, { $inc: { helpfulCount: 1 } }, { new: true });
   if (!review) throw new HttpError(404, "Review not found");
   return review.helpfulCount;
@@ -117,6 +122,7 @@ export async function listAllReviews({ page = 1, limit = 20, rating, productId, 
 }
 
 export async function replyToReview(reviewId, adminUserId, text) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 

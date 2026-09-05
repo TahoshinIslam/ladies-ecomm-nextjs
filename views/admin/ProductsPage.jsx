@@ -44,6 +44,7 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 import { usePermission } from "../../hooks/usePermission.js";
 import { PERMISSIONS } from "../../lib/permissions.js";
+import { AGE_GROUP_VALUES_LIST, AVAILABILITY_VALUES } from "../../schemas/catalogSchemas.js";
 
 const STEPS = ["Basic info", "Attributes", "Variants"];
 
@@ -70,10 +71,10 @@ const productSchema = z.object({
   department: z.string().min(1, "Select a department"),
   category: z.string().min(1, "Select a subcategory"),
   brand: z.string().optional(),
-  ageGroup: z.enum(["adult", "kids", "girls"]),
+  ageGroup: z.enum(AGE_GROUP_VALUES_LIST),
   basePrice: z.coerce.number().positive("Must be > 0"),
   discountPrice: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
-  availability: z.enum(["readyStock", "preOrder", "madeToOrder"]),
+  availability: z.enum(AVAILABILITY_VALUES),
   images: z.array(z.string()).min(1, "At least one image"),
   tags: z.string().optional(),
   isFeatured: z.boolean().optional(),

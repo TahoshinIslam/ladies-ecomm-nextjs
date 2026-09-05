@@ -130,15 +130,15 @@ describe("related-products and batch endpoints (real MongoDB, via HTTP)", { skip
     );
   });
 
-  test("batch endpoint silently drops malformed ids instead of erroring", async () => {
+  test("FIXED (Phase 5C): a malformed id in the batch list rejects the WHOLE request (400), rather than silently dropping it", async () => {
+    // schemas/catalogSchemas.js's productBatchQuerySchema now validates
+    // every comma-separated id explicitly — "do not silently filter
+    // invalid IDs" per the Phase 5 input-validation contract. Previously
+    // a garbage id was just dropped and the request quietly succeeded with
+    // whatever valid ids remained.
     const validId = activeProducts[0]._id;
     const res = await fetch(`${BASE_URL}/api/products/batch?ids=not-an-id,${validId},123`);
-    assert.equal(res.status, 200);
-    const json = await res.json();
-    assert.deepEqual(
-      json.products.map((p) => p._id),
-      [validId],
-    );
+    assert.equal(res.status, 400);
   });
 
   test("batch endpoint excludes an inactive product", async () => {
@@ -151,9 +151,22 @@ describe("related-products and batch endpoints (real MongoDB, via HTTP)", { skip
     );
   });
 
-  test("batch endpoint returns an empty list for an empty ids param", async () => {
+  test("FIXED (Phase 5C): an empty ids param is now rejected (400) — 'at least one id is required', not silently a 200 with an empty list", async () => {
     const res = await fetch(`${BASE_URL}/api/products/batch?ids=`);
+    assert.equal(res.status, 400);
+  });
+
+  test("FIXED (Phase 5C): duplicate ids in the batch list are de-duplicated (not meaningful, not rejected)", async () => {
+    const validId = activeProducts[0]._id;
+    const res = await fetch(`${BASE_URL}/api/products/batch?ids=${validId},${validId}`);
+    assert.equal(res.status, 200);
     const json = await res.json();
-    assert.deepEqual(json.products, []);
+    assert.equal(json.products.length, 1);
+  });
+
+  test("FIXED (Phase 5C): more than the maximum allowed ids is rejected (400)", async () => {
+    const tooMany = Array.from({ length: 51 }, (_, i) => "5".repeat(23) + i.toString(16)).join(",");
+    const res = await fetch(`${BASE_URL}/api/products/batch?ids=${tooMany}`);
+    assert.equal(res.status, 400);
   });
 });

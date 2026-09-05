@@ -5,6 +5,8 @@ import { validateCoupon } from "../../../../services/couponService.js";
 import { withRoute } from "../../../../lib/http.js";
 import { enforceRateLimit } from "../../../../lib/rateLimit.js";
 import { COUPON_VALIDATE_USER_LIMIT, COUPON_VALIDATE_USER_WINDOW_MS } from "../../../../lib/rateLimitConfig.js";
+import { parseJsonBody } from "../../../../lib/validation.js";
+import { validateCouponSchema } from "../../../../schemas/couponSchemas.js";
 
 export const POST = withRoute(async (request) => {
   const user = await requireUser(request);
@@ -16,7 +18,7 @@ export const POST = withRoute(async (request) => {
   // coupon-specific).
   await enforceRateLimit([{ identity: String(user._id), action: "coupon-validate:user", limit: COUPON_VALIDATE_USER_LIMIT, windowMs: COUPON_VALIDATE_USER_WINDOW_MS }]);
 
-  const { code, subtotal } = await request.json();
+  const { code, subtotal } = await parseJsonBody(request, validateCouponSchema);
   const result = await validateCoupon(code, subtotal);
   return NextResponse.json({ success: true, ...result });
 });

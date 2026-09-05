@@ -1,5 +1,6 @@
 import Coupon from "../models/couponModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 export async function validateCoupon(code, subtotal = 0) {
   const coupon = await Coupon.findOne({ code: code?.toUpperCase() });
@@ -73,12 +74,20 @@ export async function createCoupon(body) {
 }
 
 export async function updateCoupon(id, body) {
+  requireObjectIdFormat(id, "id");
+  // `body` is already schema-validated + `.strict()`-rejected of unknown
+  // fields by schemas/couponSchemas.js's updateCouponSchema before this
+  // runs (see app/api/coupons/[id]/route.js) — critically, that schema
+  // does NOT include `usedCount`, so an admin PUT can never directly set
+  // it (it may only ever change via the guarded atomic claim/rollback in
+  // services/orderService.js).
   const coupon = await Coupon.findByIdAndUpdate(id, body, { new: true, runValidators: true });
   if (!coupon) throw new HttpError(404, "Coupon not found");
   return coupon;
 }
 
 export async function deleteCoupon(id) {
+  requireObjectIdFormat(id, "id");
   const coupon = await Coupon.findByIdAndDelete(id);
   if (!coupon) throw new HttpError(404, "Coupon not found");
 }

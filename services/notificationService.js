@@ -1,6 +1,7 @@
 import Notification from "../models/notificationModel.js";
 import User from "../models/userModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 // Fans a notification out to every admin/employee — called internally from
 // orderService.js (new order) and reviewService.js (new review). Already a
@@ -30,6 +31,7 @@ export async function getNotifications(userId, { page = 1, limit = 20, unreadOnl
 }
 
 export async function markAsRead(userId, notificationId) {
+  requireObjectIdFormat(notificationId, "notificationId");
   const notification = await Notification.findOneAndUpdate(
     { _id: notificationId, recipient: userId },
     { readAt: new Date() },

@@ -25,10 +25,11 @@ import {
 } from "../../store/shopApi.js";
 import { formatCurrency, formatDate } from "../../lib/utils.js";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
+import { DISCOUNT_TYPES } from "../../schemas/couponSchemas.js";
 
 const couponSchema = z.object({
   code: z.string().min(3, "At least 3 characters").transform((s) => s.toUpperCase()),
-  discountType: z.enum(["percentage", "flat"]),
+  discountType: z.enum(DISCOUNT_TYPES),
   discountValue: z.coerce.number().positive(),
   minOrderAmount: z.coerce.number().min(0).optional().default(0),
   maxDiscount: z.coerce.number().optional().nullable(),

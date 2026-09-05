@@ -1,5 +1,6 @@
 import Address from "../models/addressModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 const WRITABLE_FIELDS = ["label", "fullName", "phone", "street", "city", "state", "postalCode", "country", "isDefault"];
 
@@ -20,6 +21,7 @@ export async function createAddress(userId, body) {
 }
 
 export async function updateAddress(userId, addressId, body) {
+  requireObjectIdFormat(addressId, "addressId");
   const address = await Address.findOne({ _id: addressId, user: userId });
   if (!address) throw new HttpError(404, "Address not found");
   Object.assign(address, pickWritable(body));
@@ -28,6 +30,7 @@ export async function updateAddress(userId, addressId, body) {
 }
 
 export async function deleteAddress(userId, addressId) {
+  requireObjectIdFormat(addressId, "addressId");
   const address = await Address.findOneAndDelete({ _id: addressId, user: userId });
   if (!address) throw new HttpError(404, "Address not found");
 }

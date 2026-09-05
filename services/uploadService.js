@@ -1,6 +1,7 @@
 import { uploadBuffer, deleteImage } from "../utlis/cloudinaryUpload.js";
 import { cloudinaryConfigured } from "../config/cloudinary.js";
 import { HttpError } from "../lib/http.js";
+import { detectImageSignature, normalizeDeclaredType } from "../lib/fileSignature.js";
 
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/avif"]);
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -22,17 +23,49 @@ function formatCloudinaryError(err) {
 
 async function validateAndBuffer(file) {
   if (!file) throw new HttpError(400, "No file uploaded.");
+  // Zero-byte check first — cheap (file.size, no read needed) and a
+  // zero-byte "image" can never have a real signature anyway, so this
+  // also short-circuits before ever calling file.arrayBuffer() on
+  // something with nothing to detect.
+  if (file.size === 0) {
+    throw new HttpError(400, `File "${file.name}" is empty.`);
+  }
+  if (file.size > MAX_BYTES) {
+    throw new HttpError(413, `File "${file.name}" is over 5 MB.`);
+  }
   if (!ALLOWED_TYPES.has(file.type)) {
     throw new HttpError(
       415,
       `File "${file.name}" is not an allowed image type. Allowed: jpeg, jpg, png, webp, avif.`,
     );
   }
-  if (file.size > MAX_BYTES) {
-    throw new HttpError(413, `File "${file.name}" is over 5 MB.`);
-  }
+
+  // The declared `file.type` above is attacker-controlled multipart
+  // metadata, not derived from the file's actual bytes — this is what
+  // closes that gap. There's no cheaper "read just a few bytes" path here:
+  // the full buffer is already required for the Cloudinary upload itself,
+  // so reading it once now and inspecting its first ~12 bytes for a known
+  // signature is the minimum extra work this check costs, not a second
+  // read of the file.
   const arrayBuffer = await file.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const buffer = Buffer.from(arrayBuffer);
+
+  const detectedType = detectImageSignature(buffer);
+  if (!detectedType) {
+    // Never reached for a real JPEG/PNG/WebP/AVIF — this is what actually
+    // rejects an HTML/script file renamed to .jpg, a truncated/corrupt
+    // upload, an SVG (plain XML text, no binary magic number, and not on
+    // ALLOWED_TYPES to begin with), or arbitrary random bytes.
+    throw new HttpError(415, `File "${file.name}" does not have a recognized image file signature.`);
+  }
+  if (normalizeDeclaredType(file.type) !== detectedType) {
+    throw new HttpError(
+      415,
+      `File "${file.name}"'s declared type does not match its actual content.`,
+    );
+  }
+
+  return buffer;
 }
 
 export async function uploadSingle(file, folder = "shoestore") {

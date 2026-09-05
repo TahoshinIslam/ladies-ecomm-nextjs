@@ -3,21 +3,24 @@ import { NextResponse } from "next/server";
 import { requireUser } from "../../../../../lib/auth.js";
 import { getProductReviews, createReview } from "../../../../../services/reviewService.js";
 import { withRoute } from "../../../../../lib/http.js";
+import { parseJsonBody, parsePathParams, parseQuery, z } from "../../../../../lib/validation.js";
+import { productReviewsQuerySchema, createReviewSchema } from "../../../../../schemas/reviewSchemas.js";
+import { objectIdSchema } from "../../../../../schemas/commonSchemas.js";
+
+const productIdParamSchema = z.object({ productId: objectIdSchema });
 
 export const GET = withRoute(async (request, { params }) => {
-  const { productId } = await params;
+  const { productId } = parsePathParams(await params, productIdParamSchema);
   const { searchParams } = new URL(request.url);
-  const result = await getProductReviews(productId, {
-    page: searchParams.get("page") || undefined,
-    limit: searchParams.get("limit") || undefined,
-  });
+  const query = parseQuery(searchParams, productReviewsQuerySchema);
+  const result = await getProductReviews(productId, query);
   return NextResponse.json({ success: true, ...result });
 });
 
 export const POST = withRoute(async (request, { params }) => {
   const user = await requireUser(request);
-  const { productId } = await params;
-  const body = await request.json();
+  const { productId } = parsePathParams(await params, productIdParamSchema);
+  const body = await parseJsonBody(request, createReviewSchema);
   const review = await createReview(user._id, productId, body);
   return NextResponse.json({ success: true, review }, { status: 201 });
 });

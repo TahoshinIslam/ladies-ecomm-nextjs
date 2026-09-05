@@ -6,6 +6,8 @@ import { updateMe } from "../../../../services/userService.js";
 import { HttpError, withRoute } from "../../../../lib/http.js";
 import { revokeAllSessionsForUser } from "../../../../lib/session.js";
 import { readSessionTokenFromRequest, clearSessionCookie, clearCsrfCookie } from "../../../../lib/cookies.js";
+import { parseJsonBody } from "../../../../lib/validation.js";
+import { updateMeSchema } from "../../../../schemas/authSchemas.js";
 
 export const GET = withRoute(async (request) => {
   const user = await getSessionUser(request);
@@ -15,7 +17,7 @@ export const GET = withRoute(async (request) => {
 
 export const PUT = withRoute(async (request) => {
   const sessionUser = await requireUser(request);
-  const body = await request.json();
+  const body = await parseJsonBody(request, updateMeSchema);
   const user = await updateMe(sessionUser._id, body);
 
   const response = NextResponse.json({ success: true, user }, { headers: { "Cache-Control": "no-store" } });

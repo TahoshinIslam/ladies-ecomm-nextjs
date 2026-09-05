@@ -6,6 +6,8 @@ import { clearSessionCookie, clearCsrfCookie } from "../../../../../lib/cookies.
 import { requireClientIp } from "../../../../../lib/clientIp.js";
 import { enforceRateLimit, ClientIpUnavailableError } from "../../../../../lib/rateLimit.js";
 import { RESET_PASSWORD_IP_LIMIT, RESET_PASSWORD_IP_WINDOW_MS } from "../../../../../lib/rateLimitConfig.js";
+import { parseJsonBody } from "../../../../../lib/validation.js";
+import { resetPasswordSchema } from "../../../../../schemas/authSchemas.js";
 
 export const POST = withRoute(async (request, { params }) => {
   const { token } = await params;
@@ -21,7 +23,7 @@ export const POST = withRoute(async (request, { params }) => {
   if (!ok) throw new ClientIpUnavailableError();
   if (ip) await enforceRateLimit([{ identity: ip, action: "reset-password:ip", limit: RESET_PASSWORD_IP_LIMIT, windowMs: RESET_PASSWORD_IP_WINDOW_MS }]);
 
-  const { password } = await request.json();
+  const { password } = await parseJsonBody(request, resetPasswordSchema);
   const result = await resetPassword(token, password);
 
   // resetPassword() already revoked every session server-side; also clear

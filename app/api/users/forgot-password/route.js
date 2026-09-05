@@ -10,9 +10,17 @@ import {
   FORGOT_PASSWORD_ACCOUNT_LIMIT,
   FORGOT_PASSWORD_ACCOUNT_WINDOW_MS,
 } from "../../../../lib/rateLimitConfig.js";
+import { validateData } from "../../../../lib/validation.js";
+import { forgotPasswordSchema } from "../../../../schemas/authSchemas.js";
 
 export const POST = withRoute(async (request) => {
-  const { email } = await request.json();
+  let raw;
+  try {
+    raw = await request.json();
+  } catch {
+    raw = {};
+  }
+  const email = raw?.email;
 
   // Both dimensions key off the SUBMITTED email string only — never a
   // database lookup to decide whether to rate-limit — so the limiter
@@ -33,6 +41,7 @@ export const POST = withRoute(async (request) => {
   }
   if (rateLimitChecks.length) await enforceRateLimit(rateLimitChecks);
 
-  const result = await forgotPassword(email);
+  const validated = validateData(raw, forgotPasswordSchema);
+  const result = await forgotPassword(validated.email);
   return NextResponse.json({ success: true, ...result });
 });

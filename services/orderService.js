@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
 import Coupon from "../models/couponModel.js";
+import CouponUsage from "../models/couponUsageModel.js";
 import Cart from "../models/cartModel.js";
 import Settings from "../models/settingsModel.js";
 import User from "../models/userModel.js";
@@ -11,6 +12,7 @@ import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
 import { emitOrderEvent, emitAdminEvent } from "../lib/events.js";
 import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 // Matches the "danger" row-highlight threshold ProductsPage.jsx already
 // uses for total stock — reusing the same number so "low stock" means the
@@ -167,6 +169,19 @@ const calcTotals = async (
     if (couponDoc.minOrderAmount && subtotal < couponDoc.minOrderAmount) {
       throw new HttpError(400, `Minimum order ${couponDoc.minOrderAmount} required`);
     }
+    // Phase 5: read-only checks for a clear, early error message. These
+    // are NOT the atomic guarantee (a concurrent request could still race
+    // past a plain read) — the real enforcement is the guarded conditional
+    // update at claim time below, inside createOrder()'s transaction.
+    if (couponDoc.usageLimit !== null && couponDoc.usedCount >= couponDoc.usageLimit) {
+      throw new HttpError(400, "Coupon usage limit reached");
+    }
+    if (userId && couponDoc.perUserLimit !== null && couponDoc.perUserLimit !== undefined) {
+      const existingUsage = await CouponUsage.findOne({ coupon: couponDoc._id, user: userId }).session(session);
+      if (existingUsage && existingUsage.count >= couponDoc.perUserLimit) {
+        throw new HttpError(400, "You have already used this coupon the maximum number of times");
+      }
+    }
     discount =
       couponDoc.discountType === "percentage"
         ? Math.round((subtotal * couponDoc.discountValue) / 100)
@@ -297,7 +312,52 @@ export async function createOrder(
         }
 
         if (t.couponDoc) {
-          await Coupon.updateOne({ _id: t.couponDoc._id }, { $inc: { usedCount: 1 } }, { session });
+          // Atomic, guarded global-usage claim — mirrors the stock-decrement
+          // pattern above exactly: the filter itself re-checks
+          // `usedCount < usageLimit` (or is skipped entirely for a null/
+          // unlimited usageLimit) at the moment of the write, and
+          // `modifiedCount` is checked to detect a lost race. Previously
+          // this was an unconditional `$inc` with no upper bound, letting
+          // concurrent checkouts push `usedCount` past `usageLimit`.
+          const couponClaim = await Coupon.updateOne(
+            {
+              _id: t.couponDoc._id,
+              $or: [{ usageLimit: null }, { $expr: { $lt: ["$usedCount", "$usageLimit"] } }],
+            },
+            { $inc: { usedCount: 1 } },
+            { session },
+          );
+          if (couponClaim.modifiedCount !== 1) {
+            throw new HttpError(409, "Coupon usage limit reached");
+          }
+
+          // Atomic, guarded PER-USER claim — perUserLimit is defined on
+          // the Coupon schema but was never enforced anywhere before
+          // Phase 5. A null/undefined perUserLimit means unlimited for
+          // this user; otherwise the upsert's filter requires the
+          // existing usage row (if any) to still be under the limit. When
+          // it isn't, Mongo's upsert tries to insert a second row for the
+          // same (coupon, user) pair, which models/couponUsageModel.js's
+          // unique compound index rejects — caught below and translated
+          // into the same 409 conflict shape the stock/global-usage guards
+          // use, not a raw duplicate-key 500.
+          const perUserLimit = t.couponDoc.perUserLimit;
+          const usageFilter = { coupon: t.couponDoc._id, user: userId };
+          if (perUserLimit !== null && perUserLimit !== undefined) {
+            usageFilter.count = { $lt: perUserLimit };
+          }
+          try {
+            await CouponUsage.findOneAndUpdate(
+              usageFilter,
+              { $inc: { count: 1 }, $setOnInsert: { coupon: t.couponDoc._id, user: userId } },
+              { session, upsert: true },
+            );
+          } catch (err) {
+            if (err?.code === 11000) {
+              throw new HttpError(409, "You have already used this coupon the maximum number of times");
+            }
+            throw err;
+          }
         }
 
         const [order] = await Order.create(
@@ -399,6 +459,7 @@ export async function getMyOrders(userId) {
 }
 
 export async function getOrder(userId, role, orderId) {
+  requireObjectIdFormat(orderId, "orderId");
   const order = await Order.findById(orderId).populate("user", "name email");
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user._id.toString() === String(userId);
@@ -407,6 +468,7 @@ export async function getOrder(userId, role, orderId) {
 }
 
 export async function cancelOrder(userId, role, orderId) {
+  requireObjectIdFormat(orderId, "orderId");
   const session = await mongoose.startSession();
   let updatedOrder;
   try {
@@ -427,9 +489,23 @@ export async function cancelOrder(userId, role, orderId) {
         );
       }
       if (order.coupon) {
+        // Symmetric with the existing (pre-Phase-5) global-usage rollback
+        // below: cancelling an order restores both the global usedCount
+        // AND this Phase 5 per-user usage count — the same choice already
+        // made for usedCount, now extended consistently to the new
+        // per-user tracking rather than left half-applied. (This mirrors
+        // the FIRST-order promo's deliberately opposite choice —
+        // claimFirstOrderPromo's flag is sticky and never restored on
+        // cancel — but that is a distinct, separately-reasoned guarantee;
+        // this coupon rollback simply keeps doing what it already did.)
         await Coupon.updateOne(
           { _id: order.coupon, usedCount: { $gt: 0 } },
           { $inc: { usedCount: -1 } },
+          { session },
+        );
+        await CouponUsage.updateOne(
+          { coupon: order.coupon, user: order.user, count: { $gt: 0 } },
+          { $inc: { count: -1 } },
           { session },
         );
       }
@@ -504,12 +580,37 @@ export async function getAllOrders({ status, search, sortBy, sortOrder, page = 1
   };
 }
 
-export async function updateOrderStatus(orderId, { status, trackingNumber }) {
-  const valid = ["pending", "paid", "processing", "shipped", "delivered", "cancelled", "refunded"];
-  if (!valid.includes(status)) throw new HttpError(400, "Invalid status");
+// Forward-progression workflow graph for the admin PUT /api/orders/[id]/status
+// endpoint. `delivered`, `cancelled`, `refunded` are terminal — nothing
+// transitions OUT of them here. Cancellation from an earlier status has
+// its own dedicated cancelOrder() flow (stock/coupon rollback); this
+// endpoint only ever moves an order forward or into cancelled/refunded,
+// never backward — the exact guarantee Phase 4's COD atomicity work
+// already relies on (a delivered/shipped/cancelled order must never
+// regress).
+const ORDER_STATUS_TRANSITIONS = {
+  pending: ["paid", "processing", "shipped", "cancelled"],
+  paid: ["processing", "shipped", "cancelled", "refunded"],
+  processing: ["shipped", "cancelled"],
+  shipped: ["delivered", "cancelled"],
+  delivered: ["refunded"],
+  cancelled: [],
+  refunded: [],
+};
 
+function isOrderStatusTransitionAllowed(from, to) {
+  if (from === to) return true; // idempotent no-op re-submission
+  return (ORDER_STATUS_TRANSITIONS[from] || []).includes(to);
+}
+
+export async function updateOrderStatus(orderId, { status, trackingNumber }) {
+  requireObjectIdFormat(orderId, "orderId");
   const order = await Order.findById(orderId);
   if (!order) throw new HttpError(404, "Order not found");
+
+  if (!isOrderStatusTransitionAllowed(order.status, status)) {
+    throw new HttpError(409, `Cannot change order status from "${order.status}" to "${status}"`);
+  }
 
   order.status = status;
   if (trackingNumber) order.trackingNumber = trackingNumber;

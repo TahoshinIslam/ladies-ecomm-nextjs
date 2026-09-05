@@ -28,6 +28,14 @@ import {
   useDeleteAddressMutation,
 } from "../store/shopApi.js";
 import { cn } from "../lib/utils.js";
+// Shared boundary values/enums (not the full server schemas — these forms
+// keep their own plain-English messages) so this client form can never
+// drift out of sync with what services/userService.js's updateMe() and
+// createAddress()/updateAddress() actually enforce server-side. No
+// Mongoose/server-only code is pulled in by importing from schemas/*.js —
+// see tests/clientSchemaImportability.test.mjs.
+import { PASSWORD_MIN_LENGTH } from "../schemas/authSchemas.js";
+import { ADDRESS_LABELS } from "../schemas/addressSchemas.js";
 
 const TABS = [
   { id: "info", label: "Profile info", icon: UserIcon },
@@ -170,8 +178,12 @@ function InfoTab() {
 // =========== PASSWORD TAB ===========
 const pwdSchema = z
   .object({
-    currentPassword: z.string().min(6, "Required"),
-    newPassword: z.string().min(6, "At least 6 characters"),
+    currentPassword: z.string().min(1, "Required"),
+    // PASSWORD_MIN_LENGTH matches schemas/authSchemas.js's passwordSchema
+    // exactly — previously this required only 6, while the server's
+    // updateMeSchema always required 8, so a password that passed this
+    // client-side check could still be rejected by the server.
+    newPassword: z.string().min(PASSWORD_MIN_LENGTH, `At least ${PASSWORD_MIN_LENGTH} characters`),
     confirmPassword: z.string(),
   })
   .refine((d) => d.newPassword === d.confirmPassword, {
@@ -238,7 +250,7 @@ const addrSchema = z.object({
   state: z.string().optional(),
   postalCode: z.string().min(2),
   country: z.string().min(2),
-  label: z.enum(["home", "work", "other"]).default("home"),
+  label: z.enum(ADDRESS_LABELS).default("home"),
   isDefault: z.boolean().optional(),
 });
 

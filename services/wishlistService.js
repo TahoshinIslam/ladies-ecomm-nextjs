@@ -8,6 +8,7 @@ import Product from "../models/productModel.js";
 // import is needed here for the nested category populate below.
 import "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 // Wishlist is deliberately product-level, not variant-level — a saved item
 // represents interest in the product, not a selected purchase variant, so
@@ -42,6 +43,7 @@ export async function getWishlist(userId) {
 }
 
 export async function toggleWishlist(userId, productId) {
+  requireObjectIdFormat(productId, "productId");
   const product = await Product.findById(productId);
   if (!product) throw new HttpError(404, "Product not found");
 

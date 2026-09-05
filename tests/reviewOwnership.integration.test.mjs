@@ -156,10 +156,15 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     assert.equal(delRes.status, 404);
   });
 
-  test("malformed (non-ObjectId) review id returns 404, not 500 — lib/http.js's CastError mapping", async () => {
+  test("FIXED (Phase 5 ObjectId contract): malformed (non-ObjectId) review id now returns 400, not the old CastError-mapped 404 — a valid-but-nonexistent id (tested above) is still 404", async () => {
+    // services/reviewService.js's updateReview() now calls
+    // requireObjectIdFormat() before ever reaching Review.findById() — a
+    // syntactically malformed id is a client input error (400), distinct
+    // from a well-formed id that legitimately doesn't exist (404, still
+    // covered above).
     const req = requestAs({ method: "PUT", url: "http://test/api/reviews/not-a-valid-id", session: await createTestSession(owner._id), body: { comment: "x" } });
     const res = await PUT(req, { params: Promise.resolve({ id: "not-a-valid-id" }) });
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 400);
   });
 
   // ---------------------------------------------------------------------

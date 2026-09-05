@@ -6,9 +6,20 @@ import { readSessionTokenFromRequest, setSessionCookie, setCsrfCookie } from "..
 import { requireClientIp } from "../../../../lib/clientIp.js";
 import { enforceRateLimit, ClientIpUnavailableError } from "../../../../lib/rateLimit.js";
 import { REGISTER_IP_LIMIT, REGISTER_IP_WINDOW_MS } from "../../../../lib/rateLimitConfig.js";
+import { validateData } from "../../../../lib/validation.js";
+import { registerSchema } from "../../../../schemas/authSchemas.js";
 
 export const POST = withRoute(async (request) => {
-  const body = await request.json();
+  // Parsed raw (not yet schema-validated) — the rate-limit check below
+  // must run regardless of whether the body turns out to be well-formed,
+  // so a malformed body can't dodge the limiter by failing validation
+  // first.
+  let raw;
+  try {
+    raw = await request.json();
+  } catch {
+    raw = {};
+  }
 
   // Per trusted client IP only, to prevent bulk account creation — there
   // is no per-account dimension to fall back on here (no account exists
@@ -21,6 +32,8 @@ export const POST = withRoute(async (request) => {
   const { ok, identity: ip } = requireClientIp(request);
   if (!ok) throw new ClientIpUnavailableError();
   if (ip) await enforceRateLimit([{ identity: ip, action: "register:ip", limit: REGISTER_IP_LIMIT, windowMs: REGISTER_IP_WINDOW_MS }]);
+
+  const body = validateData(raw, registerSchema);
 
   const presented = readSessionTokenFromRequest(request);
   const { rawToken, rawCsrfToken, user } = await register(body, presented, {

@@ -10,6 +10,8 @@ import {
 import { withRoute } from "../../../../lib/http.js";
 import { getServerLocale } from "../../../../lib/i18n/server.js";
 import { localizeProduct } from "../../../../lib/i18n/localize.js";
+import { parseJsonBody } from "../../../../lib/validation.js";
+import { updateProductSchema } from "../../../../schemas/catalogSchemas.js";
 
 // Route params are async in Next.js 16 and must be awaited.
 export const GET = withRoute(async (request, { params }) => {
@@ -21,7 +23,7 @@ export const GET = withRoute(async (request, { params }) => {
 export const PUT = withRoute(async (request, { params }) => {
   await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
   const { idOrSlug } = await params;
-  const body = await request.json();
+  const body = await parseJsonBody(request, updateProductSchema);
   const product = await updateProduct(idOrSlug, body);
   return NextResponse.json({ success: true, product });
 });

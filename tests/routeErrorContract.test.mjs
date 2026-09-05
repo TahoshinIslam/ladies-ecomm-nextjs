@@ -55,7 +55,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     assert.ok(!("stack" in json), "no stack trace field");
   }
 
-  test("malformed JSON body -> caught, not an unhandled crash", async () => {
+  test("FIXED: malformed JSON body -> a clean 400 (Phase 5's shared JSON-parse contract), not a raw-SyntaxError-mapped 500", async () => {
     // Origin must match, or Phase 2's Layer 1 CSRF/Origin check (applied to
     // every unsafe request, including this public auth endpoint — see
     // lib/http.js's withRoute()) rejects the request with 403 before the
@@ -66,24 +66,28 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       body: "{not valid json,,,",
     });
     const res = await loginPOST(req);
-    // request.json() throws a SyntaxError, which withRoute()'s catch-all
-    // turns into a generic 500 (SyntaxError has no special mapping in
-    // lib/http.js's toResponse()) — confirmed by observation, not assumed.
-    assert.equal(res.status, 500);
+    // app/api/users/login/route.js now catches the JSON parse failure
+    // itself (so the rate-limit check below it still always runs) and
+    // schema-validates the resulting empty object, which fails cleanly —
+    // 400, not the old unmapped-SyntaxError 500.
+    assert.equal(res.status, 400);
     const json = await res.json();
     assertErrorShape(json);
     assert.equal(res.headers.get("content-type")?.includes("application/json"), true);
   });
 
-  test("invalid ObjectId (malformed) -> 404, not 500 (CastError+kind=='ObjectId' mapping)", async () => {
+  test("FIXED (Phase 5B ObjectId contract): invalid/malformed ObjectId path param -> 400, not the old CastError-mapped 404", async () => {
+    // services/orderService.js's getOrder() now calls requireObjectIdFormat()
+    // before ever reaching Order.findById() — a malformed id is a client
+    // input error (400), distinct from a well-formed id that legitimately
+    // doesn't exist (404, tested separately below).
     const user = await createTestUser();
     try {
       const req = requestAs({ method: "GET", url: "http://test/api/orders/not-a-valid-id", session: await createTestSession(user._id) });
       const res = await orderGET(req, { params: Promise.resolve({ id: "not-a-valid-id" }) });
-      assert.equal(res.status, 404);
+      assert.equal(res.status, 400);
       const json = await res.json();
       assertErrorShape(json);
-      assert.equal(json.message, "Resource not found");
     } finally {
       await User.deleteOne({ _id: user._id });
     }
@@ -104,16 +108,18 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     }
   });
 
-  test("missing required body field -> a clean 400, application-level message (not a raw Mongoose error)", async () => {
-    const req = requestAs({ method: "POST", url: "http://test/api/users/register", body: { email: "x@example.invalid", password: "x" } }); // no `name`
+  test("missing required body field -> a clean 400, with a safe field-level error identifying the missing field (not a raw Mongoose error)", async () => {
+    const req = requestAs({ method: "POST", url: "http://test/api/users/register", body: { email: "x@example.invalid", password: "x" } }); // no `name`, and `password` too short
     const res = await registerPOST(req);
     assert.equal(res.status, 400);
     const json = await res.json();
     assertErrorShape(json);
-    assert.match(json.message, /name/i);
+    assert.ok(Array.isArray(json.errors), "schemas/*.js validation failures carry a safe field-level errors array");
+    assert.ok(json.errors.some((e) => e.path === "name"), "the missing `name` field is identified by path");
+    assert.ok(!json.errors.some((e) => "value" in e), "no submitted value is ever echoed back in a field error");
   });
 
-  test("DOCUMENTED GAP: an invalid field TYPE (string where the schema expects Number) is NOT mapped to a clean 400 — falls through to the generic 500", async () => {
+  test("FIXED: an invalid field TYPE (string where the schema expects Number) is now a clean 400, not a generic 500", async () => {
     const user = await createTestUser();
     const product = await createTestProduct({ stock: 10 });
     try {
@@ -127,15 +133,10 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
         },
       });
       const res = await ordersPOST(req);
-      // lib/http.js's CastError branch only checks `err.kind === "ObjectId"`
-      // — a Number-cast failure has `err.kind === "Number"` and does not
-      // match, so it falls through to the unmapped-error 500 branch instead
-      // of a clean, informative 400. Confirmed here, not assumed.
-      assert.equal(
-        res.status,
-        500,
-        "confirmed gap: a non-numeric `quantity` produces a generic 500, not a clean validation 400 — the CastError mapping in lib/http.js is ObjectId-specific only",
-      );
+      // Phase 5: schemas/orderSchemas.js's createOrderSchema rejects a
+      // non-numeric quantity before the request body ever reaches
+      // calcTotals()/Mongoose — a clean 400, not the old unmapped 500.
+      assert.equal(res.status, 400, "a non-numeric quantity is now caught by shared body validation, not a raw CastError/500");
       const json = await res.json();
       assertErrorShape(json);
     } finally {
@@ -226,7 +227,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     }
   });
 
-  test("unexpected/unmapped exception -> generic 500, no leaked internals — tested directly against the real withRoute()/toResponse() translation lib/http.js, the same functions every route above goes through", async () => {
+  test("FIXED: unexpected/unmapped exception -> generic sanitized 500, the raw message is NEVER echoed — tested directly against the real withRoute()/toResponse() translation in lib/http.js, the same functions every route above goes through", async () => {
     // Deliberately not mocking a real service module here: services/orderService.js
     // is already imported (real) by app/api/orders/route.js in this file's
     // before(), so a same-process mock.module() call for it now would be
@@ -237,25 +238,60 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     // EXACT SAME translation logic every real route above already uses,
     // without fighting that ordering problem or mocking anything.
     const { withRoute } = await import("../lib/http.js");
-    const rawMessage = "boom: an entirely unexpected, un-typed failure";
-    const handler = withRoute(async () => {
-      throw new Error(rawMessage);
-    });
-    const req = requestAs({ method: "GET", url: "http://test/api/whatever" });
-    const res = await handler(req, {});
+    const originalConsoleError = console.error;
+    console.error = () => {}; // expected — this test deliberately forces the error path
+    let res;
+    try {
+      const rawMessage = "boom: an entirely unexpected, un-typed failure";
+      const handler = withRoute(async () => {
+        throw new Error(rawMessage);
+      });
+      const req = requestAs({ method: "GET", url: "http://test/api/whatever" });
+      res = await handler(req, {});
+      const json = await res.json();
+      assertErrorShape(json);
+      assert.equal(json.message, "Internal server error", "the raw thrown Error's .message must never reach the client for an unmapped exception");
+      assert.ok(!json.message.includes(rawMessage));
+    } finally {
+      console.error = originalConsoleError;
+    }
     assert.equal(res.status, 500);
-    const json = await res.json();
-    assertErrorShape(json);
-    // DOCUMENTED GAP, found by direct observation of lib/http.js's
-    // toResponse(): the catch-all branch does
-    // `NextResponse.json({ success:false, message: err.message || "Server error" }, {status:500})`
-    // — it does NOT sanitize or replace the message with a generic string.
-    // Whatever `.message` the thrown error happens to carry is echoed to
-    // the client verbatim. No stack trace leaks (confirmed above), but an
-    // unexpected error's raw message text (which could, for some future
-    // uncaught error type, contain a file path or other internal detail)
-    // currently does. console.error(err) still logs server-side too.
-    assert.equal(json.message, rawMessage, "CONFIRMED: the raw thrown Error's .message reaches the client unmodified on an unmapped 500 — this is not sanitized to a generic string");
+  });
+
+  test("FIXED: unmapped exceptions carrying sensitive-looking content (Mongo URI, password, cookie, reset token, filesystem path, stack-like text) never leak any of it to the client", async () => {
+    const { withRoute } = await import("../lib/http.js");
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    const sensitiveMessages = [
+      "connect ECONNREFUSED mongodb+srv://dbuser:S3cretPass@cluster0.mongodb.net/prod",
+      "Auth failed for password=SuperSecret123!",
+      "Invalid cookie: tahos_session=abcdef0123456789abcdef0123456789",
+      "Reset token abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789 already used",
+      "ENOENT: no such file or directory, open '/var/app/config/secrets.json'",
+      "collection 'sessions' index 'tokenHash_1' violated constraint\n    at Object.<anonymous> (/app/node_modules/mongoose/lib/model.js:123:45)\n    at processTicksAndRejections",
+    ];
+    try {
+      for (const rawMessage of sensitiveMessages) {
+        const handler = withRoute(async () => {
+          throw new Error(rawMessage);
+        });
+        const req = requestAs({ method: "GET", url: "http://test/api/whatever" });
+        const res = await handler(req, {});
+        assert.equal(res.status, 500);
+        const json = await res.json();
+        assertErrorShape(json);
+        assert.equal(json.message, "Internal server error");
+        const bodyText = JSON.stringify(json);
+        assert.ok(!/mongodb(\+srv)?:\/\//i.test(bodyText), "no Mongo connection string");
+        assert.ok(!/password\s*=/i.test(bodyText), "no password");
+        assert.ok(!/tahos_session=/i.test(bodyText), "no session cookie value");
+        assert.ok(!bodyText.includes("abcdef0123456789abcdef0123456789"), "no token-shaped value");
+        assert.ok(!/\/[a-z0-9_/-]+\.(json|js|env)/i.test(bodyText), "no filesystem path");
+        assert.ok(!bodyText.includes("\n"), "no multiline/stack-like content");
+      }
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 
   test("malformed session cookie -> 401, consistent shape (see tests/authLifecycle.test.mjs and tests/session.test.mjs for the full session-lifecycle matrix)", async () => {

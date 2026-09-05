@@ -1,9 +1,19 @@
-// Phase 1: file upload — services/uploadService.js and the real
-// POST /api/upload, /api/upload/multiple Route Handlers, against a real
-// replica-set MongoDB (for the admin/user fixtures) with Cloudinary fully
-// mocked. NO real Cloudinary credentials are ever set, and no real network
-// call to Cloudinary occurs anywhere in this file — see the mock.module
-// calls below, registered before any route/service module is imported.
+// Phase 5 rewrite — file upload validation is now signature-verified.
+//
+// services/uploadService.js and the real POST /api/upload,
+// /api/upload/multiple Route Handlers, against a real replica-set MongoDB
+// (for the admin/user fixtures) with Cloudinary fully mocked. NO real
+// Cloudinary credentials are ever set, and no real network call to
+// Cloudinary occurs anywhere in this file — see the mock.module calls
+// below, registered before any route/service module is imported.
+//
+// Previously (Phase 1) this file characterized two known defects: a
+// zero-byte file passed validation, and MIME-type validation trusted only
+// the client-supplied Content-Type with no check of the file's actual
+// bytes. Phase 5's lib/fileSignature.js fixes both — this file now asserts
+// the CORRECTED behavior and adds real, non-placeholder image bytes (a
+// zero-filled buffer is not a valid image of any format, so every fixture
+// below that should succeed now carries a genuine magic number).
 //
 // tests/uploadUnconfigured.test.mjs covers the "Cloudinary not configured"
 // 503 path separately (can't coexist with this file's "configured" mock in
@@ -25,7 +35,9 @@ try {
 
 // Controllable per-test via this mutable object — read fresh on every call,
 // so individual tests can flip `shouldReject` without needing to
-// re-register the mock.
+// re-register the mock. `calls` records every real (mocked) Cloudinary
+// invocation, so a test can assert Cloudinary was never reached for a
+// rejected file.
 const cloudinaryMockState = { shouldReject: false, calls: [] };
 
 if (moduleMockUsable) {
@@ -75,9 +87,28 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     await disconnectTestDb();
   });
 
-  const png = (bytes = 1024) => new Uint8Array(bytes).fill(1);
+  // Real magic numbers for each format this app accepts — a zero/one-
+  // filled buffer (the old fixture) is not a valid image of ANY format,
+  // so every "this should succeed" test needs a genuine signature now.
+  function realImageBytes(format, totalSize = 1024) {
+    const buf = new Uint8Array(totalSize).fill(0x2a); // arbitrary non-zero filler past the header
+    if (format === "png") {
+      buf.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    } else if (format === "jpeg") {
+      buf.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46], 0);
+    } else if (format === "webp") {
+      buf.set([0x52, 0x49, 0x46, 0x46], 0); // "RIFF"
+      buf.set([0x00, 0x00, 0x00, 0x00], 4); // size (unchecked by our detector)
+      buf.set([0x57, 0x45, 0x42, 0x50], 8); // "WEBP"
+    } else if (format === "avif") {
+      buf.set([0x00, 0x00, 0x00, 0x1c], 0); // box size (unchecked)
+      buf.set([0x66, 0x74, 0x79, 0x70], 4); // "ftyp"
+      buf.set([0x61, 0x76, 0x69, 0x66], 8); // "avif" major brand
+    }
+    return buf;
+  }
 
-  function uploadRequest({ session, fileName = "photo.png", mimeType = "image/png", bytes = png(), field = "image", noFile = false } = {}) {
+  function uploadRequest({ session, fileName = "photo.png", mimeType = "image/png", bytes = realImageBytes("png"), field = "image", noFile = false } = {}) {
     const fd = new FormData();
     if (!noFile) fd.append(field, new File([bytes], fileName, { type: mimeType }));
     const headers = {};
@@ -104,7 +135,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     }
   });
 
-  test("a properly authorized admin succeeds (201) with the mocked Cloudinary URL", async () => {
+  test("a properly authorized admin succeeds (201) with the mocked Cloudinary URL, using a real PNG signature", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id) }));
@@ -128,24 +159,42 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     }
   });
 
-  test("DOCUMENTED LIMITATION: a zero-byte file passes validation (no minimum-size check exists)", async () => {
+  test("FIXED: a zero-byte file is now rejected (400), not silently accepted", async () => {
     const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
     try {
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: new Uint8Array(0) }));
-      assert.equal(
-        res.status,
-        201,
-        "confirmed: services/uploadService.js's validateAndBuffer() only checks `file.size > MAX_BYTES` — there is no lower bound, so an empty file is accepted and 'uploaded'",
-      );
+      assert.equal(res.status, 400);
+      assert.equal(cloudinaryMockState.calls.length, before, "Cloudinary must never be reached for a rejected file");
     } finally {
       await User.deleteOne({ _id: admin._id });
     }
   });
 
-  test("a valid allowed MIME type (image/webp) succeeds", async () => {
+  test("a valid allowed MIME type (image/webp) with a real WebP signature succeeds", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/webp", fileName: "photo.webp" }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/webp", fileName: "photo.webp", bytes: realImageBytes("webp") }));
+      assert.equal(res.status, 201);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("a valid JPEG signature with declared type image/jpeg succeeds", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    try {
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/jpeg", fileName: "photo.jpg", bytes: realImageBytes("jpeg") }));
+      assert.equal(res.status, 201);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("a valid AVIF signature with declared type image/avif succeeds", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    try {
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/avif", fileName: "photo.avif", bytes: realImageBytes("avif") }));
       assert.equal(res.status, 201);
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -165,7 +214,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("a file exceeding 5 MB is rejected (413)", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: png(5 * 1024 * 1024 + 1) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("png", 5 * 1024 * 1024 + 1) }));
       assert.equal(res.status, 413);
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -175,7 +224,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
   test("a file at EXACTLY the 5 MB boundary is accepted — the check is strictly-greater-than, not greater-or-equal", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: png(5 * 1024 * 1024) }));
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("png", 5 * 1024 * 1024) }));
       assert.equal(res.status, 201, "services/uploadService.js: `file.size > MAX_BYTES` — exactly MAX_BYTES is not rejected");
     } finally {
       await User.deleteOne({ _id: admin._id });
@@ -186,8 +235,8 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     const admin = await createTestUser({ role: "admin" });
     try {
       const fd = new FormData();
-      fd.append("images", new File([png()], "a.png", { type: "image/png" }));
-      fd.append("images", new File([png()], "b.jpg", { type: "image/jpeg" }));
+      fd.append("images", new File([realImageBytes("png")], "a.png", { type: "image/png" }));
+      fd.append("images", new File([realImageBytes("jpeg")], "b.jpg", { type: "image/jpeg" }));
       const session = await createTestSession(admin._id);
       const req = new Request("http://test/api/upload/multiple", {
         method: "POST",
@@ -207,7 +256,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
     const admin = await createTestUser({ role: "admin" });
     try {
       const fd = new FormData();
-      for (let i = 0; i < 9; i++) fd.append("images", new File([png()], `f${i}.png`, { type: "image/png" }));
+      for (let i = 0; i < 9; i++) fd.append("images", new File([realImageBytes("png")], `f${i}.png`, { type: "image/png" }));
       const session = await createTestSession(admin._id);
       const req = new Request("http://test/api/upload/multiple", {
         method: "POST",
@@ -260,32 +309,134 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
         uploadRequest({ session: await createTestSession(admin._id), fileName: '../../etc/passwd<script>alert(1)</script>.png' }),
       );
       // services/uploadService.js's validateAndBuffer() never reads or
-      // validates `file.name` at all — only `file.type` and `file.size`.
-      // The original filename is discarded entirely (Cloudinary generates
-      // its own public_id), so there is no path-traversal or stored-XSS
-      // risk from the filename specifically — but this is worth confirming
-      // by direct observation, not assumption.
+      // validates `file.name` for path-traversal/HTML shape — only
+      // `file.type`/`file.size`/the real signature. The original filename
+      // is discarded entirely (Cloudinary generates its own public_id), so
+      // there is no path-traversal or stored-XSS risk from the filename
+      // specifically — confirmed here, not assumed. The bytes are still a
+      // real PNG, so this succeeds purely on the filename being irrelevant.
       assert.equal(res.status, 201, "the filename itself is never inspected, so a hostile filename doesn't even reach a validation branch");
     } finally {
       await User.deleteOne({ _id: admin._id });
     }
   });
 
-  test("DOCUMENTED LIMITATION: MIME-type validation trusts the browser-supplied Content-Type only — no file-signature (magic-byte) check exists", async () => {
+  test("a filename with no extension at all is still validated purely by content, and succeeds", async () => {
     const admin = await createTestUser({ role: "admin" });
     try {
-      // A file whose actual bytes are plain text, but whose declared MIME
-      // type is image/png. services/uploadService.js's validateAndBuffer()
-      // checks only `file.type` (the client-supplied Content-Type on the
-      // FormData part) against ALLOWED_TYPES — it never inspects the
-      // buffer's actual magic bytes/signature.
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), fileName: "no_extension_at_all" }));
+      assert.equal(res.status, 201);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("an uppercase file extension (.PNG) does not affect validation, which never reads the extension", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    try {
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), fileName: "PHOTO.PNG" }));
+      assert.equal(res.status, 201);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: MIME-type validation now verifies the actual file signature — a spoofed MIME type on plain-text bytes is rejected (415), and Cloudinary is never called", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
       const notReallyAnImage = new TextEncoder().encode("this is not image data at all");
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: notReallyAnImage, mimeType: "image/png" }));
-      assert.equal(
-        res.status,
-        201,
-        "CONFIRMED LIMITATION: a spoofed MIME type on non-image bytes is accepted — the app trusts the declared Content-Type, not the actual file content. Real Cloudinary would likely reject this upstream, but that safety net is external to this codebase, not enforced by it.",
-      );
+      assert.equal(res.status, 415, "a spoofed declared MIME type on non-image bytes is now rejected by the real signature check");
+      assert.equal(cloudinaryMockState.calls.length, before, "Cloudinary must never be reached for a rejected file");
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: an HTML file renamed to .jpg with a spoofed image/jpeg Content-Type is rejected (415)", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
+      const html = new TextEncoder().encode("<html><body><script>alert(document.cookie)</script></body></html>");
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: html, mimeType: "image/jpeg", fileName: "photo.jpg" }));
+      assert.equal(res.status, 415);
+      assert.equal(cloudinaryMockState.calls.length, before);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: a script file renamed to .png with a spoofed image/png Content-Type is rejected (415)", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
+      const script = new TextEncoder().encode("#!/bin/sh\nrm -rf /\n");
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: script, mimeType: "image/png", fileName: "photo.png" }));
+      assert.equal(res.status, 415);
+      assert.equal(cloudinaryMockState.calls.length, before);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: an SVG file (XML text, no binary image signature) is rejected — it was never on the allowed-type list, and now also fails signature detection", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
+      const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: svg, mimeType: "image/svg+xml", fileName: "photo.svg" }));
+      assert.equal(res.status, 415, "image/svg+xml was never in ALLOWED_TYPES to begin with");
+      assert.equal(cloudinaryMockState.calls.length, before);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: a truncated PNG signature (fewer bytes than the real 8-byte magic number) is rejected (415)", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
+      const truncated = new Uint8Array([0x89, 0x50, 0x4e]); // only 3 of PNG's 8 magic bytes
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: truncated, mimeType: "image/png" }));
+      assert.equal(res.status, 415);
+      assert.equal(cloudinaryMockState.calls.length, before);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: random bytes with a plausible-looking declared type are rejected (415)", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
+      const random = new Uint8Array(256);
+      for (let i = 0; i < random.length; i++) random[i] = (i * 37 + 11) % 256;
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: random, mimeType: "image/png" }));
+      assert.equal(res.status, 415);
+      assert.equal(cloudinaryMockState.calls.length, before);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("FIXED: a real PNG's bytes declared as image/jpeg (signature/declared-type mismatch) is rejected (415)", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    const before = cloudinaryMockState.calls.length;
+    try {
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("png"), mimeType: "image/jpeg", fileName: "photo.jpg" }));
+      assert.equal(res.status, 415, "a real image whose declared type doesn't match its actual signature must still be rejected");
+      assert.equal(cloudinaryMockState.calls.length, before);
+    } finally {
+      await User.deleteOne({ _id: admin._id });
+    }
+  });
+
+  test("declared image/jpg (non-standard alias) is treated as equivalent to image/jpeg for a real JPEG signature", async () => {
+    const admin = await createTestUser({ role: "admin" });
+    try {
+      const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("jpeg"), mimeType: "image/jpg", fileName: "photo.jpg" }));
+      assert.equal(res.status, 201);
     } finally {
       await User.deleteOne({ _id: admin._id });
     }

@@ -203,15 +203,34 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     await clearCounters();
     const { checkRateLimit } = await import("../lib/rateLimit.js");
     const identity = `window-${crypto.randomBytes(4).toString("hex")}`;
-    const shortWindowMs = 300;
+    // Previously 300ms — reproducibly flaky under load: this test makes 4
+    // real, sequential (not concurrent) MongoDB round trips just to reach
+    // the "still blocked" assertion below, and on a loaded machine their
+    // cumulative latency could occasionally approach a 300ms window on its
+    // own, before the window was ever meant to expire (confirmed:
+    // reproduced a failure at exactly that assertion, not the
+    // window-expiry one). 1500ms keeps normal DB round-trip jitter a small
+    // fraction of the window while still keeping this test fast.
+    const shortWindowMs = 1500;
     for (let i = 0; i < 3; i++) {
       assert.equal((await checkRateLimit({ identity, action: "test:window", limit: 3, windowMs: shortWindowMs })).allowed, true);
     }
     assert.equal((await checkRateLimit({ identity, action: "test:window", limit: 3, windowMs: shortWindowMs })).allowed, false, "over the limit within the same window");
 
-    await new Promise((r) => setTimeout(r, shortWindowMs + 50));
-
-    const afterWindow = await checkRateLimit({ identity, action: "test:window", limit: 3, windowMs: shortWindowMs });
+    // Previously a fixed `windowMs + 50ms` sleep, then a single check —
+    // reproducibly flaky under load (a slow test-runner tick between the
+    // sleep firing and this file's own await resuming could still land
+    // inside the old window). Poll instead: the window genuinely expiring
+    // is a one-way transition (test:window can only go from "blocked" to
+    // "allowed" here, never back), so retrying on a false negative can
+    // never mask a real regression — a limiter that stayed stuck blocked
+    // would still fail this by hitting the deadline.
+    const deadline = Date.now() + shortWindowMs * 10;
+    let afterWindow;
+    do {
+      afterWindow = await checkRateLimit({ identity, action: "test:window", limit: 3, windowMs: shortWindowMs });
+      if (!afterWindow.allowed) await new Promise((r) => setTimeout(r, 25));
+    } while (!afterWindow.allowed && Date.now() < deadline);
     assert.equal(afterWindow.allowed, true, "a genuinely new window must allow requests again");
   });
 

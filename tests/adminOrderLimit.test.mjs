@@ -1,15 +1,15 @@
-// Phase 1: GET /api/orders (admin listing) — unbounded `limit` characterization.
+// Phase 5 rewrite — GET /api/orders (admin listing) `limit` parameter is
+// now bounded.
 //
-// services/orderService.js's getAllOrders() does `.limit(Number(limit))`
-// with NO upper clamp — unlike services/userService.js's listUsers(), which
-// explicitly does `Math.min(100, Number(limit) || 20)`. This file documents
-// (does not fix) that inconsistency, per the Phase 1 prompt: "Document the
-// current unbounded behavior. Do not implement the clamp during Phase 1."
-//
-// For inputs where MongoDB driver behavior is not something this repo's
-// own code controls (NaN, negative numbers), this file records the actual
-// observed behavior rather than asserting a guessed contract — see the
-// per-test comments.
+// Previously services/orderService.js's getAllOrders() did
+// `.limit(Number(limit))` with NO upper clamp — unlike
+// services/userService.js's listUsers(), which explicitly does
+// `Math.min(100, Number(limit) || 20)`. Phase 5 adds
+// schemas/orderSchemas.js's adminOrderListQuerySchema (a shared bounded-
+// pagination schema, see schemas/commonSchemas.js's boundedIntParam),
+// validated in app/api/orders/route.js's GET handler BEFORE getAllOrders()
+// ever runs — an out-of-range/malformed `limit` (or `page`) is now a clean
+// 400, not a silently-accepted unbounded query.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -28,7 +28,7 @@ import {
 const canRun = dbReady;
 const reason = skipReason;
 
-describe("GET /api/orders — limit parameter (documented, not fixed)", { skip: !canRun && reason }, () => {
+describe("GET /api/orders — limit parameter is bounded (Phase 5 fix)", { skip: !canRun && reason }, () => {
   let GET;
   let Order, User, Product;
   let admin, buyer, product;
@@ -85,46 +85,65 @@ describe("GET /api/orders — limit parameter (documented, not fixed)", { skip: 
     assert.ok(json.orders.length <= 20);
   });
 
-  test("limit=100 — larger than the total dataset — returns everything, no error, no rejection", async () => {
+  test("limit=100 (the documented maximum) — larger than the total dataset — returns everything, no error", async () => {
     const { res, json } = await listAs(100);
     assert.equal(res.status, 200);
     assert.equal(json.orders.length, ORDER_COUNT, "returns every matching order since 100 > total");
   });
 
-  test("DOCUMENTED GAP: limit=999999 is accepted with no upper clamp (contrast: userService.listUsers clamps to 100, orderService.getAllOrders does not)", async () => {
-    const { res, json } = await listAs(999999);
-    assert.equal(res.status, 200, "no validation rejects an absurdly large limit");
-    assert.equal(json.orders.length, ORDER_COUNT, "with only 5 real orders this looks harmless — at production scale this becomes an unbounded query with no server-side ceiling");
+  test("FIXED: limit=999999 is now REJECTED (400), not silently accepted with no upper clamp", async () => {
+    const { res } = await listAs(999999);
+    assert.equal(res.status, 400, "an out-of-range limit is now a clean validation error, not an unbounded query");
   });
 
-  test("limit=-1 — negative value is passed through to Mongo uninspected (no validation, no 400)", async () => {
+  test("FIXED: limit=-1 (negative) is rejected (400)", async () => {
     const { res } = await listAs(-1);
-    // No input validation exists in getAllOrders for a negative limit —
-    // whatever the MongoDB driver does with it is what the client gets.
-    // The one thing the code guarantees is that this is never rejected as
-    // a 400 (there is no check to reject it) and never crashes the process
-    // (withRoute's catch-all turns any driver-level error into a normal
-    // JSON response instead of an unhandled exception).
-    assert.notEqual(res.status, 400, "confirmed: no input validation exists for a negative limit");
+    assert.equal(res.status, 400);
   });
 
-  test("limit=abc — Number('abc') is NaN, passed straight to .limit(NaN) with no validation", async () => {
+  test("FIXED: limit=abc (non-numeric) is rejected (400), not silently passed as NaN to .limit()", async () => {
     const { res } = await listAs("abc");
-    // Same point as above: services/orderService.js:433 does
-    // `.limit(Number(limit))` with no Number.isFinite guard. Whatever
-    // Mongoose/the MongoDB driver does with NaN is undocumented by this
-    // codebase's own logic — there is no application-level check that
-    // would turn this into a clean 400 "invalid limit" error.
-    assert.notEqual(res.status, 400, "confirmed: 'abc' is not rejected as a validation error before reaching the query");
+    assert.equal(res.status, 400);
   });
 
-  test("missing limit defaults to 20 (the Route Handler's own default, not a service-level default)", async () => {
+  test("FIXED: limit=0 is rejected (400)", async () => {
+    const { res } = await listAs(0);
+    assert.equal(res.status, 400);
+  });
+
+  test("FIXED: limit=1.5 (decimal) is rejected (400)", async () => {
+    const { res } = await listAs(1.5);
+    assert.equal(res.status, 400);
+  });
+
+  test("FIXED: an extremely long numeric string is rejected (400), not silently accepted as Infinity", async () => {
+    const { res } = await listAs("9".repeat(400));
+    assert.equal(res.status, 400);
+  });
+
+  test("FIXED: a repeated limit query param (ambiguous) is rejected (400)", async () => {
+    const params = new URLSearchParams({ search: buyer.name });
+    params.append("limit", "10");
+    params.append("limit", "20");
+    const url = `http://test/api/orders?${params.toString()}`;
+    const req = requestAs({ method: "GET", url, session: await createTestSession(admin._id) });
+    const res = await GET(req);
+    assert.equal(res.status, 400, "an ambiguous repeated limit value must not be silently resolved by picking one");
+  });
+
+  test("missing limit defaults to 20", async () => {
     const { res, json } = await listAs(undefined);
     assert.equal(res.status, 200);
-    // app/api/orders/route.js: `limit: searchParams.get("limit") || 20` —
-    // the default lives in the Route Handler, not in
-    // services/orderService.js's getAllOrders signature (which also
-    // defaults limit=20, redundantly).
     assert.ok(json.orders.length <= 20);
+  });
+
+  test("FIXED: page=0 and negative page are rejected (400)", async () => {
+    const params0 = new URLSearchParams({ search: buyer.name, page: "0" });
+    const resZero = await GET(requestAs({ method: "GET", url: `http://test/api/orders?${params0.toString()}`, session: await createTestSession(admin._id) }));
+    assert.equal(resZero.status, 400);
+
+    const paramsNeg = new URLSearchParams({ search: buyer.name, page: "-1" });
+    const resNeg = await GET(requestAs({ method: "GET", url: `http://test/api/orders?${paramsNeg.toString()}`, session: await createTestSession(admin._id) }));
+    assert.equal(resNeg.status, 400);
   });
 });

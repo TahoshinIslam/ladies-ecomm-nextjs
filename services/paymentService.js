@@ -5,6 +5,7 @@ import Payment from "../models/paymentModel.js";
 import { HttpError } from "../lib/http.js";
 import { emitOrderEvent } from "../lib/events.js";
 import { isDuplicateKeyError } from "../lib/idempotency.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 // The only order status COD payment creation may start from. Anything else
 // (already processing/shipped/delivered/cancelled/refunded, or an
@@ -26,6 +27,7 @@ const COD_CREATABLE_STATUS = "pending";
 // database-level backstop against a concurrent duplicate producing two
 // Payment rows.
 export async function codCreate(orderId, userId) {
+  requireObjectIdFormat(orderId, "orderId");
   const session = await mongoose.startSession();
   try {
     let result;
@@ -108,6 +110,7 @@ export async function codCreate(orderId, userId) {
 }
 
 export async function getPaymentByOrder(orderId, userId, role) {
+  requireObjectIdFormat(orderId, "orderId");
   const payment = await Payment.findOne({ order: orderId });
   if (!payment) throw new HttpError(404, "Payment not found");
   if (payment.user.toString() !== String(userId) && role !== "admin") {

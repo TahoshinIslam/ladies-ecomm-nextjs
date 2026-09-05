@@ -325,21 +325,17 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
     }
   });
 
-  test("KNOWN DEFECT: concurrent REAL claims (order creation) can exceed usageLimit — the $inc has no guard condition", async () => {
-    // This is the actual write/claim path: services/orderService.js's
-    // createOrder() -> calcTotals() reads the coupon (checking usageLimit
-    // vs usedCount AT READ TIME), then, inside the transaction, does
-    // `Coupon.updateOne({_id}, {$inc:{usedCount:1}})` — an INCREMENT WITH
-    // NO GUARD (unlike the stock decrement, which guards with
-    // `stock: {$gte: quantity}`). Two concurrent orders can both read
-    // usedCount=0 as valid against usageLimit=1, and both then
-    // unconditionally increment, ending at usedCount=2 — one MORE
-    // redemption than the coupon allows. This is a real, previously
-    // undocumented finding, not a guess.
+  test("FIXED: concurrent REAL claims (order creation) can no longer exceed usageLimit", async () => {
+    // services/orderService.js's createOrder() now claims global usage via
+    // a GUARDED conditional update — `Coupon.updateOne({_id, $or:[{usageLimit:
+    // null},{$expr:{$lt:["$usedCount","$usageLimit"]}}]}, {$inc:{usedCount:1}})`
+    // — mirroring the stock-decrement guard exactly, with `modifiedCount`
+    // checked to detect a lost race (409). Two concurrent orders against a
+    // usageLimit:1 coupon can no longer both succeed.
     const buyer1 = await createTestUser();
     const buyer2 = await createTestUser();
     const product = await createTestProduct({ stock: 10 });
-    const coupon = await makeCoupon({ usageLimit: 1, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0 });
+    const coupon = await makeCoupon({ usageLimit: 1, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0, perUserLimit: null });
     try {
       const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
       const place = async (buyer) =>
@@ -357,20 +353,226 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
         );
 
       const [res1, res2] = await Promise.all([place(buyer1), place(buyer2)]);
-      assert.equal(res1.status, 201);
-      assert.equal(res2.status, 201, "BOTH concurrent orders succeed in claiming the coupon");
+      const statuses = [res1.status, res2.status];
+      assert.equal(statuses.filter((s) => s === 201).length, 1, "exactly one concurrent order may claim the last redemption");
+      assert.equal(statuses.filter((s) => s === 400 || s === 409).length, 1, "the loser is rejected (400 from the read-time check or 409 from the guarded claim losing the race), never silently allowed");
 
       const finalCoupon = await Coupon.findById(coupon._id);
-      assert.equal(
-        finalCoupon.usedCount,
-        2,
-        "DEFECT CONFIRMED: usedCount is 2 despite usageLimit being 1 — the coupon was over-redeemed under concurrency",
-      );
+      assert.equal(finalCoupon.usedCount, 1, "FIXED: usedCount can never exceed usageLimit under concurrency");
+
+      const successfulCount = await Order.countDocuments({ user: { $in: [buyer1._id, buyer2._id] }, coupon: coupon._id });
+      assert.equal(successfulCount, 1, "only the winning order actually references the coupon");
     } finally {
       await Order.deleteMany({ user: { $in: [buyer1._id, buyer2._id] } });
       await Coupon.deleteOne({ _id: coupon._id });
       await Product.deleteOne({ _id: product._id });
       await User.deleteMany({ _id: { $in: [buyer1._id, buyer2._id] } });
+    }
+  });
+
+  test("FIXED: perUserLimit is now enforced — a second order for the SAME user against the same coupon is rejected once the limit is reached", async () => {
+    const buyer = await createTestUser();
+    const product = await createTestProduct({ stock: 10 });
+    const coupon = await makeCoupon({ usageLimit: null, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0, perUserLimit: 1 });
+    try {
+      const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
+      const place = async () =>
+        createOrderPOST(
+          requestAs({
+            method: "POST",
+            url: "http://test/api/orders",
+            session: await createTestSession(buyer._id),
+            body: {
+              items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
+              shippingAddress: address,
+              couponCode: coupon.code,
+            },
+          }),
+        );
+
+      const first = await place();
+      assert.equal(first.status, 201);
+      const second = await place();
+      assert.ok([400, 409].includes(second.status), "a second use by the same user past perUserLimit must be rejected");
+
+      const finalCoupon = await Coupon.findById(coupon._id);
+      assert.equal(finalCoupon.usedCount, 1, "the rejected second attempt must not have incremented global usedCount either");
+    } finally {
+      await Order.deleteMany({ user: buyer._id });
+      await Coupon.deleteOne({ _id: coupon._id });
+      await Product.deleteOne({ _id: product._id });
+      await User.deleteOne({ _id: buyer._id });
+    }
+  });
+
+  test("FIXED: perUserLimit is scoped per user — a DIFFERENT user can still use the same coupon after the first user reaches their own limit", async () => {
+    const buyer1 = await createTestUser();
+    const buyer2 = await createTestUser();
+    const product = await createTestProduct({ stock: 10 });
+    const coupon = await makeCoupon({ usageLimit: null, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0, perUserLimit: 1 });
+    try {
+      const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
+      const place = async (buyer) =>
+        createOrderPOST(
+          requestAs({
+            method: "POST",
+            url: "http://test/api/orders",
+            session: await createTestSession(buyer._id),
+            body: {
+              items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
+              shippingAddress: address,
+              couponCode: coupon.code,
+            },
+          }),
+        );
+
+      const res1 = await place(buyer1);
+      assert.equal(res1.status, 201);
+      const res2 = await place(buyer2);
+      assert.equal(res2.status, 201, "a different user's own per-user limit is independent");
+    } finally {
+      await Order.deleteMany({ user: { $in: [buyer1._id, buyer2._id] } });
+      await Coupon.deleteOne({ _id: coupon._id });
+      await Product.deleteOne({ _id: product._id });
+      await User.deleteMany({ _id: { $in: [buyer1._id, buyer2._id] } });
+    }
+  });
+
+  test("FIXED: concurrent orders for the SAME user against a perUserLimit:1 coupon — exactly one succeeds, no duplicate-key 500", async () => {
+    const buyer = await createTestUser();
+    const productA = await createTestProduct({ stock: 10 });
+    const productB = await createTestProduct({ stock: 10 });
+    const coupon = await makeCoupon({ usageLimit: null, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0, perUserLimit: 1 });
+    try {
+      const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
+      const place = async (product) =>
+        createOrderPOST(
+          requestAs({
+            method: "POST",
+            url: "http://test/api/orders",
+            session: await createTestSession(buyer._id),
+            body: {
+              items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
+              shippingAddress: address,
+              couponCode: coupon.code,
+            },
+          }),
+        );
+
+      const [res1, res2] = await Promise.all([place(productA), place(productB)]);
+      const statuses = [res1.status, res2.status];
+      assert.ok(statuses.every((s) => [201, 400, 409].includes(s)), "no raw duplicate-key 500 may surface");
+      assert.equal(statuses.filter((s) => s === 201).length, 1, "exactly one of the two concurrent orders for this user may claim the coupon");
+    } finally {
+      await Order.deleteMany({ user: buyer._id });
+      await Coupon.deleteOne({ _id: coupon._id });
+      await Product.deleteMany({ _id: { $in: [productA._id, productB._id] } });
+      await User.deleteOne({ _id: buyer._id });
+    }
+  });
+
+  test("FIXED: a failed order transaction rolls back the coupon claim — the same coupon can be used again immediately, global and per-user counts are unchanged", async () => {
+    const buyer = await createTestUser();
+    const product = await createTestProduct({ stock: 1 });
+    const coupon = await makeCoupon({ usageLimit: null, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0, perUserLimit: 1 });
+    try {
+      const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
+      // Force the stock guard to fail (order quantity 5 against stock 1) —
+      // the whole transaction, including the coupon claim, must roll back.
+      const failing = await createOrderPOST(
+        requestAs({
+          method: "POST",
+          url: "http://test/api/orders",
+          session: await createTestSession(buyer._id),
+          body: {
+            items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 5 }],
+            shippingAddress: address,
+            couponCode: coupon.code,
+          },
+        }),
+      );
+      assert.equal(failing.status, 400);
+
+      const afterFailure = await Coupon.findById(coupon._id);
+      assert.equal(afterFailure.usedCount, 0, "a failed transaction must not leave a partial coupon claim");
+      const { default: CouponUsage } = await import("../models/couponUsageModel.js");
+      assert.equal(await CouponUsage.findOne({ coupon: coupon._id, user: buyer._id }), null, "no per-user usage row from a rolled-back transaction");
+
+      // The SAME coupon must still be fully usable afterward.
+      const succeeding = await createOrderPOST(
+        requestAs({
+          method: "POST",
+          url: "http://test/api/orders",
+          session: await createTestSession(buyer._id),
+          body: {
+            items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
+            shippingAddress: address,
+            couponCode: coupon.code,
+          },
+        }),
+      );
+      assert.equal(succeeding.status, 201);
+    } finally {
+      await Order.deleteMany({ user: buyer._id });
+      await Coupon.deleteOne({ _id: coupon._id });
+      await Product.deleteOne({ _id: product._id });
+      await User.deleteOne({ _id: buyer._id });
+    }
+  });
+
+  test("FIXED: cancelling an order restores both the global usedCount and the per-user usage count", async () => {
+    const buyer = await createTestUser();
+    const product = await createTestProduct({ stock: 10 });
+    const coupon = await makeCoupon({ usageLimit: null, usedCount: 0, discountType: "flat", discountValue: 10, minOrderAmount: 0, perUserLimit: 1 });
+    try {
+      const address = { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" };
+      const res = await createOrderPOST(
+        requestAs({
+          method: "POST",
+          url: "http://test/api/orders",
+          session: await createTestSession(buyer._id),
+          body: {
+            items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
+            shippingAddress: address,
+            couponCode: coupon.code,
+          },
+        }),
+      );
+      assert.equal(res.status, 201);
+      const { order } = await res.json();
+
+      const { POST: cancelPOST } = await import("../app/api/orders/[id]/cancel/route.js");
+      const cancelRes = await cancelPOST(
+        requestAs({ method: "POST", url: `http://test/api/orders/${order._id}/cancel`, session: await createTestSession(buyer._id) }),
+        { params: Promise.resolve({ id: order._id }) },
+      );
+      assert.equal(cancelRes.status, 200);
+
+      const afterCancel = await Coupon.findById(coupon._id);
+      assert.equal(afterCancel.usedCount, 0, "cancelling restores global usedCount");
+      const { default: CouponUsage } = await import("../models/couponUsageModel.js");
+      const usage = await CouponUsage.findOne({ coupon: coupon._id, user: buyer._id });
+      assert.equal(usage?.count ?? 0, 0, "cancelling restores per-user usage count");
+
+      // Restored usage means the SAME user can use the coupon again.
+      const again = await createOrderPOST(
+        requestAs({
+          method: "POST",
+          url: "http://test/api/orders",
+          session: await createTestSession(buyer._id),
+          body: {
+            items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
+            shippingAddress: address,
+            couponCode: coupon.code,
+          },
+        }),
+      );
+      assert.equal(again.status, 201, "restored usage means this user can use the coupon again after cancelling");
+    } finally {
+      await Order.deleteMany({ user: buyer._id });
+      await Coupon.deleteOne({ _id: coupon._id });
+      await Product.deleteOne({ _id: product._id });
+      await User.deleteOne({ _id: buyer._id });
     }
   });
 

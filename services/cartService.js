@@ -7,6 +7,7 @@ import Product from "../models/productModel.js";
 // productService.js.
 import "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 const PRODUCT_SELECT = "name slug images basePrice discountPrice brand isActive";
 
@@ -61,6 +62,8 @@ export async function getCart(userId) {
 }
 
 export async function addToCart(userId, productId, variantId, quantity = 1) {
+  requireObjectIdFormat(productId, "productId");
+  requireObjectIdFormat(variantId, "variantId");
   const qty = Number(quantity);
   if (!Number.isInteger(qty) || qty < 1) {
     throw new HttpError(400, "Quantity must be a positive integer");
@@ -100,6 +103,8 @@ export async function addToCart(userId, productId, variantId, quantity = 1) {
 }
 
 export async function updateCartItem(userId, productId, variantId, quantity) {
+  requireObjectIdFormat(productId, "productId");
+  requireObjectIdFormat(variantId, "variantId");
   const qty = Number(quantity);
   const cart = await getOrCreateCart(userId);
   const idx = cart.items.findIndex((i) => sameItem(i, productId, variantId));
@@ -128,6 +133,8 @@ export async function updateCartItem(userId, productId, variantId, quantity) {
 }
 
 export async function removeCartItem(userId, productId, variantId) {
+  requireObjectIdFormat(productId, "productId");
+  requireObjectIdFormat(variantId, "variantId");
   const cart = await getOrCreateCart(userId);
   cart.items = cart.items.filter((i) => !sameItem(i, productId, variantId));
   await cart.save();

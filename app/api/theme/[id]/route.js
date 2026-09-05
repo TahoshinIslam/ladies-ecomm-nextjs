@@ -4,6 +4,8 @@ import { requirePermission } from "../../../../lib/auth.js";
 import { PERMISSIONS } from "../../../../lib/permissions.js";
 import { getTheme, updateTheme, deleteTheme } from "../../../../services/themeService.js";
 import { withRoute } from "../../../../lib/http.js";
+import { parseJsonBody } from "../../../../lib/validation.js";
+import { updateThemeSchema } from "../../../../schemas/adminSchemas.js";
 
 export const GET = withRoute(async (request, { params }) => {
   await requirePermission(request, PERMISSIONS.THEMES_MANAGE);
@@ -15,7 +17,7 @@ export const GET = withRoute(async (request, { params }) => {
 export const PUT = withRoute(async (request, { params }) => {
   const admin = await requirePermission(request, PERMISSIONS.THEMES_MANAGE);
   const { id } = await params;
-  const body = await request.json();
+  const body = await parseJsonBody(request, updateThemeSchema);
   const theme = await updateTheme(id, body, admin._id);
   return NextResponse.json({ success: true, theme });
 });

@@ -1,5 +1,6 @@
 import AttributeDefinition from "../models/attributeDefinitionModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 const WRITABLE_FIELDS = [
   "key",
@@ -58,6 +59,7 @@ export async function createAttribute(body) {
 }
 
 export async function updateAttribute(id, body) {
+  requireObjectIdFormat(id, "id");
   const attribute = await AttributeDefinition.findById(id);
   if (!attribute) throw new HttpError(404, "Attribute not found");
 
@@ -71,6 +73,7 @@ export async function updateAttribute(id, body) {
 }
 
 export async function deleteAttribute(id) {
+  requireObjectIdFormat(id, "id");
   const attribute = await AttributeDefinition.findById(id);
   if (!attribute) throw new HttpError(404, "Attribute not found");
   await attribute.deleteOne();
