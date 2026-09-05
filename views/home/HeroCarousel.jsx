@@ -11,7 +11,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useDispatch } from "react-redux";
 import { motion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Pause, Play } from "lucide-react";
 
 import Button from "../../components/ui/Button.jsx";
 import { setFinderOpen } from "../../store/uiSlice.js";
@@ -31,6 +31,16 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
   const { t, locale } = useLocale();
   const dispatch = useDispatch();
   const [hero, setHero] = useState(0);
+  // Three independent reasons the auto-advance can be paused — a manual
+  // user toggle (persists until toggled back), pointer hover, and
+  // keyboard focus landing anywhere in the hero (WCAG 2.2.2 Pause, Stop,
+  // Hide requires BOTH an on-page control and pausing on hover/focus).
+  const [userPaused, setUserPaused] = useState(false);
+  const [interactionPaused, setInteractionPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(prefers-reduced-motion: reduce)").matches : false,
+  );
+  const paused = userPaused || interactionPaused || reducedMotion;
 
   const heroSlug = DEPARTMENT_ROTATION_SLUGS[hero];
   const heroDept = departments.find((d) => d.slug === heroSlug);
@@ -42,25 +52,45 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
     loading: false,
   };
 
-  // Auto-advance the hero, but never while the user prefers reduced motion.
+  // Live-tracks prefers-reduced-motion (a one-time check at mount would
+  // miss the user toggling it mid-session, e.g. via OS settings while the
+  // tab stays open).
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = (e) => setReducedMotion(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (paused) return;
     const timer = setInterval(
       () => setHero((i) => (i + 1) % DEPARTMENT_ROTATION_SLUGS.length),
       6000,
     );
     return () => clearInterval(timer);
-  }, []);
+  }, [paused]);
+
+  const pauseProps = {
+    paused: userPaused,
+    onTogglePause: () => setUserPaused((p) => !p),
+    onInteractionPause: () => setInteractionPaused(true),
+    onInteractionResume: () => setInteractionPaused(false),
+  };
 
   return (
     <>
-      <MobileHero slide={slide} dispatch={dispatch} />
-      <TabletHero slide={slide} dispatch={dispatch} />
+      <MobileHero slide={slide} dispatch={dispatch} {...pauseProps} />
+      <TabletHero slide={slide} dispatch={dispatch} {...pauseProps} />
 
       {/* ------------------------------------------------------------ Hero */}
       <section
         aria-labelledby="hero-h"
         className="relative hidden overflow-hidden lg:block"
+        onMouseEnter={() => setInteractionPaused(true)}
+        onMouseLeave={() => setInteractionPaused(false)}
+        onFocus={() => setInteractionPaused(true)}
+        onBlur={() => setInteractionPaused(false)}
       >
         <div
           aria-hidden="true"
@@ -218,6 +248,15 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                   {slide.tagline}
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setUserPaused((p) => !p)}
+                aria-pressed={userPaused}
+                aria-label={userPaused ? t("home.resumeRotation") : t("home.pauseRotation")}
+                className="grid h-9 w-9 flex-none place-items-center rounded-full border border-line text-ink transition-colors hover:border-ink focus-ring"
+              >
+                {userPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+              </button>
               <div role="group" aria-label={t("home.chooseDepartment")} className="flex gap-2">
                 {DEPARTMENT_ROTATION_SLUGS.map((slug, i) => (
                   <button
@@ -261,7 +300,7 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
  * <768px only — `<Header>`'s mobile bar and `<MobileNav>` are this page's
  * counterparts for the rest of the shell (both untouched here).
  */
-function MobileHero({ slide, dispatch }) {
+function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause, onInteractionResume }) {
   const { t } = useLocale();
   const gutter = "clamp(20px,4vw,56px)";
 
@@ -270,6 +309,10 @@ function MobileHero({ slide, dispatch }) {
       aria-labelledby="hero-h-mobile"
       className="relative overflow-hidden pb-2 pt-4 md:hidden"
       style={{ paddingInline: gutter }}
+      onMouseEnter={onInteractionPause}
+      onMouseLeave={onInteractionResume}
+      onFocus={onInteractionPause}
+      onBlur={onInteractionResume}
     >
       <div
         aria-hidden="true"
@@ -346,11 +389,20 @@ function MobileHero({ slide, dispatch }) {
           </div>
           <div className="text-[12.5px] text-stone">{slide.tagline}</div>
         </div>
+        <button
+          type="button"
+          onClick={onTogglePause}
+          aria-pressed={paused}
+          aria-label={paused ? t("home.resumeRotation") : t("home.pauseRotation")}
+          className="grid h-9 w-9 flex-none place-items-center rounded-full border border-line text-ink transition-colors hover:border-ink focus-ring"
+        >
+          {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+        </button>
       </div>
 
       <div className="relative mt-3 flex gap-2">
         <Link href="/shop?sort=-createdAt" className="flex-1">
-          <span className="flex h-12 items-center justify-center rounded-[10px] bg-verm text-sm font-semibold text-white transition-transform active:scale-[0.975]">
+          <span className="flex h-12 items-center justify-center rounded-[10px] bg-verm-contrast text-sm font-semibold text-white transition-transform active:scale-[0.975]">
             {t("home.shopNewArrivals")}
           </span>
         </Link>
@@ -369,12 +421,16 @@ function MobileHero({ slide, dispatch }) {
  * A dedicated hero for 768–1023px — a single-column shape sized for that
  * width rather than the desktop composition collapsed into one column.
  */
-function TabletHero({ slide, dispatch }) {
+function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause, onInteractionResume }) {
   const { t } = useLocale();
   return (
     <section
       aria-labelledby="hero-h-tablet"
       className="relative hidden overflow-hidden md:block lg:hidden"
+      onMouseEnter={onInteractionPause}
+      onMouseLeave={onInteractionResume}
+      onFocus={onInteractionPause}
+      onBlur={onInteractionResume}
     >
       <div
         aria-hidden="true"
@@ -457,6 +513,15 @@ function TabletHero({ slide, dispatch }) {
             </div>
             <div className="text-sm text-stone">{slide.tagline}</div>
           </div>
+          <button
+            type="button"
+            onClick={onTogglePause}
+            aria-pressed={paused}
+            aria-label={paused ? t("home.resumeRotation") : t("home.pauseRotation")}
+            className="grid h-9 w-9 flex-none place-items-center rounded-full border border-line text-ink transition-colors hover:border-ink focus-ring"
+          >
+            {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+          </button>
         </div>
       </div>
     </section>

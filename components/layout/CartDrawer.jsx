@@ -197,7 +197,7 @@ export default function CartDrawer() {
                           <Minus className="h-3.5 w-3.5" />
                         </button>
                         <span
-                          aria-live="off"
+                          aria-live="polite"
                           data-tabular
                           className="min-w-[26px] text-center font-mono text-[13px]"
                         >

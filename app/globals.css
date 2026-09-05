@@ -18,7 +18,28 @@
   --line: #d8d3c9;
   --media: #e9e6de;
   --shine: #ffffff;
-  --verm: #ff3d21;
+  /* Phase 10 checkpoint — WCAG 1.4.3 contrast fix: the original #ff3d21
+     rendered as body/link TEXT directly on --canvas/--surface only
+     reached ~3.1-3.5:1 (fails the 4.5:1 normal-text minimum) in LIGHT
+     mode specifically — dark mode's use of the same value against its
+     much darker backgrounds already passed at ~5.2-5.6:1, so only light
+     mode's value changes here (dark mode keeps the original, see the
+     [data-theme="dark"] block below). This is the same red hue/
+     saturation, just darkened in lightness (56.5% -> 42.5%), not a
+     palette redesign. See --verm-contrast below for the SEPARATE,
+     different problem of white text ON a verm-colored background. */
+  --verm: #d81b00;
+  /* A second, deliberately different token: white text sitting ON a
+     solid verm background (Button.jsx's `accent` variant, Badge.jsx's
+     `accent` variant, and several inline badges/CTAs) needs the
+     BACKGROUND itself dark enough for 4.5:1 against white — a need that
+     doesn't depend on the surrounding page theme the way plain text-on-
+     page-background does. The original #ff3d21 only reached 3.53:1
+     against white in either theme. This single value satisfies both
+     that (5.15:1) and, incidentally, --verm's light-mode fix above (they
+     happen to be the same corrected shade) — used identically in both
+     themes below. */
+  --verm-contrast: #d81b00;
   --lime: #d4ff45;
   --coral: #ffd9d1;
   --lav: #ded9ff;
@@ -68,6 +89,15 @@
   --shine: #f5f2ea;
   --coral: #4a2e28;
   --lav: #2e2b45;
+  /* Explicit override, not an omission: dark mode's original #ff3d21
+     already passes 4.5:1 as TEXT against this theme's much darker
+     canvas/surface (~5.2-5.6:1) — freezing it here keeps that,
+     independent of :root's light-mode-specific darkening above.
+     --verm-contrast (the white-on-verm-background case) still uses the
+     same darker shade as light mode, since that pairing doesn't depend
+     on the page background at all. */
+  --verm: #ff3d21;
+  --verm-contrast: #d81b00;
 
   --stripe: rgba(245, 242, 234, 0.07);
   --wash: rgba(245, 242, 234, 0.04);
@@ -119,6 +149,7 @@
   --color-line: var(--line);
   --color-media: var(--media);
   --color-verm: var(--verm);
+  --color-verm-contrast: var(--verm-contrast);
   --color-lime: var(--lime);
   --color-coral: var(--coral);
   --color-lav: var(--lav);

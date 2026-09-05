@@ -146,8 +146,19 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
       onMouseLeave={() => setHovered(false)}
       className={cn("group relative flex flex-col", className)}
     >
-      <Link href={href} className="focus-ring rounded-[14px]">
-        <div className="relative aspect-4/5 overflow-hidden rounded-[14px] bg-media">
+      {/* Phase 10 — the image area and the action buttons (wishlist/
+          compare/quick-add/notify) are siblings, not a <button> nested
+          inside this <Link>'s <a>: an anchor cannot validly contain other
+          interactive content (WHATWG "transparent content model"
+          exception excludes it), and browsers/AT are inconsistent about
+          exposing a nested button's own role/name when it happens
+          anyway. The image Link fills the box via `absolute inset-0`
+          (identical visual result to the old flow-layout wrapper); the
+          buttons sit in their own `z-10` layer above it so they keep
+          receiving their own clicks/focus, and the name/price block below
+          is its own separate real link. */}
+      <div className="relative aspect-4/5 overflow-hidden rounded-[14px] bg-media">
+        <Link href={href} aria-label={product.name} className="absolute inset-0 z-0 focus-ring rounded-[14px]">
           <div aria-hidden="true" className="absolute inset-0 hatch" />
           <div aria-hidden="true" className="absolute inset-0 glow" />
 
@@ -209,7 +220,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               {availabilityLabel}
             </span>
           ) : discounted ? (
-            <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-verm px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-white">
+            <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-verm-contrast px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-white">
               {t("product.discountBadge", {
                 percent: Math.round(
                   ((product.basePrice - product.discountPrice) / product.basePrice) * 100,
@@ -217,9 +228,10 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               })}
             </span>
           ) : null}
+        </Link>
 
-          {/* Save / compare */}
-          <div className="absolute right-2.5 top-2.5 flex flex-col gap-2">
+        {/* Save / compare */}
+        <div className="absolute right-2.5 top-2.5 z-10 flex flex-col gap-2">
             <button
               onClick={handleWishlist}
               disabled={wlLoading}
@@ -262,17 +274,21 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               </button>
             </div>
           ) : (
+            // CSS-driven visibility (group-hover/group-focus-within),
+            // never tabIndex-gated: the button previously only entered
+            // the tab order while `hovered` (a mouse-only state) was
+            // true, making it permanently unreachable by keyboard. It
+            // stays a real, always-focusable button; only its visibility
+            // reacts to hover/focus-within the card.
             <div
-              className="absolute inset-x-2.5 bottom-2.5 transition-[opacity,transform] duration-200"
-              style={{
-                opacity: hovered ? 1 : 0,
-                transform: hovered ? "none" : "translateY(8px)",
-              }}
+              className={cn(
+                "absolute inset-x-2.5 bottom-2.5 opacity-0 transition-[opacity,transform] duration-200 translate-y-2",
+                "group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100",
+              )}
             >
               <button
                 onClick={handleQuickAdd}
-                tabIndex={hovered ? 0 : -1}
-                className="h-11 w-full rounded-lg bg-ink text-sm font-semibold text-canvas transition-colors hover:bg-verm hover:text-white focus-ring active:scale-[0.985]"
+                className="h-11 w-full rounded-lg bg-ink text-sm font-semibold text-canvas transition-colors hover:bg-verm-contrast hover:text-white focus-ring active:scale-[0.985]"
               >
                 {t("product.quickAdd")}
               </button>
@@ -280,7 +296,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           )}
         </div>
 
-        <div className="mt-3.5 flex items-start justify-between gap-3.5">
+        <Link href={href} className="mt-3.5 flex items-start justify-between gap-3.5 focus-ring rounded-md">
           <div className="min-w-0">
             {categoryName && (
               <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-stone">
@@ -337,8 +353,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               </span>
             )}
           </div>
-        </div>
-      </Link>
+        </Link>
     </motion.article>
   );
 }

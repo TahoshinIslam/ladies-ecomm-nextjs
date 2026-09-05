@@ -844,11 +844,14 @@ function AttributeField({ def, register, watch, setValue }) {
 // schema level, so this stays a suggestion, not a constraint.
 function ComboField({ label, def, error, ...field }) {
   const listId = `combo-${field.name}`;
+  const inputId = `combo-field-${field.name}`;
   return (
     <div className="w-full">
-      <label className="mb-1.5 block text-sm font-medium text-ink">{label}</label>
+      <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-ink">{label}</label>
       <input
+        id={inputId}
         list={def ? listId : undefined}
+        aria-invalid={error ? true : undefined}
         className={cn(
           "h-11 w-full rounded-lg border border-line bg-elev px-3 text-sm text-ink transition-colors focus-ring hover:border-ink/40",
           error && "border-danger",

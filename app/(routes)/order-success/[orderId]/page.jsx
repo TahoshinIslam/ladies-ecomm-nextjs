@@ -3,6 +3,7 @@ import OrderSuccessPage from "@/views/OrderSuccessPage.jsx";
 
 export const metadata = {
   title: "Order confirmed",
+  robots: { index: false, follow: false },
 };
 
 export default function Page() {

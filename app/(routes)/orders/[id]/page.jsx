@@ -2,6 +2,7 @@ import OrderDetailPage from "@/views/OrderDetailPage.jsx";
 
 export const metadata = {
   title: "Order",
+  robots: { index: false, follow: false },
 };
 
 // Phase 7 — deliberately NOT wrapped in <Suspense>: this page's

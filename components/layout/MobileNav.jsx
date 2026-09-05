@@ -44,7 +44,7 @@ export default function MobileNav() {
         aria-label={t("navigation.search")}
         className="flex flex-1 flex-col items-center justify-start gap-1.5 pt-0.5 text-stone transition-transform active:scale-95"
       >
-        <span className="grid h-[38px] w-[46px] place-items-center rounded-xl bg-verm text-white shadow-[0_6px_16px_-8px_rgba(255,61,33,0.9)]">
+        <span className="grid h-[38px] w-[46px] place-items-center rounded-xl bg-verm-contrast text-white shadow-[0_6px_16px_-8px_rgba(255,61,33,0.9)]">
           <Search className="h-[21px] w-[21px]" strokeWidth={2} />
         </span>
         <span className="text-[10.5px] font-medium">{t("navigation.search")}</span>
@@ -97,7 +97,7 @@ function NavTab({ href, label, icon: Icon, active, badge }) {
           <span
             aria-hidden="true"
             data-tabular
-            className="absolute -right-[7px] -top-[3px] grid h-4 min-w-4 place-items-center rounded-lg bg-verm px-1 font-mono text-[9.5px] leading-none text-white"
+            className="absolute -right-[7px] -top-[3px] grid h-4 min-w-4 place-items-center rounded-lg bg-verm-contrast px-1 font-mono text-[9.5px] leading-none text-white"
           >
             {badge > 9 ? "9+" : badge}
           </span>

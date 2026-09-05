@@ -51,7 +51,7 @@ export default function GuidedFinderSection() {
             <span className="rounded-lg border border-line bg-elev px-4 py-2.5 text-[14.5px] font-medium">
               {t("home.everyday")}
             </span>
-            <span className="rounded-lg bg-verm px-4 py-2.5 text-[14.5px] font-medium text-white">
+            <span className="rounded-lg bg-verm-contrast px-4 py-2.5 text-[14.5px] font-medium text-white">
               {t("home.fullCoverage")}
             </span>
             <span className="rounded-lg border border-line bg-elev px-4 py-2.5 text-[14.5px] font-medium">

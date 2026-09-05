@@ -305,7 +305,7 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
             {activeFilterCount > 0 && (
               <span
                 data-tabular
-                className="grid h-4 min-w-4 place-items-center rounded-lg bg-verm px-1 font-mono text-[10px] leading-none text-white"
+                className="grid h-4 min-w-4 place-items-center rounded-lg bg-verm-contrast px-1 font-mono text-[10px] leading-none text-white"
               >
                 {activeFilterCount}
               </span>
@@ -541,7 +541,7 @@ function FilterSheetMobile({ open, onClose, activeFilterCount, children }) {
                 {activeFilterCount > 0 && (
                   <span
                     data-tabular
-                    className="grid h-5 min-w-5 place-items-center rounded-lg bg-verm px-1.5 font-mono text-[11px] text-white"
+                    className="grid h-5 min-w-5 place-items-center rounded-lg bg-verm-contrast px-1.5 font-mono text-[11px] text-white"
                   >
                     {activeFilterCount}
                   </span>

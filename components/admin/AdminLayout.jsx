@@ -156,6 +156,7 @@ export default function AdminLayout({ children }) {
         <AdminTopbar onOpenMobileNav={() => setMobileOpen(true)} mobileNavTriggerRef={mobileNavTriggerRef} />
 
         <motion.main
+          id="main"
           key={pathname}
           initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 6 }}
           animate={{ opacity: 1, y: 0 }}

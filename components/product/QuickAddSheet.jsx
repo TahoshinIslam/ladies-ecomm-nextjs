@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useDispatch, useSelector } from "react-redux";
@@ -24,9 +24,7 @@ import {
   repairVariantSelection,
   resolveVariantPricing,
 } from "../../lib/utils.js";
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+import useDialogFocus from "../../hooks/useDialogFocus.js";
 
 /**
  * The board's variant picker, mounted once (like CartDrawer/SearchModal) and
@@ -72,38 +70,11 @@ export default function QuickAddSheet() {
     setAdding(false);
   }
 
-  useEffect(() => {
-    if (!open) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    const onKeydown = (e) => {
-      if (e.key === "Escape") {
-        dispatch(closeQuickAdd());
-        return;
-      }
-      if (e.key !== "Tab" || !panel) return;
-      const items = Array.from(panel.querySelectorAll(FOCUSABLE));
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeydown);
-    return () => document.removeEventListener("keydown", onKeydown);
-  }, [open, dispatch]);
+  // Moves focus into the panel on open, traps Tab, closes on Escape, and
+  // restores focus to the triggering product card on close — this sheet
+  // previously did none of the focus-in/focus-restore parts (only the
+  // scroll-lock and a partial Tab trap existed).
+  useDialogFocus({ open, panelRef, onClose: () => dispatch(closeQuickAdd()) });
 
   if (!product) return null;
 
@@ -280,7 +251,7 @@ export default function QuickAddSheet() {
                 className={cn(
                   "mt-[22px] flex h-[54px] w-full items-center justify-center gap-2 rounded-[9px] text-base font-semibold transition-colors active:scale-[0.99]",
                   canAdd
-                    ? "bg-verm text-white hover:bg-ink hover:text-canvas"
+                    ? "bg-verm-contrast text-white hover:bg-ink hover:text-canvas"
                     : "cursor-not-allowed bg-media text-stone",
                 )}
               >

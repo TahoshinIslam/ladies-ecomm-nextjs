@@ -103,7 +103,7 @@ export default function NewsletterPoster() {
               <button
                 type="submit"
                 disabled={state === "loading"}
-                className="h-[54px] whitespace-nowrap rounded-[9px] bg-verm px-6 text-[15.5px] font-semibold text-white transition-colors hover:bg-[#F5F2EA] hover:text-[#101012] focus-ring active:scale-[0.98] disabled:opacity-60"
+                className="h-[54px] whitespace-nowrap rounded-[9px] bg-verm-contrast px-6 text-[15.5px] font-semibold text-white transition-colors hover:bg-[#F5F2EA] hover:text-[#101012] focus-ring active:scale-[0.98] disabled:opacity-60"
               >
                 {state === "success" ? t("home.subscribed") : t("home.signUp")}
               </button>

@@ -401,7 +401,7 @@ export default async function HomePage() {
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3.5">
               <Link href="/shop">
-                <span className="inline-flex h-[52px] items-center gap-2.5 rounded-[9px] bg-[#F5F2EA] px-6 text-[15.5px] font-semibold text-[#101012] transition-colors hover:bg-verm hover:text-white">
+                <span className="inline-flex h-[52px] items-center gap-2.5 rounded-[9px] bg-[#F5F2EA] px-6 text-[15.5px] font-semibold text-[#101012] transition-colors hover:bg-verm-contrast hover:text-white">
                   {t("home.shopTheCollection")}
                   <ArrowRight className="h-4 w-4" />
                 </span>

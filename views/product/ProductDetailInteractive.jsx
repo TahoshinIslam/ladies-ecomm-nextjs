@@ -255,6 +255,8 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                     setSelectedImage(i);
                     setImageFailed(false);
                   }}
+                  aria-label={t("product.viewImageNumber", { number: i + 1 })}
+                  aria-current={i === selectedImage}
                   className={cn(
                     "h-20 w-20 flex-shrink-0 overflow-hidden rounded-md border-2 transition-colors",
                     i === selectedImage ? "border-accent" : "border-transparent"
@@ -555,6 +557,7 @@ function VariantAxisRow({ label, options, displayOptions, selected, onSelect, sw
               disabled={opt.disabled}
               onClick={() => onSelect(opt.value)}
               title={labelFor(opt.value)}
+              aria-pressed={active}
               className={cn(
                 "flex h-11 items-center gap-2 rounded-md border px-3.5 text-sm font-semibold transition-all",
                 active && "border-accent bg-accent text-accent-foreground shadow-card",
@@ -590,7 +593,7 @@ function QuantityStepper({ quantity, setQuantity, max }) {
       >
         <Minus className="h-4 w-4" />
       </button>
-      <span className="w-10 text-center text-sm font-bold">{quantity}</span>
+      <span aria-live="polite" className="w-10 text-center text-sm font-bold">{quantity}</span>
       <button
         onClick={() => setQuantity((q) => Math.min(max || 99, q + 1))}
         className="px-3 py-2 text-muted-foreground hover:text-foreground"

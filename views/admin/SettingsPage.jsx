@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Children, cloneElement, useCallback, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { Save, Plus, Trash2, Gift, Image as ImageIcon, Upload, X } from "lucide-react";
@@ -56,13 +56,25 @@ const Section = ({ title, children, action }) => (
   </div>
 );
 
-const Field = ({ label, children, help }) => (
-  <div className="mb-4">
-    <label className="block text-sm font-medium mb-1">{label}</label>
-    {children}
-    {help && <p className="text-xs text-muted-foreground mt-1">{help}</p>}
-  </div>
-);
+// Phase 10 — the label previously had no `htmlFor`, and its single
+// control child (Input/Select/etc. below) had no `id` — visually
+// adjacent but programmatically unassociated. Every call site renders
+// exactly one control as `children`, so cloning it to inject a
+// useId()-generated `id` (only when the child doesn't already carry its
+// own) links label and control everywhere Field is used, with zero
+// changes needed at each of this file's ~20+ call sites.
+const Field = ({ label, children, help }) => {
+  const generatedId = useId();
+  const child = Children.only(children);
+  const controlId = child.props?.id || generatedId;
+  return (
+    <div className="mb-4">
+      <label htmlFor={controlId} className="block text-sm font-medium mb-1">{label}</label>
+      {cloneElement(child, { id: controlId })}
+      {help && <p className="text-xs text-muted-foreground mt-1">{help}</p>}
+    </div>
+  );
+};
 
 const Input = (props) => (
   <input

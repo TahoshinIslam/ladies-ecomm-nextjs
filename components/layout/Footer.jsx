@@ -151,9 +151,9 @@ export default function Footer() {
 
         {columns.map((col) => (
           <div key={col.heading}>
-            <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+            <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
               {col.heading}
-            </div>
+            </h2>
             <div className="mt-[18px] flex flex-col gap-[11px] text-[15px]">
               {col.links.map((l) => (
                 <Link
@@ -169,9 +169,9 @@ export default function Footer() {
         ))}
 
         <div>
-          <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+          <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
             {t("footer.region")}
-          </div>
+          </h2>
           <div className="mt-[18px] flex flex-col gap-3">
             <span className="text-[13px] text-stone">{t("footer.shipsTo")}</span>
             <span className="text-[14.5px] font-medium text-ink">{t("footer.shipsToValue")}</span>

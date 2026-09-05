@@ -8,7 +8,7 @@ import { cn } from "../../lib/utils.js";
 const variants = {
   default: "bg-media text-stone",
   primary: "bg-ink text-canvas",
-  accent: "bg-verm text-white",
+  accent: "bg-verm-contrast text-white",
   lime: "bg-lime text-[#101012]",
   success: "border border-success/30 bg-success/15 text-success",
   warning: "border border-warning/30 bg-warning/15 text-warning",

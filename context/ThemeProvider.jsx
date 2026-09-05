@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { Provider as ReduxProvider } from "react-redux";
+import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
 
 import store from "../store/index.js";
@@ -143,25 +144,39 @@ function StorageHydrator() {
  */
 export default function AppProviders({ initialTheme = "light", initialLocale, children }) {
   return (
-    <LocaleProvider initialLocale={initialLocale}>
-      <ReduxProvider store={store}>
-        <StorageHydrator />
-        <ThemeController initialTheme={initialTheme}>
-          <SettingsProvider>{children}</SettingsProvider>
-          <Toaster
-            position="bottom-right"
-            toastOptions={{
-              style: {
-                background: "var(--elev)",
-                color: "var(--ink)",
-                border: "1px solid var(--line)",
-                borderRadius: "12px",
-                boxShadow: "var(--shadow-soft)",
-              },
-            }}
-          />
-        </ThemeController>
-      </ReduxProvider>
-    </LocaleProvider>
+    // Phase 10 — `reducedMotion="user"` makes every framer-motion
+    // animation in the app (hero, drawers, modals, product cards, admin
+    // page transitions, ...) automatically respect the OS
+    // prefers-reduced-motion setting: framer-motion swaps translate/scale/
+    // opacity transitions down to near-instant for any user who has it
+    // enabled, without each of the ~15 components that call `motion.*`
+    // needing its own `useReducedMotion()` check (previously only
+    // components/admin/AdminLayout.jsx had one). The CSS
+    // `@media (prefers-reduced-motion: reduce)` block in globals.css
+    // still separately covers plain CSS transitions/animations (not
+    // framer-motion's own JS-driven ones) — the two are complementary,
+    // not redundant.
+    <MotionConfig reducedMotion="user">
+      <LocaleProvider initialLocale={initialLocale}>
+        <ReduxProvider store={store}>
+          <StorageHydrator />
+          <ThemeController initialTheme={initialTheme}>
+            <SettingsProvider>{children}</SettingsProvider>
+            <Toaster
+              position="bottom-right"
+              toastOptions={{
+                style: {
+                  background: "var(--elev)",
+                  color: "var(--ink)",
+                  border: "1px solid var(--line)",
+                  borderRadius: "12px",
+                  boxShadow: "var(--shadow-soft)",
+                },
+              }}
+            />
+          </ThemeController>
+        </ReduxProvider>
+      </LocaleProvider>
+    </MotionConfig>
   );
 }

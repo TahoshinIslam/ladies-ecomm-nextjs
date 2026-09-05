@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useDispatch, useSelector } from "react-redux";
@@ -14,9 +14,7 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrValue, departmentName } from "../../lib/i18n/catalog.js";
 import { resolveImage } from "../../lib/utils.js";
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+import useDialogFocus from "../../hooks/useDialogFocus.js";
 
 // Three questions built from this catalog's real facets, not invented copy
 // (see the 2026-09 localization follow-up — this used to be leftover
@@ -128,39 +126,10 @@ export default function ProductFinder() {
 
   const close = () => dispatch(setFinderOpen(false));
 
-  useEffect(() => {
-    if (!open) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    const onKeydown = (e) => {
-      if (e.key === "Escape") {
-        close();
-        return;
-      }
-      if (e.key !== "Tab" || !panel) return;
-      const items = Array.from(panel.querySelectorAll(FOCUSABLE));
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeydown);
-    return () => document.removeEventListener("keydown", onKeydown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  // Moves focus into the panel on open, traps Tab, closes on Escape, and
+  // restores focus to the "Help me choose" trigger on close — previously
+  // missing here (only scroll-lock and a partial Tab trap existed).
+  useDialogFocus({ open, panelRef, onClose: close });
 
   const pick = (value) => {
     setAnswers((prev) => [...prev.slice(0, step), value]);
@@ -276,7 +245,7 @@ export default function ProductFinder() {
                   <Link
                     href="/shop"
                     onClick={close}
-                    className="flex h-[50px] flex-1 items-center justify-center rounded-[9px] bg-verm text-[15px] font-semibold text-white transition-colors hover:bg-ink hover:text-canvas"
+                    className="flex h-[50px] flex-1 items-center justify-center rounded-[9px] bg-verm-contrast text-[15px] font-semibold text-white transition-colors hover:bg-ink hover:text-canvas"
                   >
                     {t("finder.seePairs")}
                   </Link>
