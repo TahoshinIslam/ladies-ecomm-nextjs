@@ -148,10 +148,22 @@ async function registerNewUser(jar, origin = BASE_URL) {
   const suffix = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const email = `httpauth_${suffix}@example.invalid`;
   const password = "RealHttpTest123!";
+  // Phase 3B: this harness's real server runs with proxy trust configured
+  // (see scripts/httpTestServer.mjs) — register's IP dimension is now its
+  // ONLY dimension and fails closed with no IP at all (the correct fix
+  // for a real deployment). This file predates that feature and never
+  // needed to think about IP identity, so every call here gets its own
+  // fresh, random fake client IP — never shared between calls (this file
+  // registers a dozen-plus users across its tests; a single shared IP
+  // would collide with REGISTER_IP_LIMIT's own 5/hour default and start
+  // failing unrelated tests with 429 instead of exercising what they
+  // actually test).
+  const fakeClientIp = `198.51.100.${crypto.randomInt(1, 255)}`;
   const res = await req(jar, "/api/users/register", {
     method: "POST",
     origin,
     body: { name: `HTTP Auth Test ${suffix}`, email, password },
+    extraHeaders: { "x-forwarded-for": fakeClientIp },
   });
   return { res, email, password, json: await res.clone().json() };
 }

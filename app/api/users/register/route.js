@@ -3,9 +3,25 @@ import { NextResponse } from "next/server";
 import { register } from "../../../../services/authService.js";
 import { withRoute } from "../../../../lib/http.js";
 import { readSessionTokenFromRequest, setSessionCookie, setCsrfCookie } from "../../../../lib/cookies.js";
+import { requireClientIp } from "../../../../lib/clientIp.js";
+import { enforceRateLimit, ClientIpUnavailableError } from "../../../../lib/rateLimit.js";
+import { REGISTER_IP_LIMIT, REGISTER_IP_WINDOW_MS } from "../../../../lib/rateLimitConfig.js";
 
 export const POST = withRoute(async (request) => {
   const body = await request.json();
+
+  // Per trusted client IP only, to prevent bulk account creation — there
+  // is no per-account dimension to fall back on here (no account exists
+  // yet), so this is this route's ONLY protection. Phase 3B: in
+  // production, if no trustworthy IP is available at all, this route must
+  // fail closed (503) rather than silently proceed unprotected — see
+  // lib/clientIp.js's requireClientIp() for the full policy (non-
+  // production environments skip the IP dimension instead, for
+  // testability; this can never happen in a real deployment).
+  const { ok, identity: ip } = requireClientIp(request);
+  if (!ok) throw new ClientIpUnavailableError();
+  if (ip) await enforceRateLimit([{ identity: ip, action: "register:ip", limit: REGISTER_IP_LIMIT, windowMs: REGISTER_IP_WINDOW_MS }]);
+
   const presented = readSessionTokenFromRequest(request);
   const { rawToken, rawCsrfToken, user } = await register(body, presented, {
     userAgent: request.headers.get("user-agent") || "",

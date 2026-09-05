@@ -207,6 +207,24 @@ async function main() {
         // real deployment uses (lib/csrf.js's canonicalOrigin()), not just
         // the same-origin fallback meant for local single-process dev.
         APP_ORIGIN: baseUrl,
+        // Phase 3B: `next start` always runs as a production server
+        // regardless of NODE_ENV (confirmed in this codebase's own Phase 2
+        // closure) — which means, WITHOUT this, register/reset-password's
+        // Phase 3B fail-closed policy (lib/clientIp.js's requireClientIp())
+        // would make this test server's default configuration behave
+        // exactly like an unconfigured real deployment: those two routes
+        // would 503 on every request, since no proxy trust is configured.
+        // That fail-closed behavior itself IS tested — directly, in
+        // tests/rateLimit.test.mjs, by forcing NODE_ENV=production
+        // in-process (the exact same code path a real unconfigured
+        // deployment hits, without needing a second real server here).
+        // This harness's one real server instead runs WITH proxy trust
+        // configured, matching a real deployment that HAS completed the
+        // required setup — so the real-HTTP suite can verify correct IP
+        // selection, per-IP bucket isolation, and spoofing resistance
+        // against an actual running server.
+        TRUST_PROXY_HEADERS: "true",
+        TRUSTED_PROXY_HOP_COUNT: "1",
       },
       stdio: ["ignore", logFd, logFd],
     });
