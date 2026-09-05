@@ -183,29 +183,8 @@ const addressEndpoints = (b) => ({
   }),
 });
 
-// ====== Payments ======
+// ====== Payments ====== (COD-only at launch — see services/paymentService.js)
 const paymentEndpoints = (b) => ({
-  stripeCheckout: b.mutation({
-    query: (orderId) => ({
-      url: `/payments/stripe/${orderId}`,
-      method: "POST",
-    }),
-  }),
-  bkashCreate: b.mutation({
-    query: (orderId) => ({
-      url: `/payments/bkash/create/${orderId}`,
-      method: "POST",
-    }),
-  }),
-  bkashExecute: b.mutation({
-    query: (body) => ({ url: "/payments/bkash/execute", method: "POST", body }),
-  }),
-  nagadCreate: b.mutation({
-    query: (orderId) => ({
-      url: `/payments/nagad/create/${orderId}`,
-      method: "POST",
-    }),
-  }),
   codCreate: b.mutation({
     query: (orderId) => ({ url: `/payments/cod/${orderId}`, method: "POST" }),
   }),
@@ -392,10 +371,6 @@ export const {
   useCreateAddressMutation,
   useUpdateAddressMutation,
   useDeleteAddressMutation,
-  useStripeCheckoutMutation,
-  useBkashCreateMutation,
-  useBkashExecuteMutation,
-  useNagadCreateMutation,
   useCodCreateMutation,
   useGetPaymentByOrderQuery,
   useGetOverviewQuery,

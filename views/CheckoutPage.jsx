@@ -15,7 +15,6 @@ import {
   ShoppingBag,
   Check,
   Loader2,
-  Smartphone,
   Banknote,
   AlertCircle,
 } from "lucide-react";
@@ -35,9 +34,6 @@ import {
   useValidateCouponMutation,
   useCreateOrderMutation,
   usePreviewOrderMutation,
-  useStripeCheckoutMutation,
-  useBkashCreateMutation,
-  useNagadCreateMutation,
   useCodCreateMutation,
 } from "../store/shopApi.js";
 import { selectCurrentUser } from "../store/authSlice.js";
@@ -71,12 +67,9 @@ const addressSchema = z.object({
   label: z.enum(ADDRESS_LABELS).default("home"),
 });
 
-// Stripe / bKash / Nagad are temporarily disabled until the gateway
-// integrations are reworked. Only Cash on Delivery is offered at launch.
+// COD-only at launch — see services/paymentService.js for the enforced
+// server-side contract this UI reflects.
 const PAYMENT_METHODS = [
-  // { id: "stripe", labelKey: "...", descKey: "...", icon: CreditCard },
-  // { id: "bkash", labelKey: "...", descKey: "...", icon: Smartphone },
-  // { id: "nagad", labelKey: "...", descKey: "...", icon: Smartphone },
   { id: "cod", labelKey: "checkout.cashOnDelivery", descKey: "checkout.cashOnDeliveryDesc", icon: Banknote },
 ];
 
@@ -93,9 +86,6 @@ export default function CheckoutPage() {
   const [validateCoupon] = useValidateCouponMutation();
   const [createOrder, { isLoading: placing }] = useCreateOrderMutation();
   const [previewOrder] = usePreviewOrderMutation();
-  const [stripeCheckout] = useStripeCheckoutMutation();
-  const [bkashCreate] = useBkashCreateMutation();
-  const [nagadCreate] = useNagadCreateMutation();
   const [codCreate] = useCodCreateMutation();
 
   const [selectedAddressId, setSelectedAddressId] = useState(null);
@@ -434,23 +424,6 @@ export default function CheckoutPage() {
         setResumableOrderId(orderId);
       }
 
-      // Stripe / bKash / Nagad disabled until gateways are reworked.
-      // if (paymentMethod === "stripe") {
-      //   const res = await stripeCheckout(orderId).unwrap();
-      //   window.location.href = res.url;
-      //   return;
-      // }
-      // if (paymentMethod === "bkash") {
-      //   const res = await bkashCreate(orderId).unwrap();
-      //   window.location.href = res.url;
-      //   return;
-      // }
-      // if (paymentMethod === "nagad") {
-      //   toast.success("Order placed. Continue Nagad payment.");
-      //   downloadReceipt(orderRes.order);
-      //   router.push(`/orders/${orderId}`);
-      //   return;
-      // }
       if (paymentMethod === "cod") {
         await codCreate(orderId).unwrap();
         // COD's own natural idempotency (orderId, backstopped by

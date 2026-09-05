@@ -117,19 +117,6 @@ export async function resetPassword(token, password) {
   return { message: "Password updated. Please log in." };
 }
 
-export async function verifyEmail(token) {
-  if (!isHexTokenFormat(token)) throw new HttpError(400, "Invalid or expired verification link");
-  const hashed = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({ verificationToken: hashed }).select("+verificationToken");
-  if (!user) throw new HttpError(400, "Invalid or expired verification link");
-
-  user.isVerified = true;
-  user.verificationToken = undefined;
-  await user.save({ validateBeforeSave: false });
-
-  return { message: "Email verified" };
-}
-
 // ========== ADMIN ==========
 
 const ADMIN_USER_WRITABLE_FIELDS = ["name", "email", "role", "isVerified", "permissions"];

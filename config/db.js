@@ -7,9 +7,10 @@ import mongoose from "mongoose";
 // a plain module-level variable would not.
 const cache = (globalThis.__mongooseCache ??= { conn: null, promise: null });
 
-// No pino/logger dependency here on purpose — utlis/logger.js requires the
-// `pino`/`pino-pretty` packages, neither of which is installed (see Phase 1
-// notes). Plain console output is enough for connection status.
+// No pino/logger dependency here on purpose — `pino`/`pino-pretty` were
+// never installed packages (the old, unreferenced utlis/logger.js that
+// wanted them was confirmed dead and removed in Phase 6). Plain console
+// output is enough for connection status.
 //
 // Does NOT call process.exit() on failure — this runs inside a live Next.js
 // server process handling other requests; killing the whole process because

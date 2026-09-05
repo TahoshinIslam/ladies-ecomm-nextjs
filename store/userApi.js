@@ -33,9 +33,6 @@ export const userApi = apiSlice.injectEndpoints({
         body: { password },
       }),
     }),
-    verifyEmail: b.query({
-      query: (token) => `/users/verify-email/${token}`,
-    }),
     // admin
     listUsers: b.query({
       query: (params = {}) => `/users?${buildQueryString(params)}`,
@@ -60,7 +57,6 @@ export const {
   useUpdateMeMutation,
   useForgotPasswordMutation,
   useResetPasswordMutation,
-  useVerifyEmailQuery,
   useListUsersQuery,
   useUpdateUserMutation,
   useDeleteUserMutation,

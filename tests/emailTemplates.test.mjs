@@ -1,15 +1,16 @@
 // Phase 5 rewrite — email HTML injection is now FIXED.
 //
-// utlis/sendEmail.js's buildVerificationEmail()/buildPasswordResetEmail()
-// used to interpolate `name` directly into a raw HTML template literal
-// with no escaping (the Phase 1 characterization this file used to assert
-// as a known defect). Phase 5 adds lib/htmlEscape.js's escapeHtml() at
-// both interpolation sites (utlis/sendEmail.js:44,58 — name and link both
-// escaped). This file now asserts the CORRECTED behavior: a malicious name
-// must never appear unescaped in the generated HTML.
+// utlis/sendEmail.js's buildPasswordResetEmail() used to interpolate `name`
+// directly into a raw HTML template literal with no escaping (the Phase 1
+// characterization this file used to assert as a known defect). Phase 5
+// adds lib/htmlEscape.js's escapeHtml() at both interpolation sites (name
+// and link both escaped). This file now asserts the CORRECTED behavior: a
+// malicious name must never appear unescaped in the generated HTML.
+// (buildVerificationEmail() was removed in Phase 6 along with the rest of
+// the unwired email-verification feature — this file no longer references it.)
 //
-// Part A (buildVerificationEmail/buildPasswordResetEmail) needs no database
-// and no mocking — they are pure functions. Part B exercises the real send
+// Part A (buildPasswordResetEmail) needs no database and no mocking — it
+// is a pure function. Part B exercises the real send
 // path (services/userService.js's forgotPassword()) with Nodemailer's
 // "nodemailer" module replaced via node:test's `mock.module`, which
 // requires the process to be run with --experimental-test-module-mocks
@@ -67,28 +68,14 @@ if (moduleMockUsable) {
   });
 }
 
-describe("Part A — buildVerificationEmail / buildPasswordResetEmail: names and links are HTML-escaped", () => {
-  let buildVerificationEmail, buildPasswordResetEmail;
+describe("Part A — buildPasswordResetEmail: names and links are HTML-escaped", () => {
+  let buildPasswordResetEmail;
 
   before(async () => {
-    ({ buildVerificationEmail, buildPasswordResetEmail } = await import("../utlis/sendEmail.js"));
+    ({ buildPasswordResetEmail } = await import("../utlis/sendEmail.js"));
   });
 
   for (const { label, value } of MALICIOUS_NAMES) {
-    test(`FIXED: verification email HTML never contains the raw name verbatim, only its escaped form (${label})`, () => {
-      const { html } = buildVerificationEmail(value, "https://example.test/verify/abc");
-      // Ordinary values (e.g. "O'Brien", the unicode name) legitimately
-      // contain no HTML-special characters that differ once escaped — so
-      // the real assertion is "the five special characters, if present,
-      // are never left unescaped", not "the string looks different".
-      assert.equal(html.includes(escapeHtml(value)), true, "the escaped form must be present");
-      if (/[&<>"']/.test(value)) {
-        assert.equal(html.includes(value), false, "the raw, unescaped value must NOT appear anywhere in the HTML");
-      }
-      assert.ok(!/<script/i.test(html), "no <script> tag may ever appear in the rendered HTML");
-      assert.ok(!/<img\b/i.test(html), "no live <img> tag may survive escaping — '<' must become '&lt;', neutralizing any onerror= it carried");
-    });
-
     test(`FIXED: password-reset email HTML never contains the raw name verbatim, only its escaped form (${label})`, () => {
       const { html } = buildPasswordResetEmail(value, "https://example.test/reset-password/abc");
       assert.equal(html.includes(escapeHtml(value)), true);
@@ -106,7 +93,7 @@ describe("Part A — buildVerificationEmail / buildPasswordResetEmail: names and
   }
 
   test("an ordinary name with no special characters is rendered completely unchanged (no double-escaping of normal values)", () => {
-    const { html } = buildVerificationEmail("Fatima Rahman", "https://example.test/verify/abc");
+    const { html } = buildPasswordResetEmail("Fatima Rahman", "https://example.test/reset-password/abc");
     assert.ok(html.includes("Fatima Rahman"));
   });
 

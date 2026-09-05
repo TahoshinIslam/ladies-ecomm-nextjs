@@ -41,23 +41,10 @@ export const sendEmail = async ({ to, subject, html, text }) => {
 // PUT /api/users/me) and MUST be HTML-escaped before interpolation — an
 // unescaped name like `<img src=x onerror=alert(1)>` would otherwise
 // execute in any mail client that renders HTML. `link` is server-
-// constructed (see services/userService.js's buildAbsoluteResetUrl /
-// verification-link building) from a validated origin + a hex token, never
-// from raw user input, but is still escaped here as defense in depth —
-// escaping a value that's already URL-safe is a no-op.
-export const buildVerificationEmail = (name, link) => ({
-  subject: "Verify your TAHOS. account",
-  html: `
-    <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
-      <h2>Welcome, ${escapeHtml(name)}</h2>
-      <p>Tap the button below to verify your email and activate your account.</p>
-      <a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;background:#111;color:#fff;border-radius:8px;text-decoration:none;margin:16px 0">Verify email</a>
-      <p style="color:#666;font-size:13px">Link expires in 24 hours.</p>
-    </div>
-  `,
-  text: `Welcome, ${name}\n\nVerify your email: ${link}\n\nLink expires in 24 hours.`,
-});
-
+// constructed (see services/userService.js's buildAbsoluteResetUrl) from a
+// validated origin + a hex token, never from raw user input, but is still
+// escaped here as defense in depth — escaping a value that's already
+// URL-safe is a no-op.
 export const buildPasswordResetEmail = (name, link) => ({
   subject: "Reset your TAHOS. password",
   html: `

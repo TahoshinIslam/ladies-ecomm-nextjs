@@ -1,6 +1,8 @@
 // Phase 5C closure — the last few contract fixes: product compare/batch id
-// list validation, cart path-param ObjectId format, and verification/reset
-// token format (bounded, without introducing any new enumeration signal).
+// list validation, cart path-param ObjectId format, and reset token format
+// (bounded, without introducing any new enumeration signal). Its
+// verify-email counterpart was removed in Phase 6 along with the rest of
+// the unwired email-verification feature.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -125,29 +127,16 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
   });
 });
 
-describe("Phase 5C — verification/reset token format contract (no new enumeration signal)", { skip: !canRun && reason }, () => {
-  let verifyGET, resetPOST;
-  let User;
+describe("Phase 5C — reset token format contract (no new enumeration signal)", { skip: !canRun && reason }, () => {
+  let resetPOST;
 
   before(async () => {
     await connectTestDb();
-    ({ GET: verifyGET } = await import("../app/api/users/verify-email/[token]/route.js"));
     ({ POST: resetPOST } = await import("../app/api/users/reset-password/[token]/route.js"));
-    ({ default: User } = await import("../models/userModel.js"));
   });
 
   after(async () => {
     await disconnectTestDb();
-  });
-
-  test("a too-short verification token returns the SAME generic 400 as a well-formed-but-unknown one", async () => {
-    const shortRes = await verifyGET(requestAs({ method: "GET", url: "http://test/api/users/verify-email/short" }), { params: Promise.resolve({ token: "short" }) });
-    const unknownRes = await verifyGET(requestAs({ method: "GET", url: `http://test/api/users/verify-email/${"a".repeat(64)}` }), { params: Promise.resolve({ token: "a".repeat(64) }) });
-    assert.equal(shortRes.status, 400);
-    assert.equal(unknownRes.status, 400);
-    const shortJson = await shortRes.json();
-    const unknownJson = await unknownRes.json();
-    assert.equal(shortJson.message, unknownJson.message, "a malformed token must be indistinguishable from a well-formed-but-unknown one");
   });
 
   test("a too-short reset token returns the SAME generic 400 as a well-formed-but-unknown one", async () => {
@@ -164,20 +153,5 @@ describe("Phase 5C — verification/reset token format contract (no new enumerat
     const shortJson = await shortRes.json();
     const unknownJson = await unknownRes.json();
     assert.equal(shortJson.message, unknownJson.message);
-  });
-
-  test("a real, valid-format verification token for a real user still succeeds", async () => {
-    const user = await createTestUser();
-    const crypto = await import("node:crypto");
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    user.verificationToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-    user.isVerified = false;
-    await user.save();
-    try {
-      const res = await verifyGET(requestAs({ method: "GET", url: `http://test/api/users/verify-email/${rawToken}` }), { params: Promise.resolve({ token: rawToken }) });
-      assert.equal(res.status, 200);
-    } finally {
-      await User.deleteOne({ _id: user._id });
-    }
   });
 });
