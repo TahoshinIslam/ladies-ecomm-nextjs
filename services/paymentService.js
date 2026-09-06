@@ -78,6 +78,15 @@ export async function codCreate(orderId, userId) {
         order.paymentMethod = "cod";
         await order.save({ session });
 
+        // Phase 11 realtime-durability correction: the order-status
+        // event is now written INSIDE this same transaction — a genuine
+        // transactional outbox for COD payment creation. If this insert
+        // fails, the whole transaction (Payment creation + order status
+        // change) rolls back with it; the concurrent-duplicate catch
+        // branch below (a real, different request already committed)
+        // correctly never reaches here at all, so it still never emits.
+        await emitOrderEvent(orderId, { orderId, status: order.status }, { session });
+
         result = { order, payment, replayed: false };
       });
     } catch (err) {
@@ -100,9 +109,6 @@ export async function codCreate(orderId, userId) {
       }
     }
 
-    if (!result.replayed) {
-      emitOrderEvent(orderId, { orderId, status: result.order.status }).catch(() => {});
-    }
     return result.order;
   } finally {
     await session.endSession();

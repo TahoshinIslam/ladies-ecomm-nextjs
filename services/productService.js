@@ -9,7 +9,7 @@ import AttributeDefinition from "../models/attributeDefinitionModel.js";
 // module graph otherwise loads it).
 import "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
-import { emitAdminEvent } from "../lib/events.js";
+import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
 import {
   PRODUCT_SORT_FIELDS,
@@ -719,7 +719,11 @@ export async function createProduct(body) {
 
   const product = new Product(data);
   await product.save();
-  emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name }).catch(() => {});
+  // Non-transactional (a plain single-document save) — awaited so a
+  // failure is observed/logged before returning, but never fails the
+  // already-succeeded product creation itself. See lib/events.js's
+  // emitBestEffort() for the documented policy.
+  await emitBestEffort(emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name }));
   return product;
 }
 
@@ -739,7 +743,7 @@ export async function updateProduct(id, body) {
 
   Object.assign(product, data);
   await product.save();
-  emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name }).catch(() => {});
+  await emitBestEffort(emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name }));
   return product;
 }
 

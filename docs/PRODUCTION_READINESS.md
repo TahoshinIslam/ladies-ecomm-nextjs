@@ -164,13 +164,55 @@ whose SSE connection happens to be held open by a different instance.
 **After Phase 11:** a MongoDB-backed durable event outbox
 (`models/eventModel.js`) replaces it. `lib/events.js` keeps the exact same
 public function names (`emitOrderEvent`, `emitAdminEvent`, `orderChannel`,
-`ADMIN_CHANNEL`) so no call site's surrounding transaction/commit-ordering
-logic needed to change — every one of the 8 call sites across
-`services/orderService.js`, `services/paymentService.js`,
-`services/productService.js`, and `services/reviewService.js` already
-fired strictly after a successful commit (confirmed by direct call-site
-audit before this rewrite), so inserting a durable outbox row in the same
-place preserves that guarantee.
+`ADMIN_CHANNEL`).
+
+**Realtime-durability correction (post-initial-Phase-11-commit):** the
+first version of this rewrite made every event write an un-awaited
+`.catch(() => {})` fire-and-forget call. On a serverless platform this is
+a real durability gap, not a style issue: a Vercel Function can return its
+response and have its instance frozen before an un-awaited promise
+settles, so the event write might never actually happen even though the
+business mutation succeeded — and swallowing the failure silently removed
+all operational visibility into a lost event. This was corrected by
+classifying all 10 real call sites (not 8 — the original count was
+wrong) into two groups:
+
+- **Transactional outbox (3 mutations: order creation, order
+  cancellation, COD payment creation).** The event document is now
+  inserted *inside* the same `session.withTransaction(...)` block as the
+  business mutation, via `emitOrderEvent(...)`/`emitAdminEvent(...)`'s
+  optional `{ session }` parameter. This is a genuine transactional
+  outbox for these three: a forced event-insert failure rolls back the
+  whole transaction (order/stock/coupon/cart writes included — proven in
+  `tests/eventDurabilityAtomicity.test.mjs`), and a successful transaction
+  commits the mutation and its event atomically, in the same instant.
+  Nothing extra is needed to "expose the event after commit" — the SSE
+  routes only ever see data through an independent read (`readEventsSince`
+  polling), and MongoDB transactions are invisible to other readers until
+  they commit, so this property is automatic.
+- **Non-transactional, best-effort (7 sites: low-stock alerts, order
+  status changes with no surrounding transaction, product create/update,
+  new-review admin notification).** These mutations are single-document
+  writes or have no transaction to join. Each event write is now awaited
+  via `emitBestEffort()` before the calling function returns — so a
+  failure is guaranteed to be observed and logged (`lib/logger.js`'s
+  `logEvent`, no secrets, no stack trace in the structured line) before
+  the response returns, never silently lost to a frozen/recycled function
+  instance — but a failure here does NOT roll back or fail the
+  already-succeeded business mutation, since every one of these event
+  types has a documented, low-severity, self-healing loss consequence
+  (§9's async-work table): a live admin/customer view stays stale until
+  the next poll/refresh, nothing is ever silently wrong.
+
+**Background-execution API audit:** this app does not use `waitUntil()`,
+Next.js's `unstable_after()`, or any other background-execution API
+anywhere in the codebase — confirmed by a full source grep. The only
+`@vercel/functions` import (`ipAddress()` in `lib/clientIp.js`, version
+3.9.5 per `package.json`) is for client-IP resolution, unrelated to
+background execution. Background execution is deliberately NOT used as a
+substitute for the transaction atomicity above — the atomicity guarantee
+comes entirely from the MongoDB transaction itself, which is durable
+across a function instance being frozen or recycled at any point.
 
 **Change Streams vs. bounded polling — the required comparison:** MongoDB
 Change Streams were considered and rejected for now. They require a
@@ -195,11 +237,18 @@ open-stream volume — not speculatively.
   are rejected before the stream opens, identically to before.
 - Minimal payloads: unchanged from before — the event schema doesn't
   change what data any call site was already sending.
-- Events only after successful commits: preserved by construction (same
-  call sites, same position in the code, now `await`ed with a
-  `.catch(() => {})` fire-and-forget — see §9's async-work table for why
-  that's the right choice here).
-- No duplicate events on idempotent replay: proven directly — a replayed
+- Events only after successful commits: for the 3 transactional call
+  sites, this is now a hard guarantee, not just an ordering convention —
+  the event is part of the same transaction as the commit itself (proven
+  in `tests/eventDurabilityAtomicity.test.mjs` by forcing the event
+  insert to fail and confirming the business mutation rolls back too).
+  For the 7 non-transactional sites, the write is awaited via
+  `emitBestEffort()` and always happens strictly after the mutation that
+  already succeeded (see the realtime-durability correction above).
+- No duplicate events on idempotent replay: proven directly, both via
+  mocked call-count evidence (`tests/orderPostCommitEffects.test.mjs`) and
+  real-database document counts for sequential AND concurrent replay
+  (`tests/eventDurabilityAtomicity.test.mjs`) — a replayed
   `Idempotency-Key` request returns the same order without inserting a
   second `NEW_ORDER` event document.
 - `Last-Event-ID` resume: the server emits `id: <mongoId>` per SSE frame;

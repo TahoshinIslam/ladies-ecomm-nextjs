@@ -60,6 +60,13 @@ mock.module("../lib/events.js", {
       orderEventCalls.push({ orderId, payload });
       return Promise.resolve();
     },
+    emitBestEffort: async (promise) => {
+      try {
+        await promise;
+      } catch {
+        // matches lib/events.js's real emitBestEffort: never rethrows
+      }
+    },
   },
 });
 

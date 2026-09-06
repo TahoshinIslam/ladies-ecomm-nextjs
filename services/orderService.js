@@ -10,7 +10,7 @@ import User from "../models/userModel.js";
 import Payment from "../models/paymentModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
-import { emitOrderEvent, emitAdminEvent } from "../lib/events.js";
+import { emitOrderEvent, emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
 
@@ -387,6 +387,17 @@ export async function createOrder(
 
         await Cart.updateOne({ userId }, { $set: { items: [] } }, { session });
 
+        // Phase 11 realtime-durability correction: the admin NEW_ORDER
+        // event is now written INSIDE this transaction (same `session`)
+        // instead of after it — a genuine transactional outbox for order
+        // creation. If this insert fails, the whole transaction
+        // (order/stock/coupon/cart writes included) rolls back with it;
+        // if the transaction commits, the event is atomically visible in
+        // the same instant, no separate un-awaited write that could be
+        // lost to a frozen/recycled function instance.
+        const orderNumber = order._id.toString().slice(-6);
+        await emitAdminEvent({ type: "NEW_ORDER", orderId: order._id.toString(), orderNumber }, { session });
+
         createdOrder = order;
       });
     } catch (err) {
@@ -410,12 +421,15 @@ export async function createOrder(
     // Fire-and-forget admin notification (don't block the response). Only
     // reached when THIS request is the one that actually created the
     // order — a replay returns above and never runs any of this again.
+    // The NEW_ORDER realtime event itself was already written atomically
+    // inside the transaction above (see the emitAdminEvent call there) —
+    // this notification write is a separate, non-event, best-effort
+    // channel and is unaffected by this correction's scope.
     const orderNumber = createdOrder._id.toString().slice(-6);
     createAdminNotification({
       message: `New order #${orderNumber} received`,
       url: `/admin/orders`,
     }).catch(() => {});
-    emitAdminEvent({ type: "NEW_ORDER", orderId: createdOrder._id.toString(), orderNumber }).catch(() => {});
 
     // Low-stock check happens after the transaction commits — this reads the
     // post-decrement stock, it doesn't need to be part of the atomic write.
@@ -444,13 +458,15 @@ async function checkLowStock(items) {
           : `Low stock: ${label} — only ${variant.stock} remaining`,
       url: "/admin/products",
     }).catch(() => {});
-    emitAdminEvent({
-      type: "LOW_STOCK_ALERT",
-      productId: it.product.toString(),
-      variantId: it.variantId.toString(),
-      productName: label,
-      stock: variant.stock,
-    }).catch(() => {});
+    await emitBestEffort(
+      emitAdminEvent({
+        type: "LOW_STOCK_ALERT",
+        productId: it.product.toString(),
+        variantId: it.variantId.toString(),
+        productName: label,
+        stock: variant.stock,
+      }),
+    );
   }
 }
 
@@ -511,24 +527,31 @@ export async function cancelOrder(userId, role, orderId) {
       }
       order.status = "cancelled";
       await order.save({ session });
+
+      // Phase 11 realtime-durability correction: both the customer-facing
+      // and admin-facing cancellation events are now written INSIDE this
+      // same transaction — a genuine transactional outbox for
+      // cancellation. If either insert fails, the whole transaction
+      // (status change, stock restoration, coupon-usage rollback
+      // included) rolls back with it.
+      const orderNumber = orderId.toString().slice(-6);
+      await emitOrderEvent(orderId, { orderId, status: "cancelled" }, { session });
+      await emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber }, { session });
+
       updatedOrder = order;
     });
   } finally {
     await session.endSession();
   }
 
-  // Customer-facing channel (their own tracking page/timeline) — already
-  // existed. What was missing is everything below: this cancellation never
-  // told the admin team it happened at all, regardless of whether a
-  // customer or an admin did the cancelling.
-  emitOrderEvent(orderId, { orderId, status: "cancelled" }).catch(() => {});
-
+  // Separate, non-event, best-effort notification channel — unaffected by
+  // this correction's scope (the realtime ORDER_CANCELLED/cancelled
+  // events themselves were already written atomically above).
   const orderNumber = orderId.toString().slice(-6);
   createAdminNotification({
     message: `Order #${orderNumber} was cancelled`,
     url: "/admin/orders",
   }).catch(() => {});
-  emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber }).catch(() => {});
 
   return updatedOrder;
 }
@@ -625,8 +648,17 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
     );
   }
 
+  // Phase 11 realtime-durability correction: updateOrderStatus() has no
+  // surrounding MongoDB transaction (the order.save()/Payment.updateOne()
+  // above are two independent, non-transactional writes) — so its events
+  // cannot join a transaction that doesn't exist. Per the documented
+  // policy for non-transactional mutations, the write is still AWAITED
+  // (never fire-and-forget) so a failure is observed and logged before
+  // this function returns, but a failure here must not fail the status
+  // update itself — see emitBestEffort()'s own comment for why.
+  //
   // Customer-facing channel — unchanged, already worked.
-  emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber }).catch(() => {});
+  await emitBestEffort(emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber }));
 
   // Admin-facing: always refresh any open admin order list live (no
   // notification noise for a routine processing → shipped click — the
@@ -636,7 +668,7 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
   // the admin UI, but this stays defensive in case anything else calls
   // this directly) — also write a real notification.
   const orderNumber = orderId.toString().slice(-6);
-  emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }).catch(() => {});
+  await emitBestEffort(emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }));
   if (["cancelled", "refunded"].includes(status)) {
     createAdminNotification({
       message: `Order #${orderNumber} marked as ${status}`,

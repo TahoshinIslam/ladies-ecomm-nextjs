@@ -2,7 +2,7 @@ import Review from "../models/reviewModel.js";
 import Order from "../models/orderModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
-import { emitAdminEvent } from "../lib/events.js";
+import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
 
 export async function getProductReviews(productId, { page = 1, limit = 10 } = {}) {
@@ -51,7 +51,11 @@ export async function createReview(userId, productId, { rating, title, comment, 
     message: `New ${review.rating}★ review received`,
     url: "/admin/reviews",
   }).catch(() => {});
-  emitAdminEvent({ type: "NEW_NOTIFICATION", message: `New ${review.rating}★ review received`, url: "/admin/reviews" }).catch(() => {});
+  // Non-transactional (a plain single-document create) — awaited so a
+  // failure is observed/logged before returning, but never fails the
+  // already-succeeded review submission. See lib/events.js's
+  // emitBestEffort() for the documented policy.
+  await emitBestEffort(emitAdminEvent({ type: "NEW_NOTIFICATION", message: `New ${review.rating}★ review received`, url: "/admin/reviews" }));
 
   return review;
 }

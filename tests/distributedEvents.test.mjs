@@ -37,17 +37,61 @@ describe("Phase 11 — lib/events.js no longer uses a process-local EventEmitter
   });
 });
 
-describe("Phase 11 — every call site awaits/handles the now-async emit functions", () => {
+describe("Phase 11 CORRECTION — no production emit call site uses silent fire-and-forget", () => {
   const files = ["services/orderService.js", "services/paymentService.js", "services/productService.js", "services/reviewService.js"];
   for (const rel of files) {
-    test(`${rel}'s emit call sites are followed by .catch (never an unhandled rejection)`, () => {
+    test(`${rel} never calls emitOrderEvent/emitAdminEvent with a silent .catch(() => {})`, () => {
       const content = stripComments(fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8"));
-      const calls = content.match(/emit(Order|Admin)Event\([\s\S]*?\)\.catch/g) || [];
-      const bareCalls = (content.match(/emit(Order|Admin)Event\(/g) || []).length;
-      assert.ok(bareCalls > 0, `${rel} should still call an emit function`);
-      assert.equal(calls.length, bareCalls, `every emit call in ${rel} must be followed by .catch(...)`);
+      // Bounded lookahead (200 chars) rather than an unbounded [\s\S]*? —
+      // an unbounded lazy match can bridge across an emit call all the
+      // way to an unrelated LATER `.catch(() => {})` elsewhere in the
+      // file (e.g. createAdminNotification's own legitimate
+      // fire-and-forget pattern), producing a false positive. Every real
+      // emit call site's own `.catch` (if any) appears within a couple of
+      // lines of the call itself.
+      assert.ok(
+        !/emit(Order|Admin)Event\([\s\S]{0,200}?\)\.catch\(\(\)\s*=>\s*\{\}\)/.test(content),
+        `${rel} must never silently swallow an emit call's rejection — every emit is either transactional (awaited directly, no catch) or wrapped in emitBestEffort()`,
+      );
+    });
+
+    test(`${rel} calls at least one emit function, and every call is either transactional (awaited with { session }, no catch) or wrapped in emitBestEffort(...)`, () => {
+      const content = stripComments(fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8"));
+      const totalEmitCalls = (content.match(/emit(Order|Admin)Event\(/g) || []).length;
+      assert.ok(totalEmitCalls > 0, `${rel} should still call an emit function`);
+
+      const transactionalCalls = (content.match(/await emit(Order|Admin)Event\([\s\S]*?\{\s*session\s*\}\)/g) || []).length;
+      const bestEffortCalls = (content.match(/emitBestEffort\(\s*\n?\s*emit(Order|Admin)Event\(/g) || []).length;
+      assert.equal(
+        transactionalCalls + bestEffortCalls,
+        totalEmitCalls,
+        `${rel}: every emit call must be transactional ({ session }, awaited directly) or wrapped in emitBestEffort() — found ${totalEmitCalls} total, ${transactionalCalls} transactional, ${bestEffortCalls} best-effort`,
+      );
     });
   }
+
+  test("services/orderService.js: NEW_ORDER and cancellation events are written INSIDE their transactions", () => {
+    const content = stripComments(fs.readFileSync(new URL("../services/orderService.js", import.meta.url), "utf8"));
+    assert.match(content, /await emitAdminEvent\(\{ type: "NEW_ORDER"[\s\S]*?\{ session \}\)/);
+    assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: "cancelled" \}, \{ session \}\)/);
+    assert.match(content, /await emitAdminEvent\(\{ type: "ORDER_CANCELLED"[\s\S]*?\{ session \}\)/);
+  });
+
+  test("services/paymentService.js: the COD order-status event is written INSIDE its transaction", () => {
+    const content = stripComments(fs.readFileSync(new URL("../services/paymentService.js", import.meta.url), "utf8"));
+    assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: order\.status \}, \{ session \}\)/);
+  });
+
+  test("lib/events.js's publish() passes { session } through to Event.create() using the array form (required for Mongoose to join a transaction)", () => {
+    const content = fs.readFileSync(new URL("../lib/events.js", import.meta.url), "utf8");
+    assert.match(content, /Event\.create\(\[doc\], \{ session \}\)/);
+  });
+
+  test("lib/events.js's emitBestEffort logs failures via lib/logger.js's logEvent, never throws", () => {
+    const content = fs.readFileSync(new URL("../lib/events.js", import.meta.url), "utf8");
+    assert.match(content, /export async function emitBestEffort/);
+    assert.match(content, /logEvent\(/);
+  });
 });
 
 describe("Phase 11 — models/eventModel.js TTL and index shape", () => {
