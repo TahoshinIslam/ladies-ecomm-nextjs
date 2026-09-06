@@ -1,128 +1,75 @@
-"use client";
-
-import Link from "next/link";
-import { usePathname, useParams, useRouter, useSearchParams } from "next/navigation";
-import {
-  Home,
-  Package,
-  MapPin,
-  CreditCard,
-  X,
-  AlertCircle,
-  Gift,
-  Download,
-} from "lucide-react";
-import { useState, useEffect, useRef } from "react";
-import { toast } from "sonner";
+import Image from "next/image";
+import { notFound } from "next/navigation";
+import { Home, Package, MapPin, CreditCard, Gift } from "lucide-react";
 
 import Badge from "../components/ui/Badge.jsx";
 import Button from "../components/ui/Button.jsx";
-import ConfirmDialog from "../components/ui/ConfirmDialog.jsx";
-import Skeleton from "../components/ui/Skeleton.jsx";
 import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 import ReviewForm from "../components/review/ReviewForm.jsx";
 import OrderTimeline from "../components/order/OrderTimeline.jsx";
+import OrderDetailActions from "../components/order/OrderDetailActions.jsx";
 
-import {
-  useGetOrderQuery,
-  useCancelOrderMutation,
-  useGetPaymentByOrderQuery,
-} from "../store/shopApi.js";
-import { formatCurrency, cn } from "../lib/utils.js";
+import { getOrder } from "../services/orderService.js";
+import { getPaymentByOrder } from "../services/paymentService.js";
+import { requireServerUser } from "../lib/serverPageAuth.js";
+import { serializeForClient } from "../lib/serialize.js";
+import { HttpError } from "../lib/http.js";
+import { isObjectIdFormat } from "../lib/validation.js";
+import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
-import { downloadReceipt } from "../lib/receipt.js";
-import { useOrderStatusStream } from "../hooks/useOrderStatusStream.js";
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT, getServerLocale } from "../lib/i18n/server.js";
 
-export default function OrderDetailPage() {
-  const { id } = useParams();
-  const sp = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
-  const { t, locale } = useLocale();
-  const { data, isLoading, isError, error, refetch } = useGetOrderQuery(id);
-  const { data: paymentData } = useGetPaymentByOrderQuery(id, { skip: !id });
-  useOrderStatusStream(id, refetch);
-  const [cancelOrder, { isLoading: cancelling }] = useCancelOrderMutation();
-  const [confirmOpen, setConfirmOpen] = useState(false);
+const STATUS_KEYS = {
+  pending: "orders.statusPending",
+  paid: "orders.statusPaid",
+  processing: "orders.statusProcessing",
+  shipped: "orders.statusShipped",
+  delivered: "orders.statusDelivered",
+  cancelled: "orders.statusCancelled",
+  refunded: "orders.statusRefunded",
+};
 
-  const order = data?.order;
-  const receiptShown = useRef(false);
+// Phase 7 — real Server Component: authenticates via the cookie session,
+// enforces ownership through the existing services/orderService.js
+// getOrder() rule (owner or admin, otherwise a 403 — both a malformed id
+// and an unauthorized/missing order resolve to the SAME notFound() here,
+// which avoids confirming a given id even exists to a non-owner, a
+// stricter guarantee than the JSON API's own distinguishable 403/404).
+// The only client-side pieces are OrderDetailActions (SSE refresh, receipt
+// download, cancel confirmation) and the pre-existing ReviewForm/
+// OrderTimeline islands — everything else below is plain server-rendered
+// content.
+export default async function OrderDetailPage({ params }) {
+  const { id } = await params;
+  const user = await requireServerUser(`/orders/${id}`);
+  const [t, locale] = await Promise.all([getT(), getServerLocale()]);
 
-  // Auto-open the receipt once when the user arrives here right after a
-  // successful checkout (gateway redirect adds ?receipt=1).
-  useEffect(() => {
-    if (!order || receiptShown.current) return;
-    if (sp.get("receipt") === "1") {
-      receiptShown.current = true;
-      downloadReceipt(order, locale);
-      // Strip the flag so a refresh doesn't re-download the receipt.
-      const next = new URLSearchParams(sp);
-      next.delete("receipt");
-      const qs = next.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    }
-  }, [order, sp, router, pathname]);
+  if (!isObjectIdFormat(id)) notFound();
 
-  if (isLoading) {
-    return (
-      <div className="container-x py-10 space-y-6">
-        <Skeleton className="h-8 w-60" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-60 w-full" />
-      </div>
-    );
+  let rawOrder;
+  try {
+    rawOrder = await getOrder(user._id, user.role, id);
+  } catch (err) {
+    if (err instanceof HttpError && (err.status === 404 || err.status === 403)) notFound();
+    throw err;
   }
+  const order = serializeForClient(rawOrder);
 
-  if (isError || !order) {
-    return (
-      <div className="container-x py-10">
-        <Breadcrumb
-          items={[
-            { label: t("navigation.home"), href: "/", icon: Home },
-            { label: t("navigation.orders"), href: "/orders", icon: Package },
-            { label: t("orders.notFound") },
-          ]}
-        />
-        <div className="text-center">
-          <AlertCircle className="mx-auto h-10 w-10 text-muted-foreground" />
-          <h2 className="mt-4 font-heading text-xl font-bold">{t("orders.orderNotFound")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {error?.data?.message || t("orders.couldntFindOrder")}
-          </p>
-          <Link href="/orders" className="mt-4 inline-block">
-            <Button variant="outline">{t("orders.backToOrders")}</Button>
-          </Link>
-        </div>
-      </div>
-    );
+  // Optional — an order can legitimately have no Payment row visible yet;
+  // never let that (or any other lookup failure) take down the whole page.
+  let payment = null;
+  try {
+    const rawPayment = await getPaymentByOrder(id, user._id, user.role);
+    payment = serializeForClient(rawPayment);
+  } catch {
+    payment = null;
   }
 
   const isFreeShippingPromo = /first order free/i.test(order.shippingTier || "");
   const isDelivered = order.status === "delivered";
-
   const isCancelled = order.status === "cancelled";
   const isRefunded = order.status === "refunded";
   const canCancel = ["pending", "paid", "processing"].includes(order.status);
-  const STATUS_KEYS = {
-    pending: "orders.statusPending",
-    paid: "orders.statusPaid",
-    processing: "orders.statusProcessing",
-    shipped: "orders.statusShipped",
-    delivered: "orders.statusDelivered",
-    cancelled: "orders.statusCancelled",
-    refunded: "orders.statusRefunded",
-  };
-
-  const handleCancel = async () => {
-    try {
-      await cancelOrder(order._id).unwrap();
-      toast.success(t("orders.orderCancelled"));
-      setConfirmOpen(false);
-    } catch (e) {
-      toast.error(e?.data?.message || t("orders.couldntCancel"));
-    }
-  };
 
   return (
     <div className="container-x py-10">
@@ -157,16 +104,7 @@ export default function OrderDetailPage() {
           >
             {t(STATUS_KEYS[order.status] || "orders.statusPending")}
           </Badge>
-          <Button variant="outline" size="sm" onClick={() => downloadReceipt(order, locale)}>
-            <Download className="h-3 w-3" />
-            {t("orders.receipt")}
-          </Button>
-          {canCancel && (
-            <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)}>
-              <X className="h-3 w-3" />
-              {t("orders.cancel")}
-            </Button>
-          )}
+          <OrderDetailActions order={order} canCancel={canCancel} />
         </div>
       </div>
 
@@ -180,12 +118,17 @@ export default function OrderDetailPage() {
               {order.items.map((it, i) => (
                 <li key={i} className="py-4 first:pt-0 last:pb-0">
                   <div className="flex gap-4">
-                    <div className="h-20 w-20 flex-shrink-0 overflow-hidden rounded-md bg-muted">
-                      <img
-                        src={it.snapshot?.image}
-                        alt={it.snapshot?.name}
-                        className="h-full w-full object-cover"
-                      />
+                    <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+                      {it.snapshot?.image && (
+                        <Image
+                          src={resolveImage(it.snapshot.image, 160)}
+                          alt={it.snapshot?.name || ""}
+                          fill
+                          sizes="80px"
+                          loading="lazy"
+                          className="object-cover"
+                        />
+                      )}
                     </div>
                     <div className="flex-1">
                       <p className="font-semibold">{it.snapshot?.name}</p>
@@ -228,28 +171,22 @@ export default function OrderDetailPage() {
             </p>
           </Card>
 
-          {paymentData?.payment && (
+          {payment && (
             <Card title={t("orders.payment")} icon={CreditCard}>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm">
                     {t("orders.method")}:{" "}
-                    <span className="font-semibold uppercase">
-                      {paymentData.payment.method}
-                    </span>
+                    <span className="font-semibold uppercase">{payment.method}</span>
                   </p>
-                  {paymentData.payment.transactionId && (
+                  {payment.transactionId && (
                     <p className="text-xs text-muted-foreground">
-                      TXN: {paymentData.payment.transactionId}
+                      TXN: {payment.transactionId}
                     </p>
                   )}
                 </div>
-                <Badge
-                  variant={
-                    paymentData.payment.status === "completed" ? "success" : "warning"
-                  }
-                >
-                  {paymentData.payment.status}
+                <Badge variant={payment.status === "completed" ? "success" : "warning"}>
+                  {payment.status}
                 </Badge>
               </div>
             </Card>
@@ -305,16 +242,6 @@ export default function OrderDetailPage() {
           </div>
         </div>
       </div>
-
-      <ConfirmDialog
-        open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        onConfirm={handleCancel}
-        title={t("orders.cancelOrderTitle")}
-        description={t("orders.cancelOrderDesc")}
-        confirmLabel={t("orders.yesCancel")}
-        loading={cancelling}
-      />
     </div>
   );
 }

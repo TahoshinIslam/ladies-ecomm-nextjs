@@ -9,7 +9,24 @@ import AttributeDefinition from "../models/attributeDefinitionModel.js";
 // module graph otherwise loads it).
 import "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
-import { emitAdminEvent } from "../lib/events.js";
+import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
+import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
+import {
+  PRODUCT_SORT_FIELDS,
+  PRODUCT_SELECT_FIELDS,
+  FACET_KEY_RE,
+  DANGEROUS_FACET_KEYS,
+  MAX_PRODUCT_QUERY_LENGTH,
+  MAX_DYNAMIC_FACETS,
+  MAX_FACET_KEY_LENGTH,
+  MAX_FACET_VALUES,
+  MAX_FACET_VALUE_LENGTH,
+  splitBoundedCsv,
+  isExplicitBooleanParam,
+  validateAllowlistedTokenCsv,
+  validateBoundedPriceValue,
+  AGE_GROUP_VALUES_LIST,
+} from "../schemas/catalogSchemas.js";
 
 // Structural fields — a fixed, known set of flat schema paths (plus the
 // storefront's category/style aliases below). Ported from
@@ -29,7 +46,7 @@ const NON_FILTER_KEYS = new Set(["search", "featured", "discount", "new", "sort"
 // rather than passed through to Mongo (Section 6: "reject or safely ignore
 // unsupported values"). "girls" was added without touching the meaning of
 // the pre-existing "adult"/"kids" values (see productModel.js).
-export const AGE_GROUP_VALUES = new Set(["adult", "kids", "girls"]);
+export const AGE_GROUP_VALUES = new Set(AGE_GROUP_VALUES_LIST);
 
 // "New" has no admin-managed field — it's derived from real createdAt
 // timestamps within one rolling window, defined here once so the cutoff is
@@ -238,6 +255,187 @@ export function computePagination(query, total = 0) {
   return { page, limit, skip, pages };
 }
 
+// Phase 5D — the hybrid GET /api/products query contract. Runs BEFORE
+// buildFilter()/listProducts() ever see the query: every fixed field is
+// bounded/typed here, and every remaining key must name a real, filterable
+// AttributeDefinition — buildFilter() itself is otherwise unchanged (it
+// still does its own CSV-split/escape/cast work on whatever this function
+// hands it), so a normalized, already-safe plain object is all this adds.
+// Throws HttpError(400) on the first violation found; never silently
+// drops an unrecognized key the way the pre-5D code implicitly did.
+const PRODUCT_LIST_FIXED_KEYS = new Set([...ALLOWED_FILTER_FIELDS, "style", ...NON_FILTER_KEYS]);
+const OBJECT_ID_CSV_FIELDS = ["category", "style", "brand", "topCategory"];
+const EXPLICIT_BOOLEAN_FIELDS = ["isActive", "isFeatured", "featured", "discount", "new"];
+
+function failQuery(message, path) {
+  throw new HttpError(400, message, path ? [{ path, message }] : undefined);
+}
+
+function queryStringLength(query) {
+  return Object.entries(query).reduce((sum, [key, val]) => {
+    const valLen = typeof val === "string" ? val.length : JSON.stringify(val ?? "").length;
+    return sum + key.length + valLen;
+  }, 0);
+}
+
+export async function parseProductListQuery(query) {
+  if (queryStringLength(query) > MAX_PRODUCT_QUERY_LENGTH) {
+    failQuery("Query is too large");
+  }
+
+  const out = {};
+
+  for (const rawKey of OBJECT_ID_CSV_FIELDS) {
+    const val = query[rawKey];
+    if (val === undefined || val === "") continue;
+    if (typeof val !== "string") failQuery(`Invalid ${rawKey}`, rawKey);
+    const { values, error } = splitBoundedCsv(val, { maxValues: 20, maxValueLength: 24 });
+    if (error) failQuery(`Invalid ${rawKey}: ${error}`, rawKey);
+    if (!values.every(isObjectIdFormat)) failQuery(`Invalid ${rawKey}`, rawKey);
+    out[rawKey] = values.join(",");
+  }
+
+  if (query.ageGroup !== undefined && query.ageGroup !== "") {
+    if (typeof query.ageGroup !== "string") failQuery("Invalid ageGroup", "ageGroup");
+    const { values, error } = splitBoundedCsv(query.ageGroup, { maxValues: 10, maxValueLength: 20 });
+    if (error) failQuery(`Invalid ageGroup: ${error}`, "ageGroup");
+    // Unrecognized values are safely ignored, not rejected — preserves the
+    // pre-existing, tested behavior: "an unrecognized ageGroup value is
+    // safely ignored, not passed to Mongo"
+    // (tests/http/productFilters.integration.test.mjs).
+    const recognized = values.filter((v) => AGE_GROUP_VALUES.has(v));
+    if (recognized.length) out.ageGroup = recognized.join(",");
+  }
+
+  for (const key of EXPLICIT_BOOLEAN_FIELDS) {
+    const val = query[key];
+    if (val === undefined || val === "") continue;
+    if (typeof val !== "string" || !isExplicitBooleanParam(val)) {
+      failQuery(`Invalid ${key}: must be "true" or "false"`, key);
+    }
+    out[key] = val;
+  }
+
+  if (query.search !== undefined && query.search !== "") {
+    if (typeof query.search !== "string") failQuery("Invalid search", "search");
+    // Deliberately NOT splitBoundedCsv here — a search term legitimately
+    // contains commas (e.g. "abaya, black"); only length and control
+    // characters are bounded, matching buildFilter()'s own >=2-char
+    // threshold before it becomes a $text/regex query.
+    const search = query.search.trim();
+    if (search.length > 200) failQuery("search is too long", "search");
+    if (/[\x00-\x1f\x7f]/.test(search)) failQuery("Invalid search", "search");
+    if (search.length) out.search = search;
+  }
+
+  if (query.sort !== undefined && query.sort !== "") {
+    if (typeof query.sort !== "string") failQuery("Invalid sort", "sort");
+    const { values, error } = validateAllowlistedTokenCsv(query.sort, new Set(PRODUCT_SORT_FIELDS), { maxTokens: 5 });
+    if (error) failQuery(`Invalid sort: ${error}`, "sort");
+    out.sort = values.join(",");
+  }
+
+  if (query.fields !== undefined && query.fields !== "") {
+    if (typeof query.fields !== "string") failQuery("Invalid fields", "fields");
+    const { values, error } = validateAllowlistedTokenCsv(query.fields, new Set(PRODUCT_SELECT_FIELDS), { maxTokens: 20 });
+    if (error) failQuery(`Invalid fields: ${error}`, "fields");
+    out.fields = values.join(",");
+  }
+
+  // page/limit deliberately keep the pre-existing, tested LENIENT contract
+  // — a malformed value falls back to computePagination()'s own default
+  // rather than rejecting outright ("malformed pagination params don't
+  // crash the request", same file). This is an intentional, evidence-based
+  // divergence from the strict boundedIntParam() contract other list
+  // routes use (schemas/commonSchemas.js) — computePagination()'s
+  // `Math.max(1, Number(query.page) || 1)` already makes any non-numeric
+  // value safe by construction (never reaches Mongo as anything but a
+  // clamped integer), so only the shape (plain scalar string, never an
+  // object/array smuggled via bracket notation) is checked here.
+  for (const key of ["page", "limit"]) {
+    if (query[key] !== undefined && typeof query[key] !== "string") failQuery(`Invalid ${key}`, key);
+    if (query[key] !== undefined) out[key] = query[key];
+  }
+
+  if (query.basePrice !== undefined && query.basePrice !== "") {
+    const val = query.basePrice;
+    if (typeof val === "string") {
+      const { values, error } = splitBoundedCsv(val, { maxValues: 10, maxValueLength: 20 });
+      if (error) failQuery(`Invalid basePrice: ${error}`, "basePrice");
+      const nums = values.map((v) => {
+        const { value, error: numErr } = validateBoundedPriceValue(v);
+        if (numErr) failQuery(`Invalid basePrice: ${numErr}`, "basePrice");
+        return value;
+      });
+      out.basePrice = nums.join(",");
+    } else if (val && typeof val === "object" && !Array.isArray(val)) {
+      const allowedOps = new Set(["gte", "gt", "lte", "lt"]);
+      const converted = {};
+      for (const [op, v] of Object.entries(val)) {
+        if (!allowedOps.has(op)) failQuery(`Invalid basePrice operator: ${op}`, `basePrice.${op}`);
+        if (v === "") continue;
+        const { value, error } = validateBoundedPriceValue(v);
+        if (error) failQuery(`Invalid basePrice[${op}]: ${error}`, `basePrice.${op}`);
+        converted[op] = value;
+      }
+      const min = converted.gte ?? converted.gt;
+      const max = converted.lte ?? converted.lt;
+      if (min !== undefined && max !== undefined && min > max) {
+        failQuery("basePrice minimum must not exceed maximum", "basePrice");
+      }
+      if (Object.keys(converted).length) out.basePrice = converted;
+    } else {
+      failQuery("Invalid basePrice", "basePrice");
+    }
+  }
+
+  // ---- Dynamic attribute facets: every remaining key must name a real,
+  // filterable AttributeDefinition. ----
+  const dynamicKeys = Object.keys(query).filter((k) => !PRODUCT_LIST_FIXED_KEYS.has(k));
+  if (dynamicKeys.length > MAX_DYNAMIC_FACETS) {
+    failQuery(`At most ${MAX_DYNAMIC_FACETS} filter facets are allowed`);
+  }
+  for (const key of dynamicKeys) {
+    if (key.length > MAX_FACET_KEY_LENGTH || DANGEROUS_FACET_KEYS.has(key) || !FACET_KEY_RE.test(key)) {
+      failQuery("Unrecognized filter key");
+    }
+  }
+
+  if (dynamicKeys.length) {
+    const defs = await AttributeDefinition.find({ key: { $in: dynamicKeys } }).lean();
+    const defsByKey = new Map(defs.map((d) => [d.key, d]));
+
+    for (const key of dynamicKeys) {
+      const def = defsByKey.get(key);
+      if (!def || def.filterable === false) {
+        failQuery(`Unrecognized filter: ${key}`, key);
+      }
+      const val = query[key];
+      if (typeof val !== "string") failQuery(`Invalid ${key}`, key);
+      const { values, error } = splitBoundedCsv(val, { maxValues: MAX_FACET_VALUES, maxValueLength: MAX_FACET_VALUE_LENGTH });
+      if (error) failQuery(`Invalid ${key}: ${error}`, key);
+
+      if (def.type === "text") {
+        out[key] = values.join(",");
+      } else {
+        // select / swatch / boolean all validate against the definition's
+        // real, admin-configured option values — "boolean" renders as a
+        // multi-select checkbox group over def.options in the admin
+        // product form (views/admin/ProductsPage.jsx's AttributeField),
+        // not a literal true/false, so it shares the same options-based
+        // validation as select/swatch.
+        const allowed = new Set((def.options || []).map((o) => o.value));
+        if (!values.every((v) => allowed.has(v))) {
+          failQuery(`Invalid value for ${key}`, key);
+        }
+        out[key] = values.join(",");
+      }
+    }
+  }
+
+  return out;
+}
+
 export async function listProducts(query, { isAdmin = false } = {}) {
   const baseFilter = isAdmin ? {} : { isActive: true };
   const scopeIds = isAdmin ? null : await getStorefrontDepartmentIds();
@@ -322,6 +520,7 @@ export async function listFeatured(limit = 8) {
 // with one, groups by the subcategories under that department. Only
 // categories/departments with at least one active product are included.
 export async function listGroupings(categoryId) {
+  if (categoryId) requireObjectIdFormat(categoryId, "category");
   const parentFilter = categoryId ? { parent: categoryId } : { parent: null };
   const categories = await Category.find(parentFilter).sort("sortOrder name").lean();
 
@@ -459,6 +658,7 @@ const pickWritable = (body) => {
 // department can't be assigned directly to a product) — also returns the
 // department id for the required-attribute check below.
 async function resolveLeafCategory(categoryId) {
+  if (!isObjectIdFormat(categoryId)) throw new HttpError(400, "Invalid category id");
   const category = await Category.findById(categoryId).lean();
   if (!category) throw new HttpError(400, "Category not found");
   if (!category.parent) {
@@ -519,16 +719,29 @@ export async function createProduct(body) {
 
   const product = new Product(data);
   await product.save();
-  emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name });
+  // Non-transactional (a plain single-document save) — awaited so a
+  // failure is observed/logged before returning, but never fails the
+  // already-succeeded product creation itself. See lib/events.js's
+  // emitBestEffort() for the documented policy.
+  await emitBestEffort(emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name }));
   return product;
 }
 
 export async function updateProduct(id, body) {
+  requireObjectIdFormat(id, "id");
   const product = await Product.findById(id);
   if (!product) throw new HttpError(404, "Product not found");
 
   const data = pickWritable(body);
-  const categoryId = data.category ?? product.category;
+  // `product` is a hydrated Mongoose document (not `.lean()`), so its
+  // `category` field is a real ObjectId instance, not a string — falling
+  // back to it directly used to fail resolveLeafCategory's
+  // isObjectIdFormat() check (which requires typeof === "string"), making
+  // any partial update that omitted `category` wrongly 400 with "Invalid
+  // category id". Stringify the fallback so an omitted `category` behaves
+  // like the existing value, while an explicitly-supplied `data.category`
+  // is still validated exactly as before.
+  const categoryId = data.category ?? String(product.category);
   const category = await resolveLeafCategory(categoryId);
 
   const variants = data.variants ?? product.variants;
@@ -538,11 +751,12 @@ export async function updateProduct(id, body) {
 
   Object.assign(product, data);
   await product.save();
-  emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name });
+  await emitBestEffort(emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name }));
   return product;
 }
 
 export async function deleteProduct(id) {
+  requireObjectIdFormat(id, "id");
   const product = await Product.findById(id);
   if (!product) throw new HttpError(404, "Product not found");
   product.isActive = false;

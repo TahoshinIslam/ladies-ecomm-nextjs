@@ -111,12 +111,19 @@ export const SettingsProvider = ({ children }) => {
       });
 
   useEffect(() => {
-    // Skip network fetch if we have valid cached settings
-    if (cached) {
-      setLoaded(true);
-      return;
-    }
+    // Cached settings already set `loaded` to true via useState's initial
+    // value above — nothing to do here in that case. Only the no-cache path
+    // needs the effect, and it flips `loaded` from inside the async
+    // .finally(), not synchronously in the effect body.
+    if (cached) return;
     fetchSettings().finally(() => setLoaded(true));
+    // `cached` is deliberately omitted: it's read from sessionStorage fresh
+    // on every render (see getCachedSettings() above), so adding it here
+    // would make this effect re-run on every render instead of once on
+    // mount — the intent is "check once, at mount, whether we already have
+    // a cached value," not "re-check whenever this render happened to
+    // recompute `cached`."
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Apply branding to <head> whenever settings change. Runs after both the

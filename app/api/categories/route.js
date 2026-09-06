@@ -6,6 +6,10 @@ import { listCategories, createCategory } from "../../../services/categoryServic
 import { withRoute } from "../../../lib/http.js";
 import { getServerLocale } from "../../../lib/i18n/server.js";
 import { localizeCategoryList } from "../../../lib/i18n/localize.js";
+import { parseJsonBody } from "../../../lib/validation.js";
+import { createCategorySchema } from "../../../schemas/catalogSchemas.js";
+import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
+import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 // Shared by the storefront (department nav, filter chips) and the admin
 // Categories/Products pages. Admin requests always get raw English +
@@ -24,7 +28,8 @@ export const GET = withRoute(async (request) => {
 
 export const POST = withRoute(async (request) => {
   await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
-  const body = await request.json();
+  const body = await parseJsonBody(request, createCategorySchema);
   const category = await createCategory(body);
+  invalidateCacheTags([CACHE_TAGS.CATEGORIES, CACHE_TAGS.CATALOG]);
   return NextResponse.json({ success: true, category }, { status: 201 });
 });

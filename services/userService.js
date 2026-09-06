@@ -4,6 +4,9 @@ import User from "../models/userModel.js";
 import { sendEmail, buildPasswordResetEmail } from "../utlis/sendEmail.js";
 import { HttpError } from "../lib/http.js";
 import { PERMISSIONS } from "../lib/permissions.js";
+import { revokeAllSessionsForUser } from "../lib/session.js";
+import { buildAppUrl } from "../lib/appUrl.js";
+import { requireObjectIdFormat, isHexTokenFormat } from "../lib/validation.js";
 
 // ========== SELF-SERVICE ==========
 
@@ -48,32 +51,47 @@ export async function updateMe(userId, body) {
 // raw 500 or silently pretend an email went out, the reset token is still
 // generated and stored correctly (so the feature is real once SMTP is
 // configured), and a failed send rolls the token back and reports clearly.
+const FORGOT_PASSWORD_RESPONSE = { message: "If that email exists, a link has been sent." };
+
 export async function forgotPassword(email) {
   const user = await User.findOne({ email });
 
-  // Always respond success either way to avoid leaking which emails exist.
-  if (!user) return { message: "If that email exists, a link has been sent." };
+  // Always respond identically regardless of what happens below — whether
+  // the account doesn't exist, CLIENT_URL is misconfigured, or SMTP send
+  // fails, the PUBLIC response must be indistinguishable in every case.
+  // Previously, an existing account whose email failed to send (e.g. SMTP
+  // unreachable) surfaced a 500 while a nonexistent email quietly returned
+  // 200 — a reliable enumeration oracle. Every failure path below is now
+  // swallowed (logged server-side only) and this same response returned.
+  if (!user) return FORGOT_PASSWORD_RESPONSE;
 
   const rawToken = crypto.randomBytes(32).toString("hex");
   user.resetPasswordToken = crypto.createHash("sha256").update(rawToken).digest("hex");
   user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
   await user.save({ validateBeforeSave: false });
 
-  const resetUrl = `${process.env.CLIENT_URL || ""}/reset-password/${rawToken}`;
   try {
+    // buildAppUrl throws on a missing/malformed CLIENT_URL — treated the
+    // same as a send failure below, never surfaced to the caller.
+    const resetUrl = buildAppUrl("reset-password", rawToken);
     const tpl = buildPasswordResetEmail(user.name, resetUrl);
     await sendEmail({ to: user.email, ...tpl });
   } catch (err) {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
     await user.save({ validateBeforeSave: false });
-    throw new HttpError(500, "Email could not be sent");
+    // Never logs the raw token or the user's email — just enough to alert
+    // ops that delivery/config is broken.
+    console.error("forgotPassword: failed to send reset email", err?.message || err);
   }
 
-  return { message: "If that email exists, a link has been sent." };
+  return FORGOT_PASSWORD_RESPONSE;
 }
 
 export async function resetPassword(token, password) {
+  // Same generic 400 as the not-found case below — a malformed token must
+  // never be distinguishable from a well-formed-but-unknown one.
+  if (!isHexTokenFormat(token)) throw new HttpError(400, "Invalid or expired reset link");
   const hashed = crypto.createHash("sha256").update(token).digest("hex");
   const user = await User.findOne({
     resetPasswordToken: hashed,
@@ -90,19 +108,13 @@ export async function resetPassword(token, password) {
   user.lockUntil = undefined;
   await user.save();
 
+  // Every session this user had — on any device, any browser — must stop
+  // working the moment their password changes via reset. A previously
+  // issued session cookie is rejected the next time it's used (see
+  // lib/session.js's validateSessionToken, which checks revokedAt).
+  await revokeAllSessionsForUser(user._id);
+
   return { message: "Password updated. Please log in." };
-}
-
-export async function verifyEmail(token) {
-  const hashed = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({ verificationToken: hashed }).select("+verificationToken");
-  if (!user) throw new HttpError(400, "Invalid or expired verification link");
-
-  user.isVerified = true;
-  user.verificationToken = undefined;
-  await user.save({ validateBeforeSave: false });
-
-  return { message: "Email verified" };
 }
 
 // ========== ADMIN ==========
@@ -145,12 +157,14 @@ export async function listUsers({ page = 1, limit = 20, search, sortBy, sortOrde
 }
 
 export async function getUserById(id) {
+  requireObjectIdFormat(id, "id");
   const user = await User.findById(id);
   if (!user) throw new HttpError(404, "User not found");
   return user;
 }
 
 export async function updateUser(id, body, actingUser) {
+  requireObjectIdFormat(id, "id");
   const user = await User.findById(id);
   if (!user) throw new HttpError(404, "User not found");
 
@@ -195,6 +209,7 @@ export async function updateUser(id, body, actingUser) {
 }
 
 export async function deleteUser(id) {
+  requireObjectIdFormat(id, "id");
   const user = await User.findById(id);
   if (!user) throw new HttpError(404, "User not found");
   if (user.role === "admin") throw new HttpError(400, "Cannot delete an admin user");

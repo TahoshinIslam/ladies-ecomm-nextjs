@@ -93,6 +93,18 @@ const orderSchema = new mongoose.Schema(
     trackingNumber: { type: String, default: "" },
     deliveredAt: { type: Date },
     notes: { type: String, default: "" },
+
+    // --- Phase 4: order-request idempotency (internal only) ---
+    // SHA-256 of the client's Idempotency-Key header, scoped per-user by
+    // the unique index below. Never the raw key. select:false so it's
+    // never accidentally serialized into an API response; absent entirely
+    // on orders created before this field existed (no backfill needed —
+    // see the partial index below).
+    idempotencyKeyHash: { type: String, select: false },
+    // SHA-256 of the normalized, business-relevant request body (see
+    // lib/idempotency.js's fingerprintOrderRequest). Used to detect the
+    // same key being reused with a materially different request.
+    idempotencyRequestHash: { type: String, select: false },
   },
   { timestamps: true },
 );
@@ -100,6 +112,16 @@ const orderSchema = new mongoose.Schema(
 // Index for the most common admin query
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ user: 1, createdAt: -1 });
+
+// The database-level idempotency guarantee: at most one order per
+// (user, idempotencyKeyHash) pair. `partialFilterExpression` scopes the
+// uniqueness to documents that actually have the field, so pre-Phase-4
+// orders (which never set it at all) never collide with each other or with
+// new orders — no migration/backfill of historical orders is required.
+orderSchema.index(
+  { user: 1, idempotencyKeyHash: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKeyHash: { $exists: true } } },
+);
 
 // Guards against Next.js dev's hot-reload re-executing this module and
 // trying to re-register an already-compiled model.

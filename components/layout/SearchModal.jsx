@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
@@ -10,11 +11,10 @@ import { setSearchOpen } from "../../store/uiSlice.js";
 import { useGetProductsQuery } from "../../store/productApi.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { storage, resolveImage } from "../../lib/utils.js";
+import useDialogFocus from "../../hooks/useDialogFocus.js";
 
 const POPULAR = ["Abaya", "Hijab", "Burqa", "Eid"];
 const RECENT_KEY = "ss:recentSearches";
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Highlights the matched substring the way the board's search does — a lime
@@ -66,47 +66,16 @@ export default function SearchModal() {
     return () => clearTimeout(id);
   }, [term]);
 
-  // Focusing the input is an imperative DOM action, not state — it stays in
-  // an effect.
-  useEffect(() => {
-    if (!open) return;
-    const id = setTimeout(() => inputRef.current?.focus(), 50);
-    return () => clearTimeout(id);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  // Tab stays inside the dialog; Escape closes it.
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    const onKeydown = (e) => {
-      if (e.key === "Escape") {
-        dispatch(setSearchOpen(false));
-        return;
-      }
-      if (e.key !== "Tab" || !panel) return;
-      const items = Array.from(panel.querySelectorAll(FOCUSABLE));
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeydown);
-    return () => document.removeEventListener("keydown", onKeydown);
-  }, [open, dispatch]);
+  // Moves focus into the search input on open, traps Tab inside the
+  // panel, closes on Escape, and — the fix this consolidation was for —
+  // restores focus to whatever opened the modal when it closes (the
+  // previous three separate effects here never did that last part).
+  useDialogFocus({
+    open,
+    panelRef,
+    onClose: () => dispatch(setSearchOpen(false)),
+    initialFocusRef: inputRef,
+  });
 
   const { data, isFetching, isError, refetch } = useGetProductsQuery(
     { search: debounced, limit: 6 },
@@ -281,12 +250,13 @@ export default function SearchModal() {
                       >
                         <span className="relative h-[62px] w-[62px] flex-none overflow-hidden rounded-[10px] bg-media">
                           {p.images?.[0] ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img
+                            <Image
                               src={resolveImage(p.images[0], 124)}
-                              alt=""
+                              alt={p.name}
+                              fill
+                              sizes="62px"
                               loading="lazy"
-                              className="h-full w-full object-cover"
+                              className="object-cover"
                             />
                           ) : (
                             <span aria-hidden="true" className="absolute inset-0 hatch" />
@@ -348,7 +318,7 @@ export default function SearchModal() {
                   </p>
                   <button
                     onClick={() => refetch()}
-                    className="mt-[22px] h-[46px] rounded-[9px] bg-ink px-[22px] text-[14.5px] font-semibold text-canvas transition-colors hover:bg-verm hover:text-white focus-ring"
+                    className="mt-[22px] h-[46px] rounded-[9px] bg-ink px-[22px] text-[14.5px] font-semibold text-canvas transition-colors hover:bg-verm-contrast hover:text-white focus-ring"
                   >
                     Retry search
                   </button>

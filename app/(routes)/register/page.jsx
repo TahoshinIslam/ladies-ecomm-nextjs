@@ -3,6 +3,7 @@ import RegisterPage from "@/views/RegisterPage.jsx";
 
 export const metadata = {
   title: "Create account",
+  robots: { index: false, follow: false },
 };
 
 export default function Page() {

@@ -41,6 +41,7 @@ import {
   toggleSearch,
   setMobileMenuOpen,
 } from "../../store/uiSlice.js";
+import useDialogFocus from "../../hooks/useDialogFocus.js";
 
 // Free-shipping amount comes from live settings (see ANNOUNCEMENTS below,
 // built in the component body) so this copy can never drift from the real,
@@ -170,6 +171,18 @@ export default function Header() {
   useEffect(() => {
     dispatch(setMobileMenuOpen(false));
   }, [pathname, dispatch]);
+
+  // The tablet-width hamburger drawer previously had no dialog semantics
+  // at all (no role/aria-modal, no focus trap, no initial-focus-in, no
+  // focus-restore-on-close) — Escape didn't even close it, unlike the
+  // mega menu/account dropdown handled above. This gives it the same
+  // dialog behavior every other overlay in the app has.
+  const mobileNavPanelRef = useRef(null);
+  useDialogFocus({
+    open: mobileMenuOpen,
+    panelRef: mobileNavPanelRef,
+    onClose: () => dispatch(setMobileMenuOpen(false)),
+  });
 
   // Small grace period so a diagonal mouse path between trigger and panel
   // doesn't dismiss the menu mid-travel.
@@ -449,7 +462,7 @@ export default function Header() {
             <button
               onClick={() => dispatch(toggleCart())}
               aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
-              className="relative ml-1 flex h-11 items-center gap-2.5 rounded-lg bg-ink px-4 text-canvas transition-colors hover:bg-verm hover:text-white focus-ring"
+              className="relative ml-1 flex h-11 items-center gap-2.5 rounded-lg bg-ink px-4 text-canvas transition-colors hover:bg-verm-contrast hover:text-white focus-ring"
             >
               <ShoppingBag className="h-[18px] w-[18px]" />
               <span data-tabular className="font-mono text-[13px]">
@@ -465,9 +478,9 @@ export default function Header() {
             <MegaPanel key="shop" onMouseEnter={() => openMenu("shop")}>
               <div className="grid gap-12 lg:grid-cols-[1fr_1fr_1fr_1.25fr]">
                 <div>
-                  <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                  <h3 className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
                     {t("header.collections")}
-                  </div>
+                  </h3>
                   <div className="flex flex-col gap-[11px] text-[15.5px]">
                     {OCCASION_LINKS.map((l) => (
                       <Link
@@ -484,9 +497,9 @@ export default function Header() {
                   </div>
                 </div>
                 <div>
-                  <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                  <h3 className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
                     {t("header.departments")}
-                  </div>
+                  </h3>
                   <div className="flex flex-col gap-[11px] text-[15.5px]">
                     {departments.map((d) => (
                       <Link
@@ -503,9 +516,9 @@ export default function Header() {
                   </div>
                 </div>
                 <div>
-                  <div className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
+                  <h3 className="mb-[18px] font-mono text-[11px] uppercase tracking-[0.14em] text-stone">
                     {t("header.fabric")}
-                  </div>
+                  </h3>
                   <div className="flex flex-col gap-[11px] text-[15.5px]">
                     {FABRIC_LINKS.map((l) => (
                       <Link
@@ -568,6 +581,9 @@ export default function Header() {
       <AnimatePresence>
         {mobileMenuOpen && (
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("header.openMenu")}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -576,6 +592,7 @@ export default function Header() {
             onClick={() => dispatch(setMobileMenuOpen(false))}
           >
             <motion.nav
+              ref={mobileNavPanelRef}
               aria-label={t("navigation.shop")}
               initial={{ x: "-100%" }}
               animate={{ x: 0 }}
@@ -753,7 +770,7 @@ function Badge({ count }) {
   return (
     <span
       data-tabular
-      className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-lg bg-verm px-1 font-mono text-[10px] leading-none text-white"
+      className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-lg bg-verm-contrast px-1 font-mono text-[10px] leading-none text-white"
     >
       {count > 99 ? "99+" : count}
     </span>

@@ -4,6 +4,10 @@ import { requirePermission } from "../../../lib/auth.js";
 import { PERMISSIONS } from "../../../lib/permissions.js";
 import { getSettings, updateSettings } from "../../../services/settingsService.js";
 import { withRoute } from "../../../lib/http.js";
+import { parseJsonBody } from "../../../lib/validation.js";
+import { updateSettingsSchema } from "../../../schemas/adminSchemas.js";
+import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
+import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 export const GET = withRoute(async (request) => {
   await requirePermission(request, PERMISSIONS.SETTINGS_MANAGE);
@@ -13,7 +17,8 @@ export const GET = withRoute(async (request) => {
 
 export const PUT = withRoute(async (request) => {
   await requirePermission(request, PERMISSIONS.SETTINGS_MANAGE);
-  const body = await request.json();
+  const body = await parseJsonBody(request, updateSettingsSchema);
   const settings = await updateSettings(body);
+  invalidateCacheTags([CACHE_TAGS.PUBLIC_SETTINGS]);
   return NextResponse.json({ success: true, settings });
 });

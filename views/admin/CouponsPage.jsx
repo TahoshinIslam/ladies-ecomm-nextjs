@@ -25,10 +25,11 @@ import {
 } from "../../store/shopApi.js";
 import { formatCurrency, formatDate } from "../../lib/utils.js";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
+import { DISCOUNT_TYPES } from "../../schemas/couponSchemas.js";
 
 const couponSchema = z.object({
   code: z.string().min(3, "At least 3 characters").transform((s) => s.toUpperCase()),
-  discountType: z.enum(["percentage", "flat"]),
+  discountType: z.enum(DISCOUNT_TYPES),
   discountValue: z.coerce.number().positive(),
   minOrderAmount: z.coerce.number().min(0).optional().default(0),
   maxDiscount: z.coerce.number().optional().nullable(),
@@ -240,6 +241,19 @@ function CouponFormModal({ coupon, onClose }) {
   const [createCoupon, { isLoading: creating }] = useCreateCouponMutation();
   const [updateCoupon, { isLoading: updating }] = useUpdateCouponMutation();
 
+  // Date.now() is impure to call during render (React Compiler's purity
+  // rule) — a useMemo callback is still part of the render path and isn't
+  // exempt, but a useState lazy initializer function is specifically
+  // documented as safe for one-time impure/expensive work, since React
+  // guarantees it runs exactly once per component instance. This is also
+  // the actually-intended behavior: react-hook-form only reads
+  // `defaultValues` at the form's initial render anyway, so this "30 days
+  // from now" default was already meant to be fixed at mount, not
+  // recomputed on every re-render.
+  const [defaultNewExpiresAt] = useState(
+    () => new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+  );
+
   const {
     register,
     handleSubmit,
@@ -256,7 +270,7 @@ function CouponFormModal({ coupon, onClose }) {
           isActive: true,
           perUserLimit: 1,
           minOrderAmount: 0,
-          expiresAt: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+          expiresAt: defaultNewExpiresAt,
         },
   });
 

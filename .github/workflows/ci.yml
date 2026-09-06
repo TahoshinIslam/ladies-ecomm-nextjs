@@ -1,0 +1,159 @@
+name: CI
+
+# Phase 1 regression safety net. Every job here uses ONLY isolated,
+# CI-local test values defined directly in this file (see the `env:` block
+# below) — nothing is pulled from repository secrets, and no step ever
+# references a production MongoDB URI. This workflow triggers on
+# `pull_request` (never `pull_request_target`), so a fork's PR branch never
+# runs with access to any repository secret in the first place — and since
+# no step here references `secrets.*` at all, there is nothing to expose
+# even on a same-repo PR.
+#
+# scripts/assertTestDbSafety.mjs additionally enforces database isolation
+# at runtime, inside the test run itself (checks the URI naming, refuses to
+# match MONGO_URI, refuses known hosted-provider hostnames, and — because
+# CI=true/REQUIRE_TEST_DB=true below — hard-fails if MONGO_URI_TEST is
+# missing or not actually transaction-capable, rather than letting
+# database-backed suites silently skip). scripts/assertNoCriticalSkips.mjs
+# then inspects the captured test output and fails the job if any
+# database-backed suite reported itself skipped anyway.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel any in-progress run for the same branch/PR when a new commit lands,
+# so obsolete runs don't keep consuming runner time.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default for every job in this workflow — none of them
+# need to write to the repo, open issues/PRs, or touch packages.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Phase 11, section M: bounds a hung test/build step (stuck server,
+    # infinite test loop) to a fixed wall-clock ceiling instead of running
+    # until GitHub's default 360-minute cap.
+    timeout-minutes: 20
+
+    env:
+      NODE_ENV: test
+      CI: "true"
+      REQUIRE_TEST_DB: "true"
+      # Local-to-this-job replica-set MongoDB — provisioned by the
+      # supercharge/mongodb-github-action step below, torn down with the
+      # runner. Never points at anything outside this job. Database name
+      # deliberately contains "test" — scripts/assertTestDbSafety.mjs
+      # refuses to run against a database whose name doesn't.
+      MONGO_URI_TEST: mongodb://127.0.0.1:27017/tahos_test_ci?replicaSet=test-rs&directConnection=true
+      # JWT_SECRET/JWT_EXPIRES_IN were removed here as of the Phase 2
+      # session-cookie migration (jsonwebtoken is uninstalled; nothing in
+      # this codebase signs or verifies a JWT anymore) — no test file's
+      # gate reads them anymore either, so they are no longer an executable
+      # requirement, only a historical artifact of the old bearer-JWT setup.
+      CLIENT_URL: http://localhost:3000
+
+    steps:
+      # Pinned to the v7.0.1 release commit (actions/checkout).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Pinned to the v7.0.0 release commit (actions/setup-node). Node
+      # version pinned to the exact patch used during Phase 1 development.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.18.0"
+          cache: "npm" # keys off package-lock.json automatically
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Single-node replica set — required because
+      # services/orderService.js's createOrder() uses a real Mongoose
+      # transaction (session.withTransaction), which MongoDB only supports
+      # on a replica set. Pinned to the 1.12.1 release commit (third-party
+      # action — pinned to an immutable commit SHA, not just a tag, per the
+      # Phase 1 CI-hardening requirements).
+      - name: Start MongoDB (replica set)
+        uses: supercharge/mongodb-github-action@315db7fe45ac2880b7758f1933e6e5d59afd5e94 # 1.12.1
+        with:
+          mongodb-version: "7.0"
+          mongodb-replica-set: test-rs
+
+      - name: Lint
+        run: npm run lint
+
+      # Captures output to a file (not just stdout) so the critical-skip
+      # check below can inspect it — `set -o pipefail` is required so a
+      # non-zero exit code still fails this step even through the `tee`
+      # pipe. npm's `pretest` hook (scripts/assertTestDbSafety.mjs) runs
+      # first and fails the job immediately if MONGO_URI_TEST is missing or
+      # isn't actually reachable and transaction-capable — CI=true above
+      # puts it in strict mode.
+      - name: Test (core — database-backed suites)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:core 2>&1 | tee test-core-output.log
+
+      # scripts/httpTestServer.mjs builds, seeds the same isolated
+      # MONGO_URI_TEST database, starts one `next start` server on a
+      # verified-free port pointed ONLY at that database (config/db.js's
+      # double-gated ALLOW_TEST_DB_OVERRIDE/TEST_SERVER_MONGO_URI — see
+      # that file), runs tests/http/*.test.mjs against it, and always
+      # stops the server afterward (success, failure, or interruption).
+      - name: Test (HTTP integration suites)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:http 2>&1 | tee test-http-output.log
+
+      # These two suites each own their own multi-instance server
+      # lifecycle (two independent `next start` processes) and can never
+      # actually execute inside the shared single-server harness above —
+      # tests/http/multiInstanceEvents.integration.test.mjs and
+      # tests/http/coldStartHomepage.integration.test.mjs both match that
+      # harness's default glob and always report themselves SKIPPED there
+      # (by design — see each script's own header comment), which is why
+      # they need their own dedicated npm scripts and CI steps rather than
+      # being expected to run via `npm run test:http` above. Captured to
+      # their own log files so assertNoCriticalSkips.mjs below can confirm
+      # they didn't ALSO skip here (which would mean the regression proof
+      # never actually ran anywhere in CI).
+      - name: Test (multi-instance realtime — mandatory cross-process proof)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:multi-instance 2>&1 | tee test-multi-instance-output.log
+
+      - name: Test (cold-start homepage — mandatory DB-readiness regression proof)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:http:cold-start 2>&1 | tee test-cold-start-output.log
+
+      - name: Verify no critical suites were skipped
+        run: node scripts/assertNoCriticalSkips.mjs test-core-output.log test-http-output.log test-multi-instance-output.log test-cold-start-output.log
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload test output (on failure)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-output
+          path: |
+            test-core-output.log
+            test-http-output.log
+            test-multi-instance-output.log
+            test-cold-start-output.log
+            .phase1-http-test-logs/
+            .phase11-multi-instance-logs/
+            .phase11-coldstart-logs/
+          retention-days: 7

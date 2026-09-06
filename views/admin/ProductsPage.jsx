@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Image from "next/image";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -44,6 +45,7 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 import { usePermission } from "../../hooks/usePermission.js";
 import { PERMISSIONS } from "../../lib/permissions.js";
+import { AGE_GROUP_VALUES_LIST, AVAILABILITY_VALUES } from "../../schemas/catalogSchemas.js";
 
 const STEPS = ["Basic info", "Attributes", "Variants"];
 
@@ -70,10 +72,10 @@ const productSchema = z.object({
   department: z.string().min(1, "Select a department"),
   category: z.string().min(1, "Select a subcategory"),
   brand: z.string().optional(),
-  ageGroup: z.enum(["adult", "kids", "girls"]),
+  ageGroup: z.enum(AGE_GROUP_VALUES_LIST),
   basePrice: z.coerce.number().positive("Must be > 0"),
   discountPrice: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
-  availability: z.enum(["readyStock", "preOrder", "madeToOrder"]),
+  availability: z.enum(AVAILABILITY_VALUES),
   images: z.array(z.string()).min(1, "At least one image"),
   tags: z.string().optional(),
   isFeatured: z.boolean().optional(),
@@ -177,10 +179,16 @@ export default function AdminProductsPage() {
       width: 260,
       render: (p) => (
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
+          <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted">
             {p.images?.[0] && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={resolveImage(p.images[0], 80)} alt="" loading="lazy" className="h-full w-full object-cover" />
+              <Image
+                src={resolveImage(p.images[0], 80)}
+                alt={p.name}
+                fill
+                sizes="40px"
+                loading="lazy"
+                className="object-cover"
+              />
             )}
           </div>
           <div className="min-w-0">
@@ -382,7 +390,11 @@ function ProductFormModal({ product, onClose }) {
   const [createProduct, { isLoading: creating }] = useCreateProductMutation();
   const [updateProduct, { isLoading: updating }] = useUpdateProductMutation();
 
-  const categories = catsData?.categories ?? [];
+  // Stable reference across renders when `catsData` is undefined/loading —
+  // `catsData?.categories ?? []` would otherwise create a new array every
+  // render, invalidating the useMemo at the bottom of this component that
+  // depends on `categories` for no real reason.
+  const categories = useMemo(() => catsData?.categories ?? [], [catsData]);
   const departments = categories.filter((c) => !c.parent);
 
   // Editing an existing product: resolve its department from the leaf
@@ -832,11 +844,14 @@ function AttributeField({ def, register, watch, setValue }) {
 // schema level, so this stays a suggestion, not a constraint.
 function ComboField({ label, def, error, ...field }) {
   const listId = `combo-${field.name}`;
+  const inputId = `combo-field-${field.name}`;
   return (
     <div className="w-full">
-      <label className="mb-1.5 block text-sm font-medium text-ink">{label}</label>
+      <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-ink">{label}</label>
       <input
+        id={inputId}
         list={def ? listId : undefined}
+        aria-invalid={error ? true : undefined}
         className={cn(
           "h-11 w-full rounded-lg border border-line bg-elev px-3 text-sm text-ink transition-colors focus-ring hover:border-ink/40",
           error && "border-danger",

@@ -2,16 +2,23 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser, requirePermission } from "../../../lib/auth.js";
 import { PERMISSIONS } from "../../../lib/permissions.js";
-import { listProducts, createProduct } from "../../../services/productService.js";
+import { listProducts, createProduct, parseProductListQuery } from "../../../services/productService.js";
 import { withRoute, parseQueryParams } from "../../../lib/http.js";
 import { getServerLocale } from "../../../lib/i18n/server.js";
 import { localizeProductList } from "../../../lib/i18n/localize.js";
+import { parseJsonBody, assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../../../lib/validation.js";
+import { createProductSchema } from "../../../schemas/catalogSchemas.js";
+import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
+import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 export const GET = withRoute(async (request) => {
   const user = await getSessionUser(request).catch(() => null);
   const isAdmin = user?.role === "admin";
   const { searchParams } = new URL(request.url);
-  const query = parseQueryParams(searchParams);
+  assertNoDuplicateQueryKeys(searchParams);
+  assertNoDangerousQueryKeys(searchParams);
+  const rawQuery = parseQueryParams(searchParams);
+  const query = await parseProductListQuery(rawQuery);
 
   const [result, locale] = await Promise.all([
     listProducts(query, { isAdmin }),
@@ -33,7 +40,11 @@ export const GET = withRoute(async (request) => {
 
 export const POST = withRoute(async (request) => {
   await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
-  const body = await request.json();
+  const body = await parseJsonBody(request, createProductSchema);
   const product = await createProduct(body);
+  // A newly created product can change every product-list-shaped cached
+  // read (home sections, shop listing) — invalidated only after the
+  // write above has actually committed.
+  invalidateCacheTags([CACHE_TAGS.CATALOG]);
   return NextResponse.json({ success: true, product }, { status: 201 });
 });

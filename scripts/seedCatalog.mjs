@@ -11,11 +11,10 @@ import Category from "../models/categoryModel.js";
 import AttributeDefinition from "../models/attributeDefinitionModel.js";
 import Product from "../models/productModel.js";
 
-// Connects directly rather than via config/db.js: that helper pulls in
-// utlis/logger.js -> pino/pino-pretty, neither of which is an installed
-// dependency (config/db.js has never actually been run — see plan notes).
-// Installing new packages is out of scope for this phase, so this script
-// stays self-contained.
+// Connects directly rather than via config/db.js so this script stays
+// self-contained and dependency-free, independent of the app's own
+// connection caching (which is only useful inside a live Next.js server
+// process, not a one-shot script).
 async function connectDB() {
   const uri =
     process.env.NODE_ENV === "test"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
@@ -285,6 +286,7 @@ export default function ComparePage() {
 }
 
 function ProductColumnHeader({ product, onRemove }) {
+  const [imageFailed, setImageFailed] = useState(false);
   return (
     <th
       scope="col"
@@ -302,19 +304,18 @@ function ProductColumnHeader({ product, onRemove }) {
           href={`/product/${product.slug || product._id}`}
           className="block focus-ring rounded-md"
         >
-          <div className="aspect-square w-full overflow-hidden rounded-md bg-muted">
-            <img
-              src={resolveImage(product.images?.[0], 400)}
-              alt={product.name}
-              width="400"
-              height="400"
-              loading="lazy"
-              decoding="async"
-              className="h-full w-full object-cover"
-              onError={(e) => {
-                e.currentTarget.src = "/images/placeholder.png";
-              }}
-            />
+          <div className="relative aspect-square w-full overflow-hidden rounded-md bg-muted">
+            {product.images?.[0] && !imageFailed ? (
+              <Image
+                src={resolveImage(product.images[0], 400)}
+                alt={product.name}
+                fill
+                sizes="(max-width: 640px) 140px, 180px"
+                loading="lazy"
+                className="object-cover"
+                onError={() => setImageFailed(true)}
+              />
+            ) : null}
           </div>
           <div className="mt-3">
             {product.brand?.name && (

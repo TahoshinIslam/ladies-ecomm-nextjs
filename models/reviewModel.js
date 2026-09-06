@@ -87,5 +87,9 @@ reviewSchema.post("deleteOne", { document: true }, function () {
   this.constructor.calcAverageRating(this.product);
 });
 
-const reviewModel = mongoose.model("reviews", reviewSchema);
+// Guards against Next.js dev's hot-reload (and, as of Phase 7, the build's
+// own parallel static-generation workers re-evaluating this module) trying
+// to re-register an already-compiled model — same guard every other model
+// in this codebase already has.
+const reviewModel = mongoose.models.reviews || mongoose.model("reviews", reviewSchema);
 export default reviewModel;

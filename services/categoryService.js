@@ -1,6 +1,7 @@
 import Category from "../models/categoryModel.js";
 import Product from "../models/productModel.js";
 import { HttpError } from "../lib/http.js";
+import { isObjectIdFormat, requireObjectIdFormat } from "../lib/validation.js";
 
 const WRITABLE_FIELDS = ["name", "nameBn", "parent", "image", "description", "descriptionBn", "sortOrder", "isActive"];
 
@@ -19,6 +20,7 @@ const pickWritable = (body) => {
 // create valid top-level departments.
 async function validateParent(parentId) {
   if (!parentId) return null;
+  if (!isObjectIdFormat(parentId)) throw new HttpError(400, "Invalid parent category id");
   const parent = await Category.findById(parentId).lean();
   if (!parent) throw new HttpError(400, "Parent category not found");
   if (parent.parent) {
@@ -40,6 +42,7 @@ export async function createCategory(body) {
 }
 
 export async function updateCategory(id, body) {
+  requireObjectIdFormat(id, "id");
   const category = await Category.findById(id);
   if (!category) throw new HttpError(404, "Category not found");
 
@@ -56,6 +59,7 @@ export async function updateCategory(id, body) {
 }
 
 export async function deleteCategory(id) {
+  requireObjectIdFormat(id, "id");
   const category = await Category.findById(id);
   if (!category) throw new HttpError(404, "Category not found");
 

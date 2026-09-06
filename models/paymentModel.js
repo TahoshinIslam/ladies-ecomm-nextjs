@@ -13,9 +13,13 @@ const paymentSchema = new mongoose.Schema(
       ref: "users",
       required: [true, "User is required"],
     },
+    // COD-only at launch (see services/paymentService.js) — the enum is
+    // deliberately narrow rather than pre-declaring unimplemented gateways,
+    // since nothing in this codebase ever writes anything but "cod" and a
+    // wider enum would misleadingly suggest multi-gateway support exists.
     method: {
       type: String,
-      enum: ["stripe", "sslcommerz", "bkash", "nagad", "cod"],
+      enum: ["cod"],
       required: [true, "Payment method is required"],
     },
     status: {

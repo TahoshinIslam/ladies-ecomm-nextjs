@@ -3,13 +3,16 @@ import mongoose from "mongoose";
 import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
 import Coupon from "../models/couponModel.js";
+import CouponUsage from "../models/couponUsageModel.js";
 import Cart from "../models/cartModel.js";
 import Settings from "../models/settingsModel.js";
 import User from "../models/userModel.js";
 import Payment from "../models/paymentModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
-import { emitOrderEvent, emitAdminEvent } from "../lib/events.js";
+import { emitOrderEvent, emitAdminEvent, emitBestEffort } from "../lib/events.js";
+import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 // Matches the "danger" row-highlight threshold ProductsPage.jsx already
 // uses for total stock — reusing the same number so "low stock" means the
@@ -166,6 +169,19 @@ const calcTotals = async (
     if (couponDoc.minOrderAmount && subtotal < couponDoc.minOrderAmount) {
       throw new HttpError(400, `Minimum order ${couponDoc.minOrderAmount} required`);
     }
+    // Phase 5: read-only checks for a clear, early error message. These
+    // are NOT the atomic guarantee (a concurrent request could still race
+    // past a plain read) — the real enforcement is the guarded conditional
+    // update at claim time below, inside createOrder()'s transaction.
+    if (couponDoc.usageLimit !== null && couponDoc.usedCount >= couponDoc.usageLimit) {
+      throw new HttpError(400, "Coupon usage limit reached");
+    }
+    if (userId && couponDoc.perUserLimit !== null && couponDoc.perUserLimit !== undefined) {
+      const existingUsage = await CouponUsage.findOne({ coupon: couponDoc._id, user: userId }).session(session);
+      if (existingUsage && existingUsage.count >= couponDoc.perUserLimit) {
+        throw new HttpError(400, "You have already used this coupon the maximum number of times");
+      }
+    }
     discount =
       couponDoc.discountType === "percentage"
         ? Math.round((subtotal * couponDoc.discountValue) / 100)
@@ -229,80 +245,209 @@ export async function previewOrder(userId, { items, shippingAddress, shippingTie
   };
 }
 
-export async function createOrder(userId, { items, shippingAddress, shippingTier, couponCode, notes }) {
+// Strips the two internal idempotency fields from an in-memory order doc
+// before it's ever handed back to a route/response. Setting a path to
+// `undefined` (rather than deleting it) is enough — JSON.stringify/
+// NextResponse.json omit undefined-valued keys, and this doesn't fight
+// Mongoose's own change-tracking the way `delete doc.field` can.
+function redactIdempotencyFields(order) {
+  order.idempotencyKeyHash = undefined;
+  order.idempotencyRequestHash = undefined;
+  return order;
+}
+
+// Looks up a previous order for this (user, key) pair. Needs
+// `+idempotencyRequestHash` explicitly since that field is select:false by
+// default — the caller must redact it again before this doc is ever
+// serialized back to a client (see redactIdempotencyFields above).
+async function findByIdempotencyKey(userId, keyHash) {
+  return Order.findOne({ user: userId, idempotencyKeyHash: keyHash }).select("+idempotencyRequestHash");
+}
+
+export async function createOrder(
+  userId,
+  { items, shippingAddress, shippingTier, couponCode, notes },
+  idempotencyKey,
+) {
   if (!items?.length) throw new HttpError(400, "Order must contain items");
   if (!shippingAddress) throw new HttpError(400, "Shipping address required");
+  if (!idempotencyKey) throw new HttpError(400, "Idempotency-Key header is required");
+
+  const keyHash = hashToken(idempotencyKey);
+  const requestHash = fingerprintOrderRequest({ items, shippingAddress, shippingTier, couponCode, notes });
+
+  // Sequential-replay fast path: if a prior request already used this exact
+  // key for this user, resolve from it directly — no transaction, no total
+  // recalculation (which would otherwise run against an already-emptied
+  // cart), no stock/promo/cart mutation, no new notification/SSE event.
+  const priorOrder = await findByIdempotencyKey(userId, keyHash);
+  if (priorOrder) {
+    if (priorOrder.idempotencyRequestHash !== requestHash) {
+      throw new HttpError(422, "Idempotency-Key was already used with a different request");
+    }
+    return { order: redactIdempotencyFields(priorOrder), replayed: true };
+  }
 
   const session = await mongoose.startSession();
-  let createdOrder;
   try {
-    await session.withTransaction(async () => {
-      const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, session, {
-        commitPromo: true,
-      });
+    let createdOrder;
+    try {
+      await session.withTransaction(async () => {
+        const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, session, {
+          commitPromo: true,
+        });
 
-      for (const it of t.lineItems) {
-        const result = await Product.updateOne(
-          {
-            _id: it.product,
-            variants: { $elemMatch: { _id: it.variantId, stock: { $gte: it.quantity } } },
-          },
-          { $inc: { "variants.$.stock": -it.quantity } },
+        for (const it of t.lineItems) {
+          const result = await Product.updateOne(
+            {
+              _id: it.product,
+              variants: { $elemMatch: { _id: it.variantId, stock: { $gte: it.quantity } } },
+            },
+            { $inc: { "variants.$.stock": -it.quantity } },
+            { session },
+          );
+          if (result.modifiedCount !== 1) {
+            throw new HttpError(409, `Insufficient stock for ${it.snapshot.sku || "an item"}`);
+          }
+        }
+
+        if (t.couponDoc) {
+          // Atomic, guarded global-usage claim — mirrors the stock-decrement
+          // pattern above exactly: the filter itself re-checks
+          // `usedCount < usageLimit` (or is skipped entirely for a null/
+          // unlimited usageLimit) at the moment of the write, and
+          // `modifiedCount` is checked to detect a lost race. Previously
+          // this was an unconditional `$inc` with no upper bound, letting
+          // concurrent checkouts push `usedCount` past `usageLimit`.
+          const couponClaim = await Coupon.updateOne(
+            {
+              _id: t.couponDoc._id,
+              $or: [{ usageLimit: null }, { $expr: { $lt: ["$usedCount", "$usageLimit"] } }],
+            },
+            { $inc: { usedCount: 1 } },
+            { session },
+          );
+          if (couponClaim.modifiedCount !== 1) {
+            throw new HttpError(409, "Coupon usage limit reached");
+          }
+
+          // Atomic, guarded PER-USER claim — perUserLimit is defined on
+          // the Coupon schema but was never enforced anywhere before
+          // Phase 5. A null/undefined perUserLimit means unlimited for
+          // this user; otherwise the upsert's filter requires the
+          // existing usage row (if any) to still be under the limit. When
+          // it isn't, Mongo's upsert tries to insert a second row for the
+          // same (coupon, user) pair, which models/couponUsageModel.js's
+          // unique compound index rejects — caught below and translated
+          // into the same 409 conflict shape the stock/global-usage guards
+          // use, not a raw duplicate-key 500.
+          const perUserLimit = t.couponDoc.perUserLimit;
+          const usageFilter = { coupon: t.couponDoc._id, user: userId };
+          if (perUserLimit !== null && perUserLimit !== undefined) {
+            usageFilter.count = { $lt: perUserLimit };
+          }
+          try {
+            await CouponUsage.findOneAndUpdate(
+              usageFilter,
+              { $inc: { count: 1 }, $setOnInsert: { coupon: t.couponDoc._id, user: userId } },
+              { session, upsert: true },
+            );
+          } catch (err) {
+            if (err?.code === 11000) {
+              throw new HttpError(409, "You have already used this coupon the maximum number of times");
+            }
+            throw err;
+          }
+        }
+
+        const [order] = await Order.create(
+          [
+            {
+              user: userId,
+              items: t.lineItems,
+              shippingAddress,
+              coupon: t.couponDoc?._id || null,
+              subtotal: t.subtotal,
+              tax: t.tax,
+              taxLabel: t.taxLabel,
+              shippingCost: t.shippingCost,
+              shippingTier: t.shippingTier,
+              discount: t.discount,
+              total: t.total,
+              currency: t.currency,
+              region: t.region,
+              notes: notes || "",
+              status: "pending",
+              idempotencyKeyHash: keyHash,
+              idempotencyRequestHash: requestHash,
+            },
+          ],
           { session },
         );
-        if (result.modifiedCount !== 1) {
-          throw new HttpError(409, `Insufficient stock for ${it.snapshot.sku || "an item"}`);
+
+        await Cart.updateOne({ userId }, { $set: { items: [] } }, { session });
+
+        // Phase 11 realtime-durability correction: the admin NEW_ORDER
+        // event is now written INSIDE this transaction (same `session`)
+        // instead of after it — a genuine transactional outbox for order
+        // creation. If this insert fails, the whole transaction
+        // (order/stock/coupon/cart writes included) rolls back with it;
+        // if the transaction commits, the event is atomically visible in
+        // the same instant, no separate un-awaited write that could be
+        // lost to a frozen/recycled function instance.
+        const orderNumber = order._id.toString().slice(-6);
+        await emitAdminEvent({ type: "NEW_ORDER", orderId: order._id.toString(), orderNumber }, { session });
+
+        createdOrder = order;
+      });
+    } catch (err) {
+      // Concurrent replay: another request with the same key committed
+      // first (the transaction above aborted on the unique-index conflict,
+      // so nothing from THIS attempt — stock, promo, cart, order — was
+      // persisted). Resolve to the winner instead of surfacing a raw
+      // duplicate-key 500.
+      if (isDuplicateKeyError(err, "idempotencyKeyHash")) {
+        const winner = await findByIdempotencyKey(userId, keyHash);
+        if (winner) {
+          if (winner.idempotencyRequestHash !== requestHash) {
+            throw new HttpError(422, "Idempotency-Key was already used with a different request");
+          }
+          return { order: redactIdempotencyFields(winner), replayed: true };
         }
       }
+      throw err;
+    }
 
-      if (t.couponDoc) {
-        await Coupon.updateOne({ _id: t.couponDoc._id }, { $inc: { usedCount: 1 } }, { session });
-      }
+    // Fire-and-forget admin notification (don't block the response). Only
+    // reached when THIS request is the one that actually created the
+    // order — a replay returns above and never runs any of this again.
+    // The NEW_ORDER realtime event itself was already written atomically
+    // inside the transaction above (see the emitAdminEvent call there) —
+    // this notification write is a separate, non-event, best-effort
+    // channel and is unaffected by this correction's scope.
+    const orderNumber = createdOrder._id.toString().slice(-6);
+    createAdminNotification({
+      message: `New order #${orderNumber} received`,
+      url: `/admin/orders`,
+    }).catch(() => {});
 
-      const [order] = await Order.create(
-        [
-          {
-            user: userId,
-            items: t.lineItems,
-            shippingAddress,
-            coupon: t.couponDoc?._id || null,
-            subtotal: t.subtotal,
-            tax: t.tax,
-            taxLabel: t.taxLabel,
-            shippingCost: t.shippingCost,
-            shippingTier: t.shippingTier,
-            discount: t.discount,
-            total: t.total,
-            currency: t.currency,
-            region: t.region,
-            notes: notes || "",
-            status: "pending",
-          },
-        ],
-        { session },
-      );
+    // Low-stock check happens after the transaction commits — this reads the
+    // post-decrement stock, it doesn't need to be part of the atomic write
+    // (and must not roll back or fail the already-committed order). Phase 12
+    // remediation: previously an un-awaited `.catch(() => {})` — a failure
+    // here could be silently lost forever if the serverless instance froze
+    // or was recycled the instant after the HTTP response flushed, with no
+    // log line at all. AWAITED via emitBestEffort (the same safe-catch/log
+    // utility every other post-commit best-effort write in this file uses)
+    // so a failure is guaranteed to be observed and logged — safely, never
+    // a raw stack/credential — before this function returns, without ever
+    // failing the order itself.
+    await emitBestEffort(checkLowStock(createdOrder.items));
 
-      await Cart.updateOne({ userId }, { $set: { items: [] } }, { session });
-
-      createdOrder = order;
-    });
+    return { order: redactIdempotencyFields(createdOrder), replayed: false };
   } finally {
     await session.endSession();
   }
-
-  // Fire-and-forget admin notification (don't block the response).
-  const orderNumber = createdOrder._id.toString().slice(-6);
-  createAdminNotification({
-    message: `New order #${orderNumber} received`,
-    url: `/admin/orders`,
-  }).catch(() => {});
-  emitAdminEvent({ type: "NEW_ORDER", orderId: createdOrder._id.toString(), orderNumber });
-
-  // Low-stock check happens after the transaction commits — this reads the
-  // post-decrement stock, it doesn't need to be part of the atomic write.
-  checkLowStock(createdOrder.items).catch(() => {});
-
-  return createdOrder;
 }
 
 async function checkLowStock(items) {
@@ -322,13 +467,15 @@ async function checkLowStock(items) {
           : `Low stock: ${label} — only ${variant.stock} remaining`,
       url: "/admin/products",
     }).catch(() => {});
-    emitAdminEvent({
-      type: "LOW_STOCK_ALERT",
-      productId: it.product.toString(),
-      variantId: it.variantId.toString(),
-      productName: label,
-      stock: variant.stock,
-    });
+    await emitBestEffort(
+      emitAdminEvent({
+        type: "LOW_STOCK_ALERT",
+        productId: it.product.toString(),
+        variantId: it.variantId.toString(),
+        productName: label,
+        stock: variant.stock,
+      }),
+    );
   }
 }
 
@@ -337,6 +484,7 @@ export async function getMyOrders(userId) {
 }
 
 export async function getOrder(userId, role, orderId) {
+  requireObjectIdFormat(orderId, "orderId");
   const order = await Order.findById(orderId).populate("user", "name email");
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user._id.toString() === String(userId);
@@ -345,6 +493,7 @@ export async function getOrder(userId, role, orderId) {
 }
 
 export async function cancelOrder(userId, role, orderId) {
+  requireObjectIdFormat(orderId, "orderId");
   const session = await mongoose.startSession();
   let updatedOrder;
   try {
@@ -365,32 +514,53 @@ export async function cancelOrder(userId, role, orderId) {
         );
       }
       if (order.coupon) {
+        // Symmetric with the existing (pre-Phase-5) global-usage rollback
+        // below: cancelling an order restores both the global usedCount
+        // AND this Phase 5 per-user usage count — the same choice already
+        // made for usedCount, now extended consistently to the new
+        // per-user tracking rather than left half-applied. (This mirrors
+        // the FIRST-order promo's deliberately opposite choice —
+        // claimFirstOrderPromo's flag is sticky and never restored on
+        // cancel — but that is a distinct, separately-reasoned guarantee;
+        // this coupon rollback simply keeps doing what it already did.)
         await Coupon.updateOne(
           { _id: order.coupon, usedCount: { $gt: 0 } },
           { $inc: { usedCount: -1 } },
           { session },
         );
+        await CouponUsage.updateOne(
+          { coupon: order.coupon, user: order.user, count: { $gt: 0 } },
+          { $inc: { count: -1 } },
+          { session },
+        );
       }
       order.status = "cancelled";
       await order.save({ session });
+
+      // Phase 11 realtime-durability correction: both the customer-facing
+      // and admin-facing cancellation events are now written INSIDE this
+      // same transaction — a genuine transactional outbox for
+      // cancellation. If either insert fails, the whole transaction
+      // (status change, stock restoration, coupon-usage rollback
+      // included) rolls back with it.
+      const orderNumber = orderId.toString().slice(-6);
+      await emitOrderEvent(orderId, { orderId, status: "cancelled" }, { session });
+      await emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber }, { session });
+
       updatedOrder = order;
     });
   } finally {
     await session.endSession();
   }
 
-  // Customer-facing channel (their own tracking page/timeline) — already
-  // existed. What was missing is everything below: this cancellation never
-  // told the admin team it happened at all, regardless of whether a
-  // customer or an admin did the cancelling.
-  emitOrderEvent(orderId, { orderId, status: "cancelled" });
-
+  // Separate, non-event, best-effort notification channel — unaffected by
+  // this correction's scope (the realtime ORDER_CANCELLED/cancelled
+  // events themselves were already written atomically above).
   const orderNumber = orderId.toString().slice(-6);
   createAdminNotification({
     message: `Order #${orderNumber} was cancelled`,
     url: "/admin/orders",
   }).catch(() => {});
-  emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber });
 
   return updatedOrder;
 }
@@ -442,44 +612,105 @@ export async function getAllOrders({ status, search, sortBy, sortOrder, page = 1
   };
 }
 
-export async function updateOrderStatus(orderId, { status, trackingNumber }) {
-  const valid = ["pending", "paid", "processing", "shipped", "delivered", "cancelled", "refunded"];
-  if (!valid.includes(status)) throw new HttpError(400, "Invalid status");
+// Forward-progression workflow graph for the admin PUT /api/orders/[id]/status
+// endpoint. `delivered`, `cancelled`, `refunded` are terminal — nothing
+// transitions OUT of them here. Cancellation from an earlier status has
+// its own dedicated cancelOrder() flow (stock/coupon rollback); this
+// endpoint only ever moves an order forward or into cancelled/refunded,
+// never backward — the exact guarantee Phase 4's COD atomicity work
+// already relies on (a delivered/shipped/cancelled order must never
+// regress).
+const ORDER_STATUS_TRANSITIONS = {
+  pending: ["paid", "processing", "shipped", "cancelled"],
+  paid: ["processing", "shipped", "cancelled", "refunded"],
+  processing: ["shipped", "cancelled"],
+  shipped: ["delivered", "cancelled"],
+  delivered: ["refunded"],
+  cancelled: [],
+  refunded: [],
+};
 
+function isOrderStatusTransitionAllowed(from, to) {
+  if (from === to) return true; // idempotent no-op re-submission
+  return (ORDER_STATUS_TRANSITIONS[from] || []).includes(to);
+}
+
+// Phase 12 remediation: a request whose `status` already matches the
+// order's current status must be a genuine no-op — no re-save, no
+// deliveredAt/timestamp rewrite, no re-fired event/notification, no cache
+// invalidation. Repeated admin double-clicks or two admin tabs submitting
+// the same transition were previously indistinguishable from a real
+// transition and silently corrupted `deliveredAt` / spammed
+// cancelled-or-refunded notifications every time.
+//
+// A concurrently-supplied `trackingNumber` is treated as its own,
+// independent, genuinely-optional update: it's only considered "changed"
+// when a non-empty value actually differs from what's already stored
+// (matching the pre-existing truthy-only-overwrite contract), and a
+// same-status-but-new-tracking-number request is NOT treated as another
+// status transition — it does not rewrite `deliveredAt`, does not touch
+// the admin channel or create a notification, and only refreshes the
+// customer-facing order-status stream (whose payload already includes
+// `trackingNumber`) so the customer's own tracking view updates live.
+export async function updateOrderStatus(orderId, { status, trackingNumber }) {
+  requireObjectIdFormat(orderId, "orderId");
   const order = await Order.findById(orderId);
   if (!order) throw new HttpError(404, "Order not found");
 
-  order.status = status;
-  if (trackingNumber) order.trackingNumber = trackingNumber;
-  if (status === "delivered") order.deliveredAt = new Date();
+  if (!isOrderStatusTransitionAllowed(order.status, status)) {
+    throw new HttpError(409, `Cannot change order status from "${order.status}" to "${status}"`);
+  }
+
+  const isSameStatus = order.status === status;
+  const trackingChanged = !!trackingNumber && trackingNumber !== order.trackingNumber;
+
+  if (isSameStatus && !trackingChanged) {
+    // True no-op — nothing to persist, notify, or invalidate.
+    return { order, changed: false };
+  }
+
+  if (!isSameStatus) order.status = status;
+  if (trackingChanged) order.trackingNumber = trackingNumber;
+  if (!isSameStatus && status === "delivered") order.deliveredAt = new Date();
   await order.save();
 
-  // COD: when delivered, mark Payment as completed.
-  if (status === "delivered") {
+  // COD: when delivered (a genuine, first-time transition only), mark
+  // Payment as completed.
+  if (!isSameStatus && status === "delivered") {
     await Payment.updateOne(
       { order: order._id, method: "cod", status: "pending" },
       { $set: { status: "completed", paidAt: new Date() } },
     );
   }
 
-  // Customer-facing channel — unchanged, already worked.
-  emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber });
+  // Phase 11 realtime-durability correction: updateOrderStatus() has no
+  // surrounding MongoDB transaction (the order.save()/Payment.updateOne()
+  // above are two independent, non-transactional writes) — so its events
+  // cannot join a transaction that doesn't exist. Per the documented
+  // policy for non-transactional mutations, the write is still AWAITED
+  // (never fire-and-forget) so a failure is observed and logged before
+  // this function returns, but a failure here must not fail the status
+  // update itself — see emitBestEffort()'s own comment for why.
+  //
+  // Customer-facing channel — refreshed for a real status transition OR a
+  // tracking-only update (the customer's tracking view needs to know).
+  await emitBestEffort(emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber }));
 
-  // Admin-facing: always refresh any open admin order list live (no
-  // notification noise for a routine processing → shipped click — the
-  // person who just clicked it doesn't need to be told they clicked it).
-  // Only status changes another admin/employee genuinely needs surfaced —
-  // refunded reaching here (cancelled is routed through cancelOrder() by
-  // the admin UI, but this stays defensive in case anything else calls
-  // this directly) — also write a real notification.
-  const orderNumber = orderId.toString().slice(-6);
-  emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status });
-  if (["cancelled", "refunded"].includes(status)) {
-    createAdminNotification({
-      message: `Order #${orderNumber} marked as ${status}`,
-      url: "/admin/orders",
-    }).catch(() => {});
+  // Admin-facing: only a REAL status transition refreshes the admin order
+  // list / creates a notification — a tracking-only update on an
+  // unchanged status is not "another status change" the admin team needs
+  // surfaced, and repeating an already-notified terminal status must
+  // never create a second notification.
+  if (!isSameStatus) {
+    const orderNumber = orderId.toString().slice(-6);
+    await emitBestEffort(emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }));
+    if (["cancelled", "refunded"].includes(status)) {
+      createAdminNotification({
+        message: `Order #${orderNumber} marked as ${status}`,
+        url: "/admin/orders",
+      }).catch(() => {});
+    }
   }
 
-  return order;
+  return { order, changed: true };
 }

@@ -46,11 +46,19 @@ const orderEndpoints = (b) => ({
   previewOrder: b.mutation({
     query: (body) => ({ url: "/orders/preview", method: "POST", body }),
   }),
+  // Phase 4: `idempotencyKey` is pulled out of the payload and sent as the
+  // Idempotency-Key header (never in the body/query string) — the rest of
+  // `body` is exactly what CheckoutPage.jsx already sent. The header
+  // itself is generated/persisted client-side; see views/CheckoutPage.jsx.
   createOrder: b.mutation({
-    query: (body) => ({ url: "/orders", method: "POST", body }),
+    query: ({ idempotencyKey, ...body }) => ({
+      url: "/orders",
+      method: "POST",
+      body,
+      headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
+    }),
     invalidatesTags: ["Order", "Cart"],
   }),
-  getMyOrders: b.query({ query: () => "/orders/my", providesTags: ["Order"] }),
   getOrder: b.query({
     query: (id) => `/orders/${id}`,
     providesTags: (r, e, a) => [{ type: "Order", id: a }],
@@ -174,29 +182,8 @@ const addressEndpoints = (b) => ({
   }),
 });
 
-// ====== Payments ======
+// ====== Payments ====== (COD-only at launch — see services/paymentService.js)
 const paymentEndpoints = (b) => ({
-  stripeCheckout: b.mutation({
-    query: (orderId) => ({
-      url: `/payments/stripe/${orderId}`,
-      method: "POST",
-    }),
-  }),
-  bkashCreate: b.mutation({
-    query: (orderId) => ({
-      url: `/payments/bkash/create/${orderId}`,
-      method: "POST",
-    }),
-  }),
-  bkashExecute: b.mutation({
-    query: (body) => ({ url: "/payments/bkash/execute", method: "POST", body }),
-  }),
-  nagadCreate: b.mutation({
-    query: (orderId) => ({
-      url: `/payments/nagad/create/${orderId}`,
-      method: "POST",
-    }),
-  }),
   codCreate: b.mutation({
     query: (orderId) => ({ url: `/payments/cod/${orderId}`, method: "POST" }),
   }),
@@ -206,29 +193,11 @@ const paymentEndpoints = (b) => ({
   }),
 });
 
-// ====== Analytics ======
-const analyticsEndpoints = (b) => ({
-  getOverview: b.query({
-    query: () => "/analytics/overview",
-    providesTags: ["Analytics"],
-  }),
-  getSalesSeries: b.query({
-    query: (days = 30) => `/analytics/sales-series?days=${days}`,
-    providesTags: ["Analytics"],
-  }),
-  getTopProducts: b.query({
-    query: (limit = 10) => `/analytics/top-products?limit=${limit}`,
-    providesTags: ["Analytics"],
-  }),
-  getStatusBreakdown: b.query({
-    query: () => "/analytics/status-breakdown",
-    providesTags: ["Analytics"],
-  }),
-  getRevenueByMethod: b.query({
-    query: () => "/analytics/revenue-by-method",
-    providesTags: ["Analytics"],
-  }),
-});
+// Analytics — no RTK Query endpoints here: the one consumer
+// (views/admin/OverviewPage.jsx) became a Server Component in Phase 7 and
+// now calls services/analyticsService.js directly. Kept as real, tested
+// Route Handlers (app/api/analytics/*) independent of this client — this
+// only removes the now-zero-consumer client-side wrapper.
 
 // ====== Upload ======
 const uploadEndpoints = (b) => ({
@@ -342,7 +311,6 @@ export const shopApi = apiSlice.injectEndpoints({
     ...couponEndpoints(b),
     ...addressEndpoints(b),
     ...paymentEndpoints(b),
-    ...analyticsEndpoints(b),
     ...uploadEndpoints(b),
     ...categoryBrandEndpoints(b),
     ...notificationEndpoints(b),
@@ -361,7 +329,6 @@ export const {
   useClearWishlistMutation,
   usePreviewOrderMutation,
   useCreateOrderMutation,
-  useGetMyOrdersQuery,
   useGetOrderQuery,
   useLazyGetOrderQuery,
   useCancelOrderMutation,
@@ -383,17 +350,8 @@ export const {
   useCreateAddressMutation,
   useUpdateAddressMutation,
   useDeleteAddressMutation,
-  useStripeCheckoutMutation,
-  useBkashCreateMutation,
-  useBkashExecuteMutation,
-  useNagadCreateMutation,
   useCodCreateMutation,
   useGetPaymentByOrderQuery,
-  useGetOverviewQuery,
-  useGetSalesSeriesQuery,
-  useGetTopProductsQuery,
-  useGetStatusBreakdownQuery,
-  useGetRevenueByMethodQuery,
   useUploadImageMutation,
   useUploadMultipleMutation,
   useGetCategoriesQuery,

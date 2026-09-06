@@ -18,6 +18,13 @@ import { useAddToCartMutation } from "../store/shopApi.js";
 import { setCredentials, selectCurrentUser } from "../store/authSlice.js";
 import { mergeGuestCartAfterLogin } from "../hooks/useCart.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
+// Shared boundary values (not the full server schema — this form needs its
+// own translated messages) so the client can never silently drift out of
+// sync with what services/authService.js's register() actually enforces
+// server-side (schemas/authSchemas.js's registerSchema). Importing a
+// number from schemas/*.js pulls in no Mongoose/server-only code — see
+// tests/clientSchemaImportability.test.mjs.
+import { PASSWORD_MIN_LENGTH, NAME_MAX_LENGTH } from "../schemas/authSchemas.js";
 
 export default function RegisterPage() {
   const { t } = useLocale();
@@ -39,9 +46,14 @@ export default function RegisterPage() {
     () =>
       z
         .object({
-          name: z.string().min(2, t("auth.nameMinLength")),
+          name: z.string().min(2, t("auth.nameMinLength")).max(NAME_MAX_LENGTH),
           email: z.string().email(t("auth.validEmail")),
-          password: z.string().min(6, t("auth.passwordMinLength")),
+          // PASSWORD_MIN_LENGTH is imported from schemas/authSchemas.js —
+          // the same number services/authService.js's register() enforces
+          // — so this can never again require less than the server does
+          // (previously this required only 6, the server 8; a password
+          // that passed here could still be rejected server-side).
+          password: z.string().min(PASSWORD_MIN_LENGTH, t("auth.passwordMinLength")),
           confirmPassword: z.string(),
         })
         .refine((d) => d.password === d.confirmPassword, {
@@ -60,7 +72,11 @@ export default function RegisterPage() {
   const onSubmit = async ({ confirmPassword, ...data }) => {
     try {
       const res = await registerUser(data).unwrap();
-      dispatch(setCredentials({ user: res.user, token: res.token }));
+      // Phase 2: no token in the response body — the server already set
+      // the session cookie on this same response before the client sees
+      // it, so the cart-merge mutation just below authenticates via the
+      // cookie automatically.
+      dispatch(setCredentials(res.user));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
       toast.success(t("auth.accountCreated"));
       router.push(redirectParam || "/");

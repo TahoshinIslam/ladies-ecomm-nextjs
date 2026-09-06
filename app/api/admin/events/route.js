@@ -1,6 +1,6 @@
-import { getSessionUserFromQuery } from "../../../../lib/auth.js";
+import { requireStaff } from "../../../../lib/auth.js";
 import { HttpError, withRoute } from "../../../../lib/http.js";
-import { eventBus, ADMIN_CHANNEL } from "../../../../lib/events.js";
+import { ADMIN_CHANNEL, readEventsSince, resolveStartCursor } from "../../../../lib/events.js";
 
 // Route Handlers can be statically evaluated/buffered by default; an SSE
 // stream needs to run fresh per-request and never get cached or closed
@@ -8,40 +8,111 @@ import { eventBus, ADMIN_CHANNEL } from "../../../../lib/events.js";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
-const sseLine = (event, data) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+// `id: <id>` (Phase 11) makes the browser's native EventSource track
+// `lastEventId` and automatically resend it as the `Last-Event-ID` request
+// header on its own automatic reconnect — no custom reconnect logic
+// needed client-side; see resolveStartCursor() in lib/events.js for how
+// the server honors it.
+const sseLine = (event, data, id) => {
+  const idLine = id ? `id: ${id}\n` : "";
+  return encoder.encode(`${idLine}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+};
+
+const POLL_INTERVAL_MS = 1000;
+const HEARTBEAT_MS = 25000;
+// Closes the stream itself, well before any configured Vercel function
+// duration, forcing a clean client-initiated reconnect (EventSource
+// retries automatically) rather than being cut off mid-frame by the
+// platform. See docs/PRODUCTION_READINESS.md's function-duration
+// inventory for the reasoning behind this specific bound.
+const STREAM_MAX_MS = 4 * 60 * 1000;
 
 // Broadcast stream for the whole admin team — new orders, low-stock alerts,
 // product create/update, anything NotificationsDropdown previously only
 // learned about on its next 30s poll. Any admin/employee can subscribe;
 // this isn't gated by a specific permission (see requireStaff) since it's
 // general team awareness, not a protected admin action.
+//
+// Phase 2: authenticates via the same-origin session cookie, same as every
+// other route — EventSource sends cookies automatically for same-origin
+// requests. The 401/403 checks below run BEFORE the stream opens, so an
+// unauthorized request never gets a live connection at all.
+//
+// Phase 11 (mandatory): reads from the MongoDB-backed durable event outbox
+// (lib/events.js) via bounded polling instead of a process-local
+// EventEmitter — see that file's own comment for why an in-memory bus
+// cannot work across Vercel's multiple isolated function instances.
 export const GET = withRoute(async (request) => {
-  const user = await getSessionUserFromQuery(request);
-  if (!user) throw new HttpError(401, "Not authorized, no token");
-  if (!["admin", "employee"].includes(user.role)) throw new HttpError(403, "Staff access only");
+  await requireStaff(request);
+
+  // Phase 12 remediation: resolved BEFORE the stream/Response is ever
+  // constructed — see app/api/orders/[id]/events/route.js's identical
+  // comment. A genuine DB failure here must fail the request closed with
+  // a sanitized error, never silently fall back to a full-history replay
+  // after the SSE headers have already been sent.
+  let afterId;
+  try {
+    afterId = await resolveStartCursor(ADMIN_CHANNEL, request.headers.get("last-event-id"));
+  } catch {
+    throw new HttpError(503, "Realtime stream temporarily unavailable, please retry");
+  }
 
   const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(sseLine("connected", {}));
+    async start(controller) {
+      let closed = false;
+      const startTime = Date.now();
 
-      const onEvent = (payload) => {
-        controller.enqueue(sseLine(payload.type, payload));
+      const safeEnqueue = (chunk) => {
+        if (closed) return;
+        try {
+          controller.enqueue(chunk);
+        } catch {
+          // stream already closed on the client side
+        }
       };
-      eventBus.on(ADMIN_CHANNEL, onEvent);
 
-      const heartbeat = setInterval(() => {
-        controller.enqueue(encoder.encode(": ping\n\n"));
-      }, 25000);
+      safeEnqueue(sseLine("connected", {}));
 
-      request.signal.addEventListener("abort", () => {
-        eventBus.off(ADMIN_CHANNEL, onEvent);
-        clearInterval(heartbeat);
+      let heartbeatTimer;
+      let pollTimer;
+
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeatTimer);
+        clearInterval(pollTimer);
         try {
           controller.close();
         } catch {
           // already closed
         }
-      });
+      };
+
+      request.signal.addEventListener("abort", cleanup);
+
+      heartbeatTimer = setInterval(() => {
+        safeEnqueue(encoder.encode(": ping\n\n"));
+      }, HEARTBEAT_MS);
+
+      pollTimer = setInterval(async () => {
+        if (closed) return;
+        if (Date.now() - startTime > STREAM_MAX_MS) {
+          cleanup();
+          return;
+        }
+        try {
+          const events = await readEventsSince(ADMIN_CHANNEL, afterId);
+          for (const ev of events) {
+            afterId = ev._id;
+            safeEnqueue(sseLine(ev.type, ev.payload, ev._id.toString()));
+          }
+        } catch (err) {
+          // A transient DB read hiccup must not tear down the whole
+          // stream — the next poll tick tries again. Never leaks any
+          // internal detail to the client (nothing is sent here at all).
+          console.error("admin SSE poll failed", err);
+        }
+      }, POLL_INTERVAL_MS);
     },
   });
 

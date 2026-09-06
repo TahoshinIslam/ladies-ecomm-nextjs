@@ -189,9 +189,27 @@ export default function DataTable({
                   <tr
                     key={id}
                     onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    // Phase 10 — onRowClick previously had no keyboard
+                    // equivalent (no tabIndex/role/onKeyDown), so a row
+                    // click handler was mouse-only. Currently unused by
+                    // any admin page (no caller passes onRowClick), but
+                    // fixed at the shared-component level so any future
+                    // adopter gets keyboard operability for free.
+                    tabIndex={onRowClick ? 0 : undefined}
+                    role={onRowClick ? "button" : undefined}
+                    onKeyDown={
+                      onRowClick
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onRowClick(row);
+                            }
+                          }
+                        : undefined
+                    }
                     className={cn(
                       "transition-colors hover:bg-muted/30",
-                      onRowClick && "cursor-pointer",
+                      onRowClick && "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent",
                       selected.has(id) && "bg-accent/5",
                     )}
                   >

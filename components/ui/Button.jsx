@@ -13,9 +13,9 @@ import { cn } from "../../lib/utils.js";
  */
 const variants = {
   primary:
-    "bg-ink text-canvas hover:bg-verm hover:text-white",
+    "bg-ink text-canvas hover:bg-verm-contrast hover:text-white",
   accent:
-    "bg-verm text-white hover:bg-ink hover:text-canvas",
+    "bg-verm-contrast text-white hover:bg-ink hover:text-canvas",
   outline:
     "border border-ink bg-transparent text-ink hover:bg-ink hover:text-canvas",
   subtle:

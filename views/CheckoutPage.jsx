@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -15,7 +16,6 @@ import {
   ShoppingBag,
   Check,
   Loader2,
-  Smartphone,
   Banknote,
   AlertCircle,
 } from "lucide-react";
@@ -35,9 +35,6 @@ import {
   useValidateCouponMutation,
   useCreateOrderMutation,
   usePreviewOrderMutation,
-  useStripeCheckoutMutation,
-  useBkashCreateMutation,
-  useNagadCreateMutation,
   useCodCreateMutation,
 } from "../store/shopApi.js";
 import { selectCurrentUser } from "../store/authSlice.js";
@@ -46,6 +43,19 @@ import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
 import { downloadReceipt } from "../lib/receipt.js";
 import { useSettings } from "../context/SettingsContext.jsx";
 import { useLocale } from "../context/LocaleProvider.jsx";
+import {
+  computeCheckoutFingerprint,
+  resolveCheckoutIntent,
+  markOrderCreated,
+  clearStoredIntent,
+  readStoredIntent,
+  getBrowserSessionStorage,
+  createSubmitLock,
+} from "../lib/checkoutIntent.js";
+// A genuinely shared enum (not the full server address schema — this
+// form's field-level messages stay its own) — see
+// schemas/addressSchemas.js's ADDRESS_LABELS.
+import { ADDRESS_LABELS } from "../schemas/addressSchemas.js";
 
 const addressSchema = z.object({
   fullName: z.string().min(2, "Required"),
@@ -55,15 +65,12 @@ const addressSchema = z.object({
   state: z.string().optional(),
   postalCode: z.string().min(2, "Required"),
   country: z.string().min(2, "Required"),
-  label: z.enum(["home", "work", "other"]).default("home"),
+  label: z.enum(ADDRESS_LABELS).default("home"),
 });
 
-// Stripe / bKash / Nagad are temporarily disabled until the gateway
-// integrations are reworked. Only Cash on Delivery is offered at launch.
+// COD-only at launch — see services/paymentService.js for the enforced
+// server-side contract this UI reflects.
 const PAYMENT_METHODS = [
-  // { id: "stripe", labelKey: "...", descKey: "...", icon: CreditCard },
-  // { id: "bkash", labelKey: "...", descKey: "...", icon: Smartphone },
-  // { id: "nagad", labelKey: "...", descKey: "...", icon: Smartphone },
   { id: "cod", labelKey: "checkout.cashOnDelivery", descKey: "checkout.cashOnDeliveryDesc", icon: Banknote },
 ];
 
@@ -80,9 +87,6 @@ export default function CheckoutPage() {
   const [validateCoupon] = useValidateCouponMutation();
   const [createOrder, { isLoading: placing }] = useCreateOrderMutation();
   const [previewOrder] = usePreviewOrderMutation();
-  const [stripeCheckout] = useStripeCheckoutMutation();
-  const [bkashCreate] = useBkashCreateMutation();
-  const [nagadCreate] = useNagadCreateMutation();
   const [codCreate] = useCodCreateMutation();
 
   const [selectedAddressId, setSelectedAddressId] = useState(null);
@@ -95,24 +99,77 @@ export default function CheckoutPage() {
   const [serverTotals, setServerTotals] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  const items = cartItems ?? [];
+  // Memoized so `items` has a stable reference across renders when
+  // cartItems is undefined/null — `cartItems ?? []` would otherwise create
+  // a brand-new array every render, invalidating every effect/memo below
+  // that depends on `items` for no real reason.
+  const items = useMemo(() => cartItems ?? [], [cartItems]);
 
+  // Defense in depth only — server-side idempotency (the Idempotency-Key
+  // header + database unique index, and paymentModel's unique `order`
+  // index for COD) is what's actually authoritative. `submitLockRef` is a
+  // REF, not state — checked and set synchronously at the very top of
+  // handlePlaceOrder, before any `await` and before React has had a chance
+  // to re-render — so two clicks fired in the same event turn (before
+  // `submitting` state has actually committed) still can't both proceed.
+  // `submitting` state exists only to drive the button's own disabled/
+  // loading UI, which needs a rendered value, not a ref.
+  const submitLockRef = useRef(null);
+  if (submitLockRef.current === null) submitLockRef.current = createSubmitLock();
+  const [submitting, setSubmitting] = useState(false);
+
+  // Set once on mount/user-change purely so the "Place Order" button isn't
+  // stuck disabled by an empty cart when there's actually a pending order
+  // waiting on COD to be resumed (e.g. after a reload mid-checkout, once
+  // the order's own creation already cleared the server cart). This is
+  // display-only — handlePlaceOrder resolves the authoritative intent
+  // itself, synchronously, every time it runs; this state never gates
+  // correctness, only whether the button LOOKS clickable.
+  const [resumableOrderId, setResumableOrderId] = useState(null);
   useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (!user) {
+        setResumableOrderId(null);
+        return;
+      }
+      const stored = readStoredIntent(getBrowserSessionStorage(), user._id);
+      setResumableOrderId(stored?.orderId || null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Both of the following are computed during render (React's documented
+  // "adjust state when a prop changes" pattern — same idiom AdminLayout.jsx
+  // already uses for its own pathname-driven reset) rather than in a
+  // useEffect, so neither causes an extra synchronous-setState render pass.
+  // Each only reacts when its own tracked dependency actually changes,
+  // matching the dependency arrays the original effects used.
+  const [lastAddrData, setLastAddrData] = useState(addrData);
+  if (lastAddrData !== addrData) {
+    setLastAddrData(addrData);
     if (!selectedAddressId && addrData?.addresses?.length) {
       const def = addrData.addresses.find((a) => a.isDefault) || addrData.addresses[0];
       setSelectedAddressId(def._id);
     }
-  }, [addrData, selectedAddressId]);
+  }
 
   // Newly-registered users land here from /login?redirect=/checkout with no
   // saved addresses yet — auto-open the new-address form so they immediately
-  // see the next step instead of a disabled Place Order button.
-  useEffect(() => {
+  // see the next step instead of a disabled Place Order button. Tracked on
+  // [user, addrData] only (like the original effect's deps) — deliberately
+  // not re-triggered just because `addingAddress` itself changes, so
+  // closing the form doesn't immediately reopen it.
+  const [lastAutoOpenDeps, setLastAutoOpenDeps] = useState([user, addrData]);
+  if (lastAutoOpenDeps[0] !== user || lastAutoOpenDeps[1] !== addrData) {
+    setLastAutoOpenDeps([user, addrData]);
     if (user && addrData && addrData.addresses?.length === 0 && !addingAddress) {
       setAddingAddress(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, addrData]);
+  }
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(addressSchema),
@@ -129,16 +186,48 @@ export default function CheckoutPage() {
     [addrData, selectedAddressId],
   );
 
+  // Phase 4B: a pure fingerprint of "what this order would actually be" —
+  // no I/O, safe to compute during render. The decision of whether this
+  // means reusing or minting an Idempotency-Key happens synchronously
+  // inside handlePlaceOrder itself (lib/checkoutIntent.js's
+  // resolveCheckoutIntent), NOT here — correctness must not depend on an
+  // effect having already run before the first click.
+  const checkoutFingerprint = useMemo(
+    () =>
+      computeCheckoutFingerprint({
+        items,
+        shippingAddress: selectedAddress,
+        couponCode: appliedCoupon?.coupon?.code,
+        notes,
+      }),
+    [items, selectedAddress, appliedCoupon, notes],
+  );
+
   // Server-side preview, debounced to avoid hammering on every keystroke.
   // Skipped for guests — preview requires an authenticated session.
+  //
+  // The "not eligible" reset is derived during render (same pattern as
+  // above) rather than as a synchronous setState at the top of the effect
+  // — the effect itself is left to do only what effects are for: the real
+  // side effect (the debounced network call) when eligible.
+  const previewEligible = !!(user && items.length && selectedAddress?.country);
+  const [wasPreviewEligible, setWasPreviewEligible] = useState(previewEligible);
+  if (wasPreviewEligible !== previewEligible) {
+    setWasPreviewEligible(previewEligible);
+    if (!previewEligible) setServerTotals(null);
+  }
+
   useEffect(() => {
-    if (!user || !items.length || !selectedAddress?.country) {
-      setServerTotals(null);
-      return;
-    }
+    if (!previewEligible) return;
 
     let cancelled = false;
-    setPreviewLoading(true);
+    // Deferred a microtask so this isn't a synchronous setState directly in
+    // the effect body — fires before the next paint, so the loading
+    // indicator still appears effectively immediately, matching the
+    // original timing.
+    queueMicrotask(() => {
+      if (!cancelled) setPreviewLoading(true);
+    });
 
     const timer = setTimeout(async () => {
       try {
@@ -171,7 +260,7 @@ export default function CheckoutPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [user, items, selectedAddress, appliedCoupon, previewOrder]);
+  }, [previewEligible, user, items, selectedAddress, appliedCoupon, previewOrder]);
 
   // Local fallback math used only before first preview response arrives —
   // always computed in Taka (this storefront is BDT-only; the shipping
@@ -255,68 +344,105 @@ export default function CheckoutPage() {
       router.push("/login?redirect=/checkout");
       return;
     }
-    if (!selectedAddressId) {
-      toast.error(t("checkout.selectShippingAddress"));
-      return;
-    }
-    if (items.length === 0) {
-      toast.error(t("checkout.cartEmptyError"));
-      return;
-    }
-    const address = addrData.addresses.find((a) => a._id === selectedAddressId);
-    if (!address) {
-      toast.error(t("checkout.invalidAddress"));
-      return;
-    }
 
+    // Synchronous lock, checked and set BEFORE any state read/await — two
+    // clicks fired in the same event turn (before React has re-rendered
+    // with `submitting: true`) still can't both pass this. Released in the
+    // `finally` below on every path (validation failure or a completed
+    // attempt), never left acquired.
+    if (!submitLockRef.current.tryAcquire()) return;
+
+    setSubmitting(true);
     try {
-      const orderRes = await createOrder({
-        items: items.map((i) => ({
-          productId: i.productId,
-          variantId: i.variantId,
-          quantity: i.quantity,
-        })),
-        shippingAddress: {
-          fullName: address.fullName,
-          phone: address.phone,
-          street: address.street,
-          city: address.city,
-          state: address.state || "",
-          postalCode: address.postalCode,
-          country: address.country,
-        },
-        couponCode: appliedCoupon?.coupon?.code,
-        notes,
-      }).unwrap();
+      // Resolve (reuse or mint) the checkout intent synchronously, right
+      // here in the click handler — never inside a useEffect. If a PRIOR
+      // attempt already got as far as creating the Order but never
+      // finished COD (network failure, an ambiguous 5xx, or the page was
+      // reloaded), `intent.orderId` will already be set and this resumes
+      // that exact order instead of building a new intent/key.
+      const storage = getBrowserSessionStorage();
+      const intent = resolveCheckoutIntent({
+        storage,
+        userId: user._id,
+        fingerprint: checkoutFingerprint,
+      });
 
-      const orderId = orderRes.order._id;
+      let address = null;
+      if (!intent?.orderId) {
+        // Only validate address/cart when we're actually about to CREATE a
+        // new order — resuming COD for an already-created order doesn't
+        // need either (the order already has its own snapshot of both).
+        if (!selectedAddressId) {
+          toast.error(t("checkout.selectShippingAddress"));
+          return;
+        }
+        if (items.length === 0) {
+          toast.error(t("checkout.cartEmptyError"));
+          return;
+        }
+        address = addrData.addresses.find((a) => a._id === selectedAddressId);
+        if (!address) {
+          toast.error(t("checkout.invalidAddress"));
+          return;
+        }
+      }
+      if (!intent) {
+        // No resumable order AND no fingerprint yet (e.g. address just
+        // hasn't resolved this render) — nothing to submit.
+        toast.error(t("checkout.placeOrderFailed"));
+        return;
+      }
 
-      // Stripe / bKash / Nagad disabled until gateways are reworked.
-      // if (paymentMethod === "stripe") {
-      //   const res = await stripeCheckout(orderId).unwrap();
-      //   window.location.href = res.url;
-      //   return;
-      // }
-      // if (paymentMethod === "bkash") {
-      //   const res = await bkashCreate(orderId).unwrap();
-      //   window.location.href = res.url;
-      //   return;
-      // }
-      // if (paymentMethod === "nagad") {
-      //   toast.success("Order placed. Continue Nagad payment.");
-      //   downloadReceipt(orderRes.order);
-      //   router.push(`/orders/${orderId}`);
-      //   return;
-      // }
+      let orderId = intent.orderId;
+      let createdOrder = null;
+
+      if (!orderId) {
+        const orderRes = await createOrder({
+          idempotencyKey: intent.idempotencyKey,
+          items: items.map((i) => ({
+            productId: i.productId,
+            variantId: i.variantId,
+            quantity: i.quantity,
+          })),
+          shippingAddress: {
+            fullName: address.fullName,
+            phone: address.phone,
+            street: address.street,
+            city: address.city,
+            state: address.state || "",
+            postalCode: address.postalCode,
+            country: address.country,
+          },
+          couponCode: appliedCoupon?.coupon?.code,
+          notes,
+        }).unwrap();
+
+        orderId = orderRes.order._id;
+        createdOrder = orderRes.order;
+        // Persisted BEFORE the COD call below — if COD now fails, the
+        // order is never re-created on retry, only resumed.
+        markOrderCreated(storage, intent, orderId);
+        setResumableOrderId(orderId);
+      }
+
       if (paymentMethod === "cod") {
         await codCreate(orderId).unwrap();
+        // COD's own natural idempotency (orderId, backstopped by
+        // paymentModel's unique `order` index) means this call is itself
+        // safe to resend — only clear the intent once it has actually
+        // succeeded.
+        clearStoredIntent(storage, user._id);
+        setResumableOrderId(null);
         toast.success(t("checkout.orderPlacedCod"));
-        downloadReceipt(orderRes.order, locale);
+        if (createdOrder) downloadReceipt(createdOrder, locale);
         router.push(`/order-success/${orderId}`);
         return;
       }
     } catch (e) {
       toast.error(e?.data?.message || t("checkout.placeOrderFailed"));
+    } finally {
+      submitLockRef.current.release();
+      setSubmitting(false);
     }
   };
 
@@ -533,12 +659,13 @@ export default function CheckoutPage() {
                       <div className="relative h-14 w-14 flex-none overflow-hidden rounded-md bg-media">
                         <div aria-hidden="true" className="absolute inset-0 hatch" />
                         {(it.variant?.image || p.images?.[0]) && (
-                          <img
+                          <Image
                             src={resolveImage(it.variant?.image || p.images[0], 112)}
                             alt={p.name}
+                            fill
+                            sizes="56px"
                             loading="lazy"
-                            decoding="async"
-                            className="relative h-full w-full object-cover"
+                            className="object-cover"
                           />
                         )}
                       </div>
@@ -619,8 +746,17 @@ export default function CheckoutPage() {
             )}
             <Button
               onClick={handlePlaceOrder}
-              loading={placing}
-              disabled={items.length === 0 || (!!user && (!selectedAddressId || previewLoading))}
+              loading={placing || submitting}
+              disabled={
+                // A pending order already waiting on COD (resumableOrderId)
+                // bypasses the empty-cart/no-address checks below — those
+                // describe "not ready to CREATE an order", not "nothing to
+                // resume". handlePlaceOrder re-derives this itself; this is
+                // only the button's own display gate.
+                (!resumableOrderId &&
+                  (items.length === 0 || (!!user && (!selectedAddressId || previewLoading)))) ||
+                submitting
+              }
               size="lg"
               className="mt-5 w-full"
             >

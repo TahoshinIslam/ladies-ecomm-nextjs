@@ -85,6 +85,10 @@ export const productApi = apiSlice.injectEndpoints({
 
 export const {
   useGetProductsQuery,
+  // "Show more" pagination on the (Server Component-rendered) shop page —
+  // an imperative trigger for fetching additional pages beyond the
+  // server-rendered first page, not for the page's own initial data.
+  useLazyGetProductsQuery,
   useGetFeaturedProductsQuery,
   useGetProductGroupingsQuery,
   useGetProductQuery,

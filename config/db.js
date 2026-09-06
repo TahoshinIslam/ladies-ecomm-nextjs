@@ -7,9 +7,10 @@ import mongoose from "mongoose";
 // a plain module-level variable would not.
 const cache = (globalThis.__mongooseCache ??= { conn: null, promise: null });
 
-// No pino/logger dependency here on purpose — utlis/logger.js requires the
-// `pino`/`pino-pretty` packages, neither of which is installed (see Phase 1
-// notes). Plain console output is enough for connection status.
+// No pino/logger dependency here on purpose — `pino`/`pino-pretty` were
+// never installed packages (the old, unreferenced utlis/logger.js that
+// wanted them was confirmed dead and removed in Phase 6). Plain console
+// output is enough for connection status.
 //
 // Does NOT call process.exit() on failure — this runs inside a live Next.js
 // server process handling other requests; killing the whole process because
@@ -21,12 +22,85 @@ const connectDB = async () => {
 
   if (!cache.promise) {
     mongoose.set("strictQuery", true);
-    const uri = process.env.NODE_ENV === "test" ? process.env.MONGO_URI_TEST : process.env.MONGO_URI;
+
+    // Phase 1 HTTP-integration test harness only (scripts/httpTestServer.mjs):
+    // a running `next start`/`next dev` process forces its own NODE_ENV
+    // ("production"/"development"), so the NODE_ENV==="test" branch below
+    // can never select MONGO_URI_TEST for a real Next.js server process —
+    // this is a second, independent path for that one case. It requires
+    // BOTH of two unusual, non-NODE_ENV-derived flags to be set together
+    // (never true by accident, and never set by anything other than the
+    // test harness itself), so it cannot silently activate in a real
+    // deployment the way trusting NODE_ENV alone could.
+    const useTestServerOverride =
+      process.env.ALLOW_TEST_DB_OVERRIDE === "true" && !!process.env.TEST_SERVER_MONGO_URI;
+
+    const uri = useTestServerOverride
+      ? process.env.TEST_SERVER_MONGO_URI
+      : process.env.NODE_ENV === "test"
+        ? process.env.MONGO_URI_TEST
+        : process.env.MONGO_URI;
     if (!uri) {
-      throw new Error(`${process.env.NODE_ENV === "test" ? "MONGO_URI_TEST" : "MONGO_URI"} is not set`);
+      const missingVar = useTestServerOverride
+        ? "TEST_SERVER_MONGO_URI"
+        : process.env.NODE_ENV === "test"
+          ? "MONGO_URI_TEST"
+          : "MONGO_URI";
+      throw new Error(`${missingVar} is not set`);
     }
-    cache.promise = mongoose.connect(uri).then((m) => {
-      console.log(`MongoDB connected: ${m.connection.host}`);
+    // Phase 11, section H — explicit pool/timeout settings for a Vercel
+    // Fluid Compute deployment. Fluid Compute REUSES a warm function
+    // instance across concurrent requests (not one-request-per-instance),
+    // so each warm instance keeps its own cached connection+pool
+    // (globalThis.__mongooseCache above) for its lifetime — the pool size
+    // needs to absorb one instance's own concurrent in-flight requests,
+    // not the whole app's total traffic (many instances each hold their
+    // own pool in parallel).
+    //   - maxPoolSize: 20 — conservative default. Formula: (Atlas
+    //     connection-limit tier) / (expected concurrent warm instances)
+    //     with headroom for admin/monitoring connections; 20 is a safe
+    //     starting point for a low/medium free-tier-adjacent Atlas
+    //     cluster (typically 500 connection limit) even at a few hundred
+    //     concurrent warm instances, while leaving enough headroom for
+    //     one instance to hold several concurrently-open SSE streams
+    //     (each polling the durable event outbox roughly once per
+    //     second — see lib/events.js) at the same time as ordinary
+    //     request traffic without those polls queuing behind each
+    //     other for a free connection. (Empirically: this repo's own
+    //     local single-process HTTP-integration harness, which routes
+    //     every test file's traffic through ONE shared pool, showed rare
+    //     intermittent cache-invalidation-timing test flakiness at
+    //     maxPoolSize 10 under its own concurrent load/SSE tests, and
+    //     none across repeated runs at 20 — a real, if narrow and
+    //     local-harness-specific, signal that 10 cuts it close for even
+    //     modest concurrent DB-bound work on one instance.) Raise
+    //     further only with real Atlas connection-count evidence
+    //     (Atlas's own connection metrics), never speculatively.
+    //   - minPoolSize: 0 (the driver default) — a Fluid Compute instance
+    //     that goes cold should not hold idle connections open against
+    //     Atlas's connection limit; there's no justification here for
+    //     paying that cost to save a small reconnect latency on the next
+    //     cold start.
+    //   - serverSelectionTimeoutMS/connectTimeoutMS: bounded so a
+    //     genuinely unreachable/misconfigured database fails a request
+    //     within a few seconds instead of hanging until the platform's
+    //     own function-duration limit kills it.
+    cache.promise = mongoose
+      .connect(uri, {
+        maxPoolSize: 20,
+        minPoolSize: 0,
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+      })
+      .then((m) => {
+      // Database NAME is not sensitive (it's not a credential — knowing
+      // "which database" a running instance is talking to is exactly the
+      // kind of thing operators legitimately need from logs) and is
+      // genuinely useful: this exact detail was missing during Phase 11's
+      // live-verification work, where an ambiguous/duplicate env var made
+      // it impossible to confirm from the outside which database a
+      // deployment had actually connected to without this.
+      console.log(`MongoDB connected: ${m.connection.host}/${m.connection.name}`);
       return m;
     });
   }

@@ -1,26 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useSelector } from "react-redux";
+import { Children, cloneElement, useCallback, useEffect, useId, useRef, useState } from "react";
+import Image from "next/image";
 import { toast } from "sonner";
 import { Save, Plus, Trash2, Gift, Image as ImageIcon, Upload, X } from "lucide-react";
 import { useSettings } from "../../context/SettingsContext.jsx";
-import { selectAuthToken } from "../../store/authSlice.js";
+import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
+import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
   : "/api";
 
-// Auth is Bearer-token only — the JWT lives in the auth slice and must be
-// sent on every admin request (see backend utils/generateToken.js). CSRF was
-// removed backend-side (app.js) once there were no auth cookies to protect.
-const authHeaders = (token) =>
-  token ? { Authorization: `Bearer ${token}` } : {};
+// Phase 2: auth is the HttpOnly session cookie, sent automatically by
+// `credentials: "include"` below — nothing to attach by hand anymore. The
+// CSRF cookie is deliberately NOT HttpOnly (see lib/cookies.js), so it can
+// be read here and echoed back as a header on unsafe (PUT/POST) requests —
+// same pattern store/apiSlice.js uses for the rest of the app.
+const csrfHeaders = () => {
+  if (typeof document === "undefined") return {};
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE_NAME}=([^;]*)`));
+  const token = match ? decodeURIComponent(match[1]) : null;
+  return token ? { "X-CSRF-Token": token } : {};
+};
 
 // Upload a single image file via the existing /api/upload endpoint and
 // return the resulting Cloudinary URL. We POST FormData so multer sees it —
 // no Content-Type header, the browser sets the multipart boundary itself.
-const uploadImage = async (file, token, folder = "branding") => {
+const uploadImage = async (file, folder = "branding") => {
   const fd = new FormData();
   fd.append("image", file);
   const res = await fetch(
@@ -28,7 +35,7 @@ const uploadImage = async (file, token, folder = "branding") => {
     {
       method: "POST",
       credentials: "include",
-      headers: { ...authHeaders(token) },
+      headers: { ...csrfHeaders() },
       body: fd,
     },
   );
@@ -49,13 +56,25 @@ const Section = ({ title, children, action }) => (
   </div>
 );
 
-const Field = ({ label, children, help }) => (
-  <div className="mb-4">
-    <label className="block text-sm font-medium mb-1">{label}</label>
-    {children}
-    {help && <p className="text-xs text-muted-foreground mt-1">{help}</p>}
-  </div>
-);
+// Phase 10 — the label previously had no `htmlFor`, and its single
+// control child (Input/Select/etc. below) had no `id` — visually
+// adjacent but programmatically unassociated. Every call site renders
+// exactly one control as `children`, so cloning it to inject a
+// useId()-generated `id` (only when the child doesn't already carry its
+// own) links label and control everywhere Field is used, with zero
+// changes needed at each of this file's ~20+ call sites.
+const Field = ({ label, children, help }) => {
+  const generatedId = useId();
+  const child = Children.only(children);
+  const controlId = child.props?.id || generatedId;
+  return (
+    <div className="mb-4">
+      <label htmlFor={controlId} className="block text-sm font-medium mb-1">{label}</label>
+      {cloneElement(child, { id: controlId })}
+      {help && <p className="text-xs text-muted-foreground mt-1">{help}</p>}
+    </div>
+  );
+};
 
 const Input = (props) => (
   <input
@@ -91,7 +110,7 @@ const Toggle = ({ checked, onChange, label, help }) => (
  * admin paste a URL OR upload a file. The "uploading" state is local so
  * each picker spins independently when fired in parallel.
  */
-const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }) => {
+const ImagePicker = ({ value, onChange, label, help, accept = "image/*" }) => {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
 
@@ -100,7 +119,7 @@ const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }
     if (!file) return;
     setUploading(true);
     try {
-      const url = await uploadImage(file, token, "branding");
+      const url = await uploadImage(file, "branding");
       onChange(url);
       toast.success(`${label} uploaded`);
     } catch (err) {
@@ -115,13 +134,26 @@ const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }
   return (
     <Field label={label} help={help}>
       <div className="flex items-start gap-3">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
-          {value ? (
-            <img
+        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
+          {value && isApprovedImageSource(value) ? (
+            <Image
               src={value}
               alt={label}
-              className="h-full w-full object-contain"
+              fill
+              sizes="64px"
+              className="object-contain"
             />
+          ) : value ? (
+            // `value` is a free-text branding URL (see the text input
+            // right below — placeholder "https://… (or upload)") that an
+            // admin can paste directly, not only a Cloudinary URL from
+            // the upload button. An unapproved host isn't just ineligible
+            // for next/image — proxy.js's production CSP `img-src`
+            // ('self' https://res.cloudinary.com data: blob:) already
+            // blocks the browser from ever loading it directly, so a raw
+            // <img> here would silently fail in production anyway. The
+            // icon fallback below is what actually renders for that case.
+            <ImageIcon className="h-6 w-6 text-muted-foreground" />
           ) : (
             <ImageIcon className="h-6 w-6 text-muted-foreground" />
           )}
@@ -167,7 +199,6 @@ const ImagePicker = ({ value, onChange, label, help, token, accept = "image/*" }
 };
 
 export default function SettingsPage() {
-  const token = useSelector(selectAuthToken);
   const [settings, setSettings] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -178,7 +209,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`${baseUrl}/settings`, {
         credentials: "include",
-        headers: { Accept: "application/json", ...authHeaders(token) },
+        headers: { Accept: "application/json" },
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d.success) {
@@ -190,10 +221,18 @@ export default function SettingsPage() {
       setLoadError(msg);
       toast.error(msg);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
-    loadSettings();
+    // loadSettings() is also wired directly to the retry button's onClick
+    // (a real event handler, where a synchronous setState is fine) — its
+    // first line resets `loadError`. Deferred with setTimeout(...,0) here,
+    // matching the same pattern already used in CheckoutPage.jsx's debounced
+    // preview effect, so the reset isn't a synchronous setState directly in
+    // this effect's body. loadSettings itself is untouched, so the retry
+    // button's behavior is unaffected.
+    const timer = setTimeout(() => loadSettings(), 0);
+    return () => clearTimeout(timer);
   }, [loadSettings]);
 
   if (!settings) {
@@ -279,7 +318,7 @@ export default function SettingsPage() {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...authHeaders(token),
+          ...csrfHeaders(),
         },
         body: JSON.stringify({
           store: settings.store,
@@ -353,21 +392,18 @@ export default function SettingsPage() {
           help="Shown in the site header. Recommended ~200×60px PNG/SVG."
           value={settings.store.logoUrl}
           onChange={(v) => update("store.logoUrl", v)}
-          token={token}
         />
         <ImagePicker
           label="Logo (dark mode)"
           help="Optional. Used when the site is in dark mode. Falls back to the regular logo if blank."
           value={settings.store.logoDarkUrl}
           onChange={(v) => update("store.logoDarkUrl", v)}
-          token={token}
         />
         <ImagePicker
           label="Favicon"
           help="Shown in browser tabs and bookmarks. Recommended 32×32 or 64×64 PNG/ICO."
           value={settings.store.faviconUrl}
           onChange={(v) => update("store.faviconUrl", v)}
-          token={token}
           accept="image/png,image/x-icon,image/svg+xml,image/jpeg,image/webp"
         />
       </Section>

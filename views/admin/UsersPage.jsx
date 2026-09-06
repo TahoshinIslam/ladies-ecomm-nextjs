@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useSelector } from "react-redux";
 import {
   Users,
@@ -29,6 +30,7 @@ import {
 } from "../../store/userApi.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { formatDate } from "../../lib/utils.js";
+import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 import { PERMISSIONS } from "../../lib/permissions.js";
 
@@ -181,11 +183,18 @@ export default function AdminUsersPage() {
         const isSelf = u._id === me?._id;
         return (
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-bold">
-              {u.avatar ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={u.avatar} alt="" className="h-full w-full object-cover" />
+            <div className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-sm font-bold">
+              {u.avatar && isApprovedImageSource(u.avatar) ? (
+                <Image src={u.avatar} alt="" fill sizes="36px" className="object-cover" />
               ) : (
+                // A user's own profile `avatar` field is set directly from
+                // their profile-update request body (services/
+                // userService.js) — an arbitrary URL of unknown origin.
+                // proxy.js's production CSP img-src already blocks the
+                // browser from loading any host other than
+                // res.cloudinary.com directly, so an unapproved avatar URL
+                // was never actually going to render — the initials
+                // fallback below is what real users on that data see.
                 u.name?.[0]?.toUpperCase()
               )}
             </div>

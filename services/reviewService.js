@@ -2,7 +2,8 @@ import Review from "../models/reviewModel.js";
 import Order from "../models/orderModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
-import { emitAdminEvent } from "../lib/events.js";
+import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 export async function getProductReviews(productId, { page = 1, limit = 10 } = {}) {
   const skip = (Number(page) - 1) * Number(limit);
@@ -20,6 +21,7 @@ export async function getProductReviews(productId, { page = 1, limit = 10 } = {}
 }
 
 export async function createReview(userId, productId, { rating, title, comment, images = [] }) {
+  requireObjectIdFormat(productId, "productId");
   // Hard block: must have a delivered order containing this product.
   const hasDelivered = await Order.exists({
     user: userId,
@@ -49,12 +51,17 @@ export async function createReview(userId, productId, { rating, title, comment, 
     message: `New ${review.rating}★ review received`,
     url: "/admin/reviews",
   }).catch(() => {});
-  emitAdminEvent({ type: "NEW_NOTIFICATION", message: `New ${review.rating}★ review received`, url: "/admin/reviews" });
+  // Non-transactional (a plain single-document create) — awaited so a
+  // failure is observed/logged before returning, but never fails the
+  // already-succeeded review submission. See lib/events.js's
+  // emitBestEffort() for the documented policy.
+  await emitBestEffort(emitAdminEvent({ type: "NEW_NOTIFICATION", message: `New ${review.rating}★ review received`, url: "/admin/reviews" }));
 
   return review;
 }
 
 export async function updateReview(reviewId, actingUser, { rating, title, comment, images }) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 
@@ -70,16 +77,23 @@ export async function updateReview(reviewId, actingUser, { rating, title, commen
 }
 
 export async function deleteReview(reviewId, actingUser) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 
   if (review.user.toString() !== actingUser._id.toString() && actingUser.role !== "admin") {
     throw new HttpError(403, "Not authorized");
   }
+  const productId = review.product.toString();
   await review.deleteOne();
+  // Callers that only cared about "did this succeed" (the pre-Phase-8
+  // behavior) can keep ignoring this — it's new, additive information,
+  // not a changed contract for anyone already awaiting this call.
+  return { productId };
 }
 
 export async function markHelpful(reviewId) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findByIdAndUpdate(reviewId, { $inc: { helpfulCount: 1 } }, { new: true });
   if (!review) throw new HttpError(404, "Review not found");
   return review.helpfulCount;
@@ -117,6 +131,7 @@ export async function listAllReviews({ page = 1, limit = 20, rating, productId, 
 }
 
 export async function replyToReview(reviewId, adminUserId, text) {
+  requireObjectIdFormat(reviewId, "reviewId");
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 

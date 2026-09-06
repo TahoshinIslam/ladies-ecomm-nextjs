@@ -1,13 +1,14 @@
 "use client";
 
 import { useDispatch, useSelector } from "react-redux";
+import Image from "next/image";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ArrowRight, Scale } from "lucide-react";
 
 import { useGetCompareProductsQuery } from "../../store/productApi.js";
 import { removeFromCompare, clearCompare } from "../../store/uiSlice.js";
-import { cn } from "../../lib/utils.js";
+import { cn, resolveImage } from "../../lib/utils.js";
 
 export default function CompareTray() {
   const compareList = useSelector((s) => s.ui.compareList);
@@ -53,10 +54,12 @@ export default function CompareTray() {
                     className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md border border-border bg-muted"
                   >
                     {p?.images?.[0] ? (
-                      <img
-                        src={p.images[0]}
+                      <Image
+                        src={resolveImage(p.images[0], 112)}
                         alt={p.name}
-                        className="h-full w-full object-cover"
+                        fill
+                        sizes="56px"
+                        className="object-cover"
                       />
                     ) : (
                       <div className="h-full w-full animate-pulse bg-muted" />

@@ -1,5 +1,6 @@
 import Theme from "../models/themeModel.js";
 import { HttpError } from "../lib/http.js";
+import { requireObjectIdFormat } from "../lib/validation.js";
 
 const PRESETS = [
   { name: "Classic Black", colors: { primary: "#0a0a0a", accent: "#ef4444" } },
@@ -27,6 +28,7 @@ export async function getAllThemes() {
 }
 
 export async function getTheme(id) {
+  requireObjectIdFormat(id, "id");
   const theme = await Theme.findById(id);
   if (!theme) throw new HttpError(404, "Theme not found");
   return theme;
@@ -37,6 +39,7 @@ export async function createTheme(body, adminId) {
 }
 
 export async function updateTheme(id, body, adminId) {
+  requireObjectIdFormat(id, "id");
   const theme = await Theme.findById(id);
   if (!theme) throw new HttpError(404, "Theme not found");
 
@@ -56,6 +59,7 @@ export async function updateTheme(id, body, adminId) {
 }
 
 export async function activateTheme(id, adminId) {
+  requireObjectIdFormat(id, "id");
   const theme = await Theme.findById(id);
   if (!theme) throw new HttpError(404, "Theme not found");
   theme.isActive = true;
@@ -65,6 +69,7 @@ export async function activateTheme(id, adminId) {
 }
 
 export async function deleteTheme(id) {
+  requireObjectIdFormat(id, "id");
   const theme = await Theme.findById(id);
   if (!theme) throw new HttpError(404, "Theme not found");
   if (theme.isActive) throw new HttpError(400, "Cannot delete the active theme. Activate another first.");

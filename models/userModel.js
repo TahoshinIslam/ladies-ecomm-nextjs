@@ -39,13 +39,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Admin-controlled trust flag (see views/admin/UsersPage.jsx) — not
+    // part of a self-service email-verification flow (there isn't one:
+    // no code ever generates a verification token).
     isVerified: {
       type: Boolean,
       default: false,
-    },
-    verificationToken: {
-      type: String,
-      select: false,
     },
     resetPasswordToken: {
       type: String,

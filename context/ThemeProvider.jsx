@@ -9,16 +9,17 @@ import {
   useState,
 } from "react";
 import { Provider as ReduxProvider } from "react-redux";
+import { MotionConfig } from "framer-motion";
 import { Toaster } from "sonner";
 
 import store from "../store/index.js";
 import { useGetActiveThemeQuery } from "../store/themeApi.js";
 import { hydrateUi } from "../store/uiSlice.js";
-import { hydrateAuth } from "../store/authSlice.js";
 import { hydrateGuestCart } from "../store/guestCartSlice.js";
 import { SettingsProvider } from "./SettingsContext.jsx";
 import { LocaleProvider } from "./LocaleProvider.jsx";
 import { storage } from "../lib/utils.js";
+import useAuthBoot from "../hooks/useAuthBoot.js";
 
 /**
  * Light/dark is an attribute on <html>, not a class: the Kinetic Editorial
@@ -119,10 +120,17 @@ function ThemeController({ initialTheme = "light", children }) {
  * Slices that persist to Web Storage start empty so the server's markup and
  * the client's first render agree. This pulls the saved values in immediately
  * after mount, in one pass, before paint.
+ *
+ * Auth is different: there's nothing to read from Web Storage for it
+ * anymore (Phase 2 — the session lives only in an HttpOnly cookie, invisible
+ * to JS), so useAuthBoot() instead asks the server directly via GET
+ * /api/users/me on every mount. This is the one live call site for that
+ * hook in the whole app.
  */
 function StorageHydrator() {
+  useAuthBoot();
+
   useEffect(() => {
-    store.dispatch(hydrateAuth());
     store.dispatch(hydrateUi());
     store.dispatch(hydrateGuestCart());
   }, []);
@@ -136,25 +144,39 @@ function StorageHydrator() {
  */
 export default function AppProviders({ initialTheme = "light", initialLocale, children }) {
   return (
-    <LocaleProvider initialLocale={initialLocale}>
-      <ReduxProvider store={store}>
-        <StorageHydrator />
-        <ThemeController initialTheme={initialTheme}>
-          <SettingsProvider>{children}</SettingsProvider>
-          <Toaster
-            position="bottom-right"
-            toastOptions={{
-              style: {
-                background: "var(--elev)",
-                color: "var(--ink)",
-                border: "1px solid var(--line)",
-                borderRadius: "12px",
-                boxShadow: "var(--shadow-soft)",
-              },
-            }}
-          />
-        </ThemeController>
-      </ReduxProvider>
-    </LocaleProvider>
+    // Phase 10 — `reducedMotion="user"` makes every framer-motion
+    // animation in the app (hero, drawers, modals, product cards, admin
+    // page transitions, ...) automatically respect the OS
+    // prefers-reduced-motion setting: framer-motion swaps translate/scale/
+    // opacity transitions down to near-instant for any user who has it
+    // enabled, without each of the ~15 components that call `motion.*`
+    // needing its own `useReducedMotion()` check (previously only
+    // components/admin/AdminLayout.jsx had one). The CSS
+    // `@media (prefers-reduced-motion: reduce)` block in globals.css
+    // still separately covers plain CSS transitions/animations (not
+    // framer-motion's own JS-driven ones) — the two are complementary,
+    // not redundant.
+    <MotionConfig reducedMotion="user">
+      <LocaleProvider initialLocale={initialLocale}>
+        <ReduxProvider store={store}>
+          <StorageHydrator />
+          <ThemeController initialTheme={initialTheme}>
+            <SettingsProvider>{children}</SettingsProvider>
+            <Toaster
+              position="bottom-right"
+              toastOptions={{
+                style: {
+                  background: "var(--elev)",
+                  color: "var(--ink)",
+                  border: "1px solid var(--line)",
+                  borderRadius: "12px",
+                  boxShadow: "var(--shadow-soft)",
+                },
+              }}
+            />
+          </ThemeController>
+        </ReduxProvider>
+      </LocaleProvider>
+    </MotionConfig>
   );
 }
