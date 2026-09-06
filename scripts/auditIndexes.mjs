@@ -1,10 +1,7 @@
 // Phase 11, section H — a safe, idempotent, generalized index-audit/ensure
-// script covering every production-critical index in this app: sessions
-// (models/sessionModel.js), rate limits (models/rateLimitModel.js), order
-// idempotency + status/user lookups (models/orderModel.js), payment
-// uniqueness (models/paymentModel.js), coupon-usage uniqueness
-// (models/couponUsageModel.js), product slug/category/search
-// (models/productModel.js), and reviews (models/reviewModel.js). Every one
+// script. Phase 12 closure extended it from 7 to all 19 active models
+// (models/*.js) — see the MODELS array below, kept in sync with the
+// models directory by tests/auditIndexesCoverage.test.mjs. Every one
 // of these indexes is already declared on its schema (autoIndex: true
 // builds them automatically the first time a normal app process connects
 // and the model is loaded — same as scripts/ensureOrderIdempotencyIndex.mjs
@@ -46,8 +43,46 @@ import Payment from "../models/paymentModel.js";
 import CouponUsage from "../models/couponUsageModel.js";
 import Product from "../models/productModel.js";
 import Review from "../models/reviewModel.js";
+import Address from "../models/addressModel.js";
+import AttributeDefinition from "../models/attributeDefinitionModel.js";
+import Brand from "../models/brandModel.js";
+import Cart from "../models/cartModel.js";
+import Category from "../models/categoryModel.js";
+import Coupon from "../models/couponModel.js";
+import Notification from "../models/notificationModel.js";
+import Event from "../models/eventModel.js";
+import Settings from "../models/settingsModel.js";
+import Theme from "../models/themeModel.js";
+import User from "../models/userModel.js";
+import Wishlist from "../models/wishlistModel.js";
 
-const MODELS = [Session, RateLimit, Order, Payment, CouponUsage, Product, Review];
+// Phase 12 closure — every active Mongoose model in models/*.js, covering
+// all 19 real production collections (previously only 7 were audited by
+// this script; the other 12 were only ever cross-checked once, indirectly,
+// via a Preview backup/restore drill). tests/auditIndexesCoverage.test.mjs
+// enforces that this list stays exactly in sync with models/*.js — a new
+// model file added later without updating this array fails that test.
+const MODELS = [
+  Session,
+  RateLimit,
+  Order,
+  Payment,
+  CouponUsage,
+  Product,
+  Review,
+  Address,
+  AttributeDefinition,
+  Brand,
+  Cart,
+  Category,
+  Coupon,
+  Notification,
+  Event,
+  Settings,
+  Theme,
+  User,
+  Wishlist,
+];
 
 function redact(value) {
   return String(value).replace(/:\/\/[^/@\s]*@/g, "://<redacted>@");
@@ -84,6 +119,24 @@ function keySignature(key) {
   return isTextIndexKey(key) ? "TEXT_INDEX" : JSON.stringify(key);
 }
 
+// A missing UNIQUE index can fail to build if live documents already
+// violate it (duplicate values under the new key). Reported as a bare
+// COUNT of conflicting groups only — never a document, a field value, or
+// which value is duplicated — so an operator knows to investigate before
+// running --ensure, without this script itself ever exposing potentially
+// sensitive field contents (an email, a SKU, a coupon code, ...).
+async function countDuplicateGroupsFor(model, key) {
+  const groupId = {};
+  for (const field of Object.keys(key)) groupId[field] = `$${field}`;
+  const pipeline = [
+    { $group: { _id: groupId, count: { $sum: 1 } } },
+    { $match: { count: { $gt: 1 } } },
+    { $count: "conflictingGroups" },
+  ];
+  const [result] = await model.collection.aggregate(pipeline).toArray();
+  return result?.conflictingGroups ?? 0;
+}
+
 async function auditModel(model, ensure) {
   const declared = model.schema.indexes(); // [[keyObj, optionsObj], ...]
   const existing = await model.collection.indexes().catch(() => []);
@@ -93,16 +146,38 @@ async function auditModel(model, ensure) {
 
   const missing = declared.filter(([key]) => !existingSignatures.has(keySignature(key)));
 
+  // For any missing index that's declared unique (and not a text index,
+  // which can't be "unique"), check for pre-existing duplicate values
+  // BEFORE attempting to create it — read-only, reported as a count only.
+  const conflictWarnings = [];
+  for (const [key, options] of missing) {
+    if (!options?.unique || isTextIndexKey(key)) continue;
+    const conflicts = await countDuplicateGroupsFor(model, key);
+    if (conflicts > 0) {
+      conflictWarnings.push({ key, conflicts });
+    }
+  }
+
   if (ensure && missing.length > 0) {
     // createIndexes() builds every schema-declared index; already-present
     // ones are a no-op (Mongo treats an identical createIndex call as
     // idempotent), so calling it unconditionally here is safe even though
     // we already know which ones are "missing" — no separate per-index
-    // call is needed.
+    // call is needed. A unique index whose duplicate-conflict count is
+    // nonzero (see above) will still be attempted here — Mongo itself is
+    // the final, authoritative arbiter (createIndexes rejects the build
+    // and throws if real conflicting documents exist), this function just
+    // makes that risk visible to the operator beforehand rather than
+    // silently discovering it via a thrown error.
     await model.createIndexes();
   }
 
-  return { modelName: model.modelName, declaredCount: declared.length, missing: missing.map(([key]) => key) };
+  return {
+    modelName: model.modelName,
+    declaredCount: declared.length,
+    missing: missing.map(([key]) => key),
+    conflictWarnings,
+  };
 }
 
 async function main() {
@@ -127,6 +202,11 @@ async function main() {
       anyMissing = true;
       console.log(`${r.modelName}: ${r.declaredCount} declared, ${r.missing.length} MISSING${ensure ? " (now created)" : ""}`);
       for (const key of r.missing) console.log(`  - ${JSON.stringify(key)}`);
+      for (const w of r.conflictWarnings) {
+        console.log(
+          `  ! WARNING: ${JSON.stringify(w.key)} is declared unique but ${w.conflicts} conflicting group(s) of duplicate values already exist — creating this index may fail until those are resolved (no document values shown)`,
+        );
+      }
     } else {
       console.log(`${r.modelName}: ${r.declaredCount} declared, all present`);
     }
