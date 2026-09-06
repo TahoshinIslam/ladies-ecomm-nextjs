@@ -70,5 +70,56 @@ if (!anySuitePresent) {
   process.exit(1);
 }
 
+// Phase 11 — two mandatory regression suites (tests/http/
+// multiInstanceEvents.integration.test.mjs, tests/http/
+// coldStartHomepage.integration.test.mjs) each own a two-instance server
+// lifecycle that the shared `npm run test:http` harness cannot provide —
+// they match that harness's default glob and correctly report themselves
+// SKIPPED there (see each script's own header comment), so their skip
+// lines must NOT trip the CRITICAL_SKIP_MARKERS check above. But that
+// same design means it is easy to forget to wire their dedicated npm
+// scripts (test:multi-instance, test:http:cold-start) into CI at all,
+// silently losing the regression proof forever. This checks that both
+// suites' real "ok" lines (never just their expected skip line in the
+// shared harness) appear SOMEWHERE across every log file provided —
+// i.e. their dedicated CI steps actually ran them for real at least once.
+const MANDATORY_STANDALONE_SUITES = [
+  {
+    name: "multi-instance realtime (tests/http/multiInstanceEvents.integration.test.mjs)",
+    marker: "cross-process realtime delivery via the durable event outbox",
+    npmScript: "test:multi-instance",
+  },
+  {
+    name: "cold-start homepage (tests/http/coldStartHomepage.integration.test.mjs)",
+    marker: "homepage survives a genuinely cold first request",
+    npmScript: "test:http:cold-start",
+  },
+];
+
+const outputLines = output.split("\n");
+const missingStandaloneSuites = MANDATORY_STANDALONE_SUITES.filter((suite) => {
+  // Must find a real "ok N - ...<marker>" line that is NOT the shared
+  // harness's expected skip line for this suite — a skip line also
+  // contains the same marker text (it's the suite's own description),
+  // just with a trailing "# SKIP ..." on the SAME line, so this checks
+  // per-line rather than matching the marker anywhere in the whole
+  // joined log.
+  const ranForReal = outputLines.some((line) => line.includes(suite.marker) && /^ok \d+ - /.test(line.trim()) && !line.includes("# SKIP"));
+  return !ranForReal;
+});
+
+if (missingStandaloneSuites.length > 0) {
+  console.error("\n✖ Mandatory standalone regression suite(s) never actually ran in this CI run (only ever skipped, or absent entirely):\n");
+  for (const suite of missingStandaloneSuites) {
+    console.error(`  - ${suite.name} — expected a real "ok" line, run it via \`npm run ${suite.npmScript}\` and capture its output`);
+  }
+  console.error(
+    "\nThese suites correctly SKIP when run inside the shared `npm run test:http` harness (they need their own two-instance " +
+      "server lifecycle) — that skip line alone is not evidence they ran anywhere. Pass each dedicated suite's own captured " +
+      "output log to this script alongside the standard core/HTTP logs.\n",
+  );
+  process.exit(1);
+}
+
 console.log("✓ No critical database-backed suites were skipped.");
 process.exit(0);

@@ -113,8 +113,32 @@ jobs:
           set -o pipefail
           npm run test:http 2>&1 | tee test-http-output.log
 
+      # These two suites each own their own multi-instance server
+      # lifecycle (two independent `next start` processes) and can never
+      # actually execute inside the shared single-server harness above —
+      # tests/http/multiInstanceEvents.integration.test.mjs and
+      # tests/http/coldStartHomepage.integration.test.mjs both match that
+      # harness's default glob and always report themselves SKIPPED there
+      # (by design — see each script's own header comment), which is why
+      # they need their own dedicated npm scripts and CI steps rather than
+      # being expected to run via `npm run test:http` above. Captured to
+      # their own log files so assertNoCriticalSkips.mjs below can confirm
+      # they didn't ALSO skip here (which would mean the regression proof
+      # never actually ran anywhere in CI).
+      - name: Test (multi-instance realtime — mandatory cross-process proof)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:multi-instance 2>&1 | tee test-multi-instance-output.log
+
+      - name: Test (cold-start homepage — mandatory DB-readiness regression proof)
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:http:cold-start 2>&1 | tee test-cold-start-output.log
+
       - name: Verify no critical suites were skipped
-        run: node scripts/assertNoCriticalSkips.mjs test-core-output.log test-http-output.log
+        run: node scripts/assertNoCriticalSkips.mjs test-core-output.log test-http-output.log test-multi-instance-output.log test-cold-start-output.log
 
       - name: Build
         run: npm run build
@@ -127,5 +151,9 @@ jobs:
           path: |
             test-core-output.log
             test-http-output.log
+            test-multi-instance-output.log
+            test-cold-start-output.log
             .phase1-http-test-logs/
+            .phase11-multi-instance-logs/
+            .phase11-coldstart-logs/
           retention-days: 7

@@ -14,6 +14,7 @@
 /coverage
 /.phase1-http-test-logs/
 /.phase11-multi-instance-logs/
+/.phase11-coldstart-logs/
 
 # next.js
 /.next/

@@ -16,6 +16,7 @@
     "test:all": "npm run test:core && npm run test:http",
     "validate:production": "node scripts/validateProductionEnv.mjs",
     "test:multi-instance": "node --env-file-if-exists=.env.test scripts/multiInstanceHttpTestServer.mjs run",
+    "test:http:cold-start": "node --env-file-if-exists=.env.test scripts/coldStartHttpTestServer.mjs run",
     "smoke": "node scripts/smokeDeployment.mjs"
   },
   "dependencies": {
