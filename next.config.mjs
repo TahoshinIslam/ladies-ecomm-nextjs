@@ -6,8 +6,26 @@ import path from "node:path";
 // proxy.js's own header comment for the built-output evidence — lives
 // there instead, not here, so the two mechanisms never both try to set
 // the same header on the same response).
-const isProd = process.env.NODE_ENV === "production";
-
+//
+// Phase 11 CI-verification fix: this file (unlike proxy.js's runtime
+// middleware) is evaluated once, at `next build` time — its `headers()`
+// config is baked into the build's routes manifest and never
+// re-evaluated by `next start`. Previously this gated the HSTS header on
+// `process.env.NODE_ENV === "production"` at that BUILD-TIME moment —
+// but this app's own established invariant (see proxy.js's own comment)
+// is that `next start` always serves as production regardless of
+// whatever NODE_ENV the *build* happened to run under. The very first
+// real GitHub Actions CI run for this repository caught the resulting
+// bug directly: the workflow's job-level `NODE_ENV: test` (needed for
+// config/db.js's test-database branch — see .github/workflows/ci.yml)
+// meant `next build` there saw NODE_ENV=test, so this conditional never
+// added the header at all — even though the exact same `next start`
+// process it built was unconditionally serving as production. No local
+// run had ever caught this, because no one had manually exported
+// NODE_ENV=test before an ad-hoc `npm run build`. HSTS is now
+// unconditional — sending it during `next dev` (plain HTTP) is inert
+// (browsers only ever honor HSTS over a connection already secured by
+// HTTPS), so there is no dev-workflow cost to removing the gate.
 const securityHeaders = [
   // nosniff — stop a browser from ever guessing a response's MIME type
   // and executing it as something it wasn't served as.
@@ -30,19 +48,17 @@ const securityHeaders = [
   },
 ];
 
-if (isProd) {
-  // PRODUCTION ONLY. Deliberately conservative: no `includeSubDomains` and
-  // no `preload`, because this repository has no evidence about which
-  // subdomains exist or whether every one of them is HTTPS-only (no
-  // vercel.json, no DNS/deployment config committed here) — enabling
-  // either without that confirmation risks permanently locking browsers
-  // out of a subdomain that isn't actually HTTPS-capable yet (`preload`
-  // in particular is very hard to reverse once browsers have baked a
-  // domain into their preload list). This is a deployment decision for
-  // whoever owns the real production domain, not one this codebase can
-  // make on their behalf — see .env.example for the operator note.
-  securityHeaders.push({ key: "Strict-Transport-Security", value: "max-age=15552000" });
-}
+// Deliberately conservative: no `includeSubDomains` and no `preload`,
+// because this repository has no evidence about which subdomains exist
+// or whether every one of them is HTTPS-only (no vercel.json, no
+// DNS/deployment config committed here) — enabling either without that
+// confirmation risks permanently locking browsers out of a subdomain
+// that isn't actually HTTPS-capable yet (`preload` in particular is very
+// hard to reverse once browsers have baked a domain into their preload
+// list). This is a deployment decision for whoever owns the real
+// production domain, not one this codebase can make on their behalf —
+// see .env.example for the operator note.
+securityHeaders.push({ key: "Strict-Transport-Security", value: "max-age=15552000" });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
