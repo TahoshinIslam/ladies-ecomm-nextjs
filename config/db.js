@@ -93,7 +93,14 @@ const connectDB = async () => {
         connectTimeoutMS: 5000,
       })
       .then((m) => {
-      console.log(`MongoDB connected: ${m.connection.host}`);
+      // Database NAME is not sensitive (it's not a credential — knowing
+      // "which database" a running instance is talking to is exactly the
+      // kind of thing operators legitimately need from logs) and is
+      // genuinely useful: this exact detail was missing during Phase 11's
+      // live-verification work, where an ambiguous/duplicate env var made
+      // it impossible to confirm from the outside which database a
+      // deployment had actually connected to without this.
+      console.log(`MongoDB connected: ${m.connection.host}/${m.connection.name}`);
       return m;
     });
   }
