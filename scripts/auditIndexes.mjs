@@ -184,7 +184,17 @@ async function main() {
   const ensure = process.argv.includes("--ensure");
   const uri = resolveUri();
 
-  await mongoose.connect(uri);
+  // autoIndex: false on THIS connection only — a dry-run audit must never
+  // have a side effect of its own. Every model in this app has schema-level
+  // autoIndex: true (a normal app process builds its own indexes on
+  // connect), but that means this diagnostic connection could otherwise
+  // race to silently rebuild the very index it's trying to report as
+  // missing, before this script ever reads the collection's real state —
+  // confirmed happening in CI (fast enough there to consistently win the
+  // race, unlike this repo's slower local dev Mongo). This override makes
+  // "dry-run" genuinely side-effect-free regardless of timing; `--ensure`
+  // still explicitly calls createIndexes() itself when needed.
+  await mongoose.connect(uri, { autoIndex: false });
   console.log(`Connected: ${redact(mongoose.connection.host)}/${mongoose.connection.name}`);
 
   const results = [];
