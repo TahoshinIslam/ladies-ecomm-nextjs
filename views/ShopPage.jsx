@@ -1,4 +1,5 @@
 import ShopPageClient from "./shop/ShopPageClient.jsx";
+import connectDB from "../config/db.js";
 import { listProducts, parseProductListQuery } from "../services/productService.js";
 import { assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../lib/validation.js";
 import { parseQueryParams, HttpError } from "../lib/http.js";
@@ -39,6 +40,14 @@ export default async function ShopPage({ searchParams }) {
   let result;
   let invalid = false;
   try {
+    // Realtime-durability-class fix: the cached branch below now
+    // guarantees its own DB readiness (lib/serverDataCache.js's
+    // withDb()), but the uncached listProducts() fallback (an
+    // ineligible-for-cache query — free-text search, dynamic facets)
+    // does not go through that wrapper — establish readiness explicitly
+    // here rather than relying on some earlier, unrelated request having
+    // already connected on this warm instance.
+    await connectDB();
     assertNoDuplicateQueryKeys(usp);
     assertNoDangerousQueryKeys(usp);
     const rawQuery = parseQueryParams(usp);

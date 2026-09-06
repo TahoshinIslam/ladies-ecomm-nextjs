@@ -11,6 +11,7 @@ import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
 import NewsletterPoster from "./home/NewsletterPoster.jsx";
 import SectionHead from "./home/SectionHead.jsx";
 
+import connectDB from "../config/db.js";
 import { getCachedCategories, getCachedProductList } from "../lib/serverDataCache.js";
 import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import { listProducts } from "../services/productService.js";
@@ -61,6 +62,14 @@ const OCCASIONS = [
 // plain, pre-fetched props — none of them re-fetches this page's initial
 // data itself.
 export default async function HomePage() {
+  // Realtime-durability-class fix: this page's cached reads each now
+  // guarantee their own DB readiness (lib/serverDataCache.js's withDb()),
+  // but the uncached listProducts() fallback below (when the shop-cache-
+  // eligibility check excludes this page's query) does not go through
+  // that wrapper at all — establish readiness once, up front, for the
+  // whole render rather than relying on Promise.all ordering or a sibling
+  // call having already connected.
+  await connectDB();
   const [t, locale, rawCategories] = await Promise.all([getT(), getServerLocale(), getCachedCategories()]);
   const categories = localizeCategoryList(rawCategories, locale);
   const departments = categories.filter((c) => !c.parent);
