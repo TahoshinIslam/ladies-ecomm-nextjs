@@ -1,6 +1,6 @@
 import { requireUser } from "../../../../../lib/auth.js";
 import { HttpError, withRoute } from "../../../../../lib/http.js";
-import { eventBus, orderChannel } from "../../../../../lib/events.js";
+import { orderChannel, readEventsSince, resolveStartCursor } from "../../../../../lib/events.js";
 import Order from "../../../../../models/orderModel.js";
 import { requireObjectIdFormat } from "../../../../../lib/validation.js";
 
@@ -10,17 +10,26 @@ import { requireObjectIdFormat } from "../../../../../lib/validation.js";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
-const sseLine = (event, data) => encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+const sseLine = (event, data, id) => {
+  const idLine = id ? `id: ${id}\n` : "";
+  return encoder.encode(`${idLine}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+};
+
+const POLL_INTERVAL_MS = 1000;
+const HEARTBEAT_MS = 25000;
+const STREAM_MAX_MS = 4 * 60 * 1000;
 
 // Server-sent events for one order's status — the customer's order-success
 // and order-detail pages subscribe here so a status change made in admin
 // reaches them immediately instead of waiting for a manual refresh.
 //
-// Phase 2: authenticates via the same-origin session cookie — EventSource
-// sends cookies automatically same-origin, so the old ?token=<jwt>
-// workaround (needed only because EventSource can't set a custom
-// Authorization header) no longer exists. Ownership is still checked
-// below before the stream opens.
+// Phase 2: authenticates via the same-origin session cookie. Ownership is
+// still checked below before the stream opens.
+//
+// Phase 11 (mandatory): reads from the MongoDB-backed durable event outbox
+// (lib/events.js) via bounded polling instead of a process-local
+// EventEmitter — see that file's own comment for why an in-memory bus
+// cannot work across Vercel's multiple isolated function instances.
 export const GET = withRoute(async (request, { params }) => {
   const user = await requireUser(request);
 
@@ -34,29 +43,72 @@ export const GET = withRoute(async (request, { params }) => {
   const channel = orderChannel(id);
 
   const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(sseLine("connected", { orderId: id }));
+    async start(controller) {
+      let closed = false;
+      const startTime = Date.now();
 
-      const onUpdate = (payload) => {
-        controller.enqueue(sseLine("ORDER_STATUS_UPDATED", payload));
+      const safeEnqueue = (chunk) => {
+        if (closed) return;
+        try {
+          controller.enqueue(chunk);
+        } catch {
+          // stream already closed on the client side
+        }
       };
-      eventBus.on(channel, onUpdate);
 
-      // Comment ping every 25s so intermediary proxies/load balancers don't
-      // time out and silently close an otherwise-idle connection.
-      const heartbeat = setInterval(() => {
-        controller.enqueue(encoder.encode(": ping\n\n"));
-      }, 25000);
+      safeEnqueue(sseLine("connected", { orderId: id }));
 
-      request.signal.addEventListener("abort", () => {
-        eventBus.off(channel, onUpdate);
-        clearInterval(heartbeat);
+      // See app/api/admin/events/route.js's identical comment: `let`,
+      // declared before `cleanup`, avoids a temporal-dead-zone throw (and
+      // a resulting leaked, never-cleared interval) if request.signal
+      // aborts while the resolveStartCursor() await below is still
+      // pending.
+      let heartbeatTimer;
+      let pollTimer;
+
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeatTimer);
+        clearInterval(pollTimer);
         try {
           controller.close();
         } catch {
           // already closed
         }
-      });
+      };
+
+      request.signal.addEventListener("abort", cleanup);
+
+      let afterId;
+      try {
+        afterId = await resolveStartCursor(channel, request.headers.get("last-event-id"));
+      } catch {
+        afterId = null;
+      }
+
+      if (closed) return;
+
+      heartbeatTimer = setInterval(() => {
+        safeEnqueue(encoder.encode(": ping\n\n"));
+      }, HEARTBEAT_MS);
+
+      pollTimer = setInterval(async () => {
+        if (closed) return;
+        if (Date.now() - startTime > STREAM_MAX_MS) {
+          cleanup();
+          return;
+        }
+        try {
+          const events = await readEventsSince(channel, afterId);
+          for (const ev of events) {
+            afterId = ev._id;
+            safeEnqueue(sseLine(ev.type, ev.payload, ev._id.toString()));
+          }
+        } catch (err) {
+          console.error("order SSE poll failed", err);
+        }
+      }, POLL_INTERVAL_MS);
     },
   });
 

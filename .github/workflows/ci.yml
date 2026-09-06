@@ -37,6 +37,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Phase 11, section M: bounds a hung test/build step (stuck server,
+    # infinite test loop) to a fixed wall-clock ceiling instead of running
+    # until GitHub's default 360-minute cap.
+    timeout-minutes: 20
 
     env:
       NODE_ENV: test

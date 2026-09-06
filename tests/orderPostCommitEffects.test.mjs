@@ -20,7 +20,6 @@
 
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
 
 import {
   dbReady,
@@ -51,14 +50,15 @@ mock.module("../services/notificationService.js", {
 
 mock.module("../lib/events.js", {
   namedExports: {
-    eventBus: new EventEmitter(),
     orderChannel: (orderId) => `order:${orderId}`,
     ADMIN_CHANNEL: "admin",
     emitAdminEvent: (payload) => {
       adminEventCalls.push(payload);
+      return Promise.resolve();
     },
     emitOrderEvent: (orderId, payload) => {
       orderEventCalls.push({ orderId, payload });
+      return Promise.resolve();
     },
   },
 });

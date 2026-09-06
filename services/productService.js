@@ -719,7 +719,7 @@ export async function createProduct(body) {
 
   const product = new Product(data);
   await product.save();
-  emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name });
+  emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name }).catch(() => {});
   return product;
 }
 
@@ -739,7 +739,7 @@ export async function updateProduct(id, body) {
 
   Object.assign(product, data);
   await product.save();
-  emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name });
+  emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name }).catch(() => {});
   return product;
 }
 

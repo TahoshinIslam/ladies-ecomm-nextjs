@@ -50,10 +50,32 @@ export function useAdminEventStream() {
   useEffect(() => {
     if (!isStaff) return;
 
+    // Phase 11: the server now emits `id: <mongoId>` per event (see
+    // app/api/admin/events/route.js) — the browser's native EventSource
+    // tracks that as `lastEventId` and resends it as the `Last-Event-ID`
+    // request header on its own automatic reconnect, resuming exactly
+    // where this connection left off rather than replaying/missing
+    // events. This Set is a small belt-and-suspenders client-side dedup
+    // on top of that (the server's own `_id > lastSeenId` query already
+    // guarantees no duplicates within one continuous poll/reconnect
+    // cycle) — bounded so a long-lived connection can't grow it forever.
+    const seenEventIds = new Set();
+    const MAX_SEEN = 200;
+    const alreadySeen = (id) => {
+      if (!id) return false;
+      if (seenEventIds.has(id)) return true;
+      seenEventIds.add(id);
+      if (seenEventIds.size > MAX_SEEN) {
+        seenEventIds.delete(seenEventIds.values().next().value);
+      }
+      return false;
+    };
+
     // Same-origin session cookie is sent automatically by EventSource — no
     // token in the URL (Phase 2: the old ?token=<jwt> workaround is gone).
     const source = new EventSource(`/api/admin/events`);
     const handleEvent = (e) => {
+      if (alreadySeen(e.lastEventId)) return;
       let payload;
       try {
         payload = JSON.parse(e.data);

@@ -101,7 +101,7 @@ export async function codCreate(orderId, userId) {
     }
 
     if (!result.replayed) {
-      emitOrderEvent(orderId, { orderId, status: result.order.status });
+      emitOrderEvent(orderId, { orderId, status: result.order.status }).catch(() => {});
     }
     return result.order;
   } finally {

@@ -14,18 +14,17 @@
 import { useEffect, useId, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Home, RotateCw } from "lucide-react";
+import { logClientErrorSafely } from "@/lib/clientErrorLog.js";
 
 export default function ErrorBoundary({ error, retry }) {
   const [retrying, setRetrying] = useState(false);
   const statusId = useId();
 
   useEffect(() => {
-    // Client-side only, and only the digest (an opaque correlation id) —
-    // never the message/stack, which for a Server Component error is
-    // already generic in production, but a Client Component error's
-    // `error.message` can be the real thing — still not private/security
-    // data. Logging keeps to the console, not any page content.
-    console.error("Route error boundary:", error?.digest || error);
+    // Phase 11 — never logs the full Error object (message/stack/props)
+    // to the browser console in production; only a fixed event name plus
+    // the opaque digest, if one exists. See lib/clientErrorLog.js.
+    logClientErrorSafely("route_error_boundary", error);
   }, [error]);
 
   // Phase 10 checkpoint — explicit policy decision: never show

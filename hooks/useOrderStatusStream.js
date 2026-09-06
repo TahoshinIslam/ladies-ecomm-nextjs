@@ -22,8 +22,24 @@ export function useOrderStatusStream(orderId, onUpdate) {
   useEffect(() => {
     if (!orderId || !user) return;
 
+    // Phase 11: same dedup/resume reasoning as useAdminEventStream.js —
+    // the server emits `id: <mongoId>` per event, which EventSource
+    // resends as `Last-Event-ID` on its own automatic reconnect.
+    const seenEventIds = new Set();
+    const MAX_SEEN = 50;
+    const alreadySeen = (id) => {
+      if (!id) return false;
+      if (seenEventIds.has(id)) return true;
+      seenEventIds.add(id);
+      if (seenEventIds.size > MAX_SEEN) {
+        seenEventIds.delete(seenEventIds.values().next().value);
+      }
+      return false;
+    };
+
     const source = new EventSource(`/api/orders/${orderId}/events`);
     const handleUpdate = (e) => {
+      if (alreadySeen(e.lastEventId)) return;
       try {
         onUpdate(JSON.parse(e.data));
       } catch {

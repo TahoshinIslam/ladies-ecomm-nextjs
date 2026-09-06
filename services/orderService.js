@@ -415,7 +415,7 @@ export async function createOrder(
       message: `New order #${orderNumber} received`,
       url: `/admin/orders`,
     }).catch(() => {});
-    emitAdminEvent({ type: "NEW_ORDER", orderId: createdOrder._id.toString(), orderNumber });
+    emitAdminEvent({ type: "NEW_ORDER", orderId: createdOrder._id.toString(), orderNumber }).catch(() => {});
 
     // Low-stock check happens after the transaction commits — this reads the
     // post-decrement stock, it doesn't need to be part of the atomic write.
@@ -450,7 +450,7 @@ async function checkLowStock(items) {
       variantId: it.variantId.toString(),
       productName: label,
       stock: variant.stock,
-    });
+    }).catch(() => {});
   }
 }
 
@@ -521,14 +521,14 @@ export async function cancelOrder(userId, role, orderId) {
   // existed. What was missing is everything below: this cancellation never
   // told the admin team it happened at all, regardless of whether a
   // customer or an admin did the cancelling.
-  emitOrderEvent(orderId, { orderId, status: "cancelled" });
+  emitOrderEvent(orderId, { orderId, status: "cancelled" }).catch(() => {});
 
   const orderNumber = orderId.toString().slice(-6);
   createAdminNotification({
     message: `Order #${orderNumber} was cancelled`,
     url: "/admin/orders",
   }).catch(() => {});
-  emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber });
+  emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber }).catch(() => {});
 
   return updatedOrder;
 }
@@ -626,7 +626,7 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
   }
 
   // Customer-facing channel — unchanged, already worked.
-  emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber });
+  emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber }).catch(() => {});
 
   // Admin-facing: always refresh any open admin order list live (no
   // notification noise for a routine processing → shipped click — the
@@ -636,7 +636,7 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
   // the admin UI, but this stays defensive in case anything else calls
   // this directly) — also write a real notification.
   const orderNumber = orderId.toString().slice(-6);
-  emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status });
+  emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }).catch(() => {});
   if (["cancelled", "refunded"].includes(status)) {
     createAdminNotification({
       message: `Order #${orderNumber} marked as ${status}`,

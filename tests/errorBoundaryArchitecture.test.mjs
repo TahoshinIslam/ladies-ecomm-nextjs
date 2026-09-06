@@ -39,12 +39,18 @@ describe("Phase 10 — error.jsx / global-error.jsx / admin/error.jsx use the in
       assert.ok(!/\{error\.stack\}/.test(content) && !/\{error\?\.stack\}/.test(content), `${rel} must never render error.stack`);
     });
 
-    test(`${rel} follows the checkpoint's digest-display policy: error.digest is logged to the console for engineering correlation but never rendered in the page itself (no documented "quote this reference" support workflow exists)`, () => {
+    test(`${rel} follows the digest-display policy: error.digest is never rendered in the page itself (no documented "quote this reference" support workflow exists)`, () => {
       const content = stripComments(read(rel));
       const jsxReturnStart = content.indexOf("return (");
       const jsxOnward = jsxReturnStart === -1 ? content : content.slice(jsxReturnStart);
       assert.ok(!/\{error\.digest\}|\{error\?\.digest\}/.test(jsxOnward), `${rel} must not render error.digest in the JSX it returns`);
-      assert.match(content, /console\.error\(.*error\?\.digest/, `${rel} must still log the digest to the console for correlation`);
+    });
+
+    test(`${rel} routes its logging through lib/clientErrorLog.js's logClientErrorSafely — never a raw console.error(..., error) that would print the full Error object (message/stack) to the production browser console`, () => {
+      const content = stripComments(read(rel));
+      assert.match(content, /from ["']@\/lib\/clientErrorLog\.js["']/, `${rel} must import the shared safe-logging helper`);
+      assert.match(content, /logClientErrorSafely\(/, `${rel} must call logClientErrorSafely`);
+      assert.ok(!/console\.error\(/.test(content), `${rel} must not call console.error directly — all logging goes through the shared helper`);
     });
   }
 

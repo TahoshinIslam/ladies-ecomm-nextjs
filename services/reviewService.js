@@ -51,7 +51,7 @@ export async function createReview(userId, productId, { rating, title, comment, 
     message: `New ${review.rating}★ review received`,
     url: "/admin/reviews",
   }).catch(() => {});
-  emitAdminEvent({ type: "NEW_NOTIFICATION", message: `New ${review.rating}★ review received`, url: "/admin/reviews" });
+  emitAdminEvent({ type: "NEW_NOTIFICATION", message: `New ${review.rating}★ review received`, url: "/admin/reviews" }).catch(() => {});
 
   return review;
 }

@@ -13,6 +13,7 @@
 # testing
 /coverage
 /.phase1-http-test-logs/
+/.phase11-multi-instance-logs/
 
 # next.js
 /.next/

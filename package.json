@@ -13,7 +13,10 @@
     "test:core": "npm run test",
     "pretest:http": "npm run build && NODE_ENV=test node --env-file-if-exists=.env.test scripts/assertTestDbSafety.mjs",
     "test:http": "node --env-file-if-exists=.env.test scripts/httpTestServer.mjs run",
-    "test:all": "npm run test:core && npm run test:http"
+    "test:all": "npm run test:core && npm run test:http",
+    "validate:production": "node scripts/validateProductionEnv.mjs",
+    "test:multi-instance": "node --env-file-if-exists=.env.test scripts/multiInstanceHttpTestServer.mjs run",
+    "smoke": "node scripts/smokeDeployment.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

@@ -10,10 +10,11 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle, RotateCw } from "lucide-react";
+import { logClientErrorSafely } from "@/lib/clientErrorLog.js";
 
 export default function AdminError({ error, retry }) {
   useEffect(() => {
-    console.error("Admin route error boundary:", error?.digest || error);
+    logClientErrorSafely("admin_route_error_boundary", error);
   }, [error]);
 
   return (

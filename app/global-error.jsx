@@ -12,10 +12,11 @@
 // contract as error.jsx, and the same rule: never render error.message/
 // stack — just the generic message plus the opaque digest correlation id.
 import { useEffect } from "react";
+import { logClientErrorSafely } from "@/lib/clientErrorLog.js";
 
 export default function GlobalError({ error, retry }) {
   useEffect(() => {
-    console.error("Root layout error boundary:", error?.digest || error);
+    logClientErrorSafely("root_layout_error_boundary", error);
   }, [error]);
 
   return (

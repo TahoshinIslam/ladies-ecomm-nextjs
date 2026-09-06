@@ -48,7 +48,51 @@ const connectDB = async () => {
           : "MONGO_URI";
       throw new Error(`${missingVar} is not set`);
     }
-    cache.promise = mongoose.connect(uri).then((m) => {
+    // Phase 11, section H — explicit pool/timeout settings for a Vercel
+    // Fluid Compute deployment. Fluid Compute REUSES a warm function
+    // instance across concurrent requests (not one-request-per-instance),
+    // so each warm instance keeps its own cached connection+pool
+    // (globalThis.__mongooseCache above) for its lifetime — the pool size
+    // needs to absorb one instance's own concurrent in-flight requests,
+    // not the whole app's total traffic (many instances each hold their
+    // own pool in parallel).
+    //   - maxPoolSize: 20 — conservative default. Formula: (Atlas
+    //     connection-limit tier) / (expected concurrent warm instances)
+    //     with headroom for admin/monitoring connections; 20 is a safe
+    //     starting point for a low/medium free-tier-adjacent Atlas
+    //     cluster (typically 500 connection limit) even at a few hundred
+    //     concurrent warm instances, while leaving enough headroom for
+    //     one instance to hold several concurrently-open SSE streams
+    //     (each polling the durable event outbox roughly once per
+    //     second — see lib/events.js) at the same time as ordinary
+    //     request traffic without those polls queuing behind each
+    //     other for a free connection. (Empirically: this repo's own
+    //     local single-process HTTP-integration harness, which routes
+    //     every test file's traffic through ONE shared pool, showed rare
+    //     intermittent cache-invalidation-timing test flakiness at
+    //     maxPoolSize 10 under its own concurrent load/SSE tests, and
+    //     none across repeated runs at 20 — a real, if narrow and
+    //     local-harness-specific, signal that 10 cuts it close for even
+    //     modest concurrent DB-bound work on one instance.) Raise
+    //     further only with real Atlas connection-count evidence
+    //     (Atlas's own connection metrics), never speculatively.
+    //   - minPoolSize: 0 (the driver default) — a Fluid Compute instance
+    //     that goes cold should not hold idle connections open against
+    //     Atlas's connection limit; there's no justification here for
+    //     paying that cost to save a small reconnect latency on the next
+    //     cold start.
+    //   - serverSelectionTimeoutMS/connectTimeoutMS: bounded so a
+    //     genuinely unreachable/misconfigured database fails a request
+    //     within a few seconds instead of hanging until the platform's
+    //     own function-duration limit kills it.
+    cache.promise = mongoose
+      .connect(uri, {
+        maxPoolSize: 20,
+        minPoolSize: 0,
+        serverSelectionTimeoutMS: 5000,
+        connectTimeoutMS: 5000,
+      })
+      .then((m) => {
       console.log(`MongoDB connected: ${m.connection.host}`);
       return m;
     });
