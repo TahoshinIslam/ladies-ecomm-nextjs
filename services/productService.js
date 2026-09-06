@@ -733,7 +733,15 @@ export async function updateProduct(id, body) {
   if (!product) throw new HttpError(404, "Product not found");
 
   const data = pickWritable(body);
-  const categoryId = data.category ?? product.category;
+  // `product` is a hydrated Mongoose document (not `.lean()`), so its
+  // `category` field is a real ObjectId instance, not a string — falling
+  // back to it directly used to fail resolveLeafCategory's
+  // isObjectIdFormat() check (which requires typeof === "string"), making
+  // any partial update that omitted `category` wrongly 400 with "Invalid
+  // category id". Stringify the fallback so an omitted `category` behaves
+  // like the existing value, while an explicitly-supplied `data.category`
+  // is still validated exactly as before.
+  const categoryId = data.category ?? String(product.category);
   const category = await resolveLeafCategory(categoryId);
 
   const variants = data.variants ?? product.variants;

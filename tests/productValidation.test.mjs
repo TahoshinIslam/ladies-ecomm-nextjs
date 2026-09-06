@@ -184,4 +184,98 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       await User.deleteOne({ _id: admin._id });
     }
   });
+
+  // Regression coverage for the ObjectId-vs-string defect: updateProduct()
+  // fell back to the hydrated (non-.lean()) product's `category`, a real
+  // Mongoose ObjectId instance, which failed resolveLeafCategory's
+  // isObjectIdFormat() string check and wrongly 400'd any partial update
+  // that omitted `category` — see services/productService.js.
+  describe("PUT partial updates — category is optional and preserved", () => {
+    let admin, category, child, product;
+
+    before(async () => {
+      admin = await createTestUser({ role: "admin" });
+      category = await createTestCategory();
+      child = await Category.create({ name: "Child", slug: `child-${Date.now()}-${Math.random()}`, parent: category._id });
+    });
+
+    after(async () => {
+      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
+      await User.deleteOne({ _id: admin._id });
+    });
+
+    async function freshProduct() {
+      const res = await productsPOST(await createReq(admin, validProductBody(child._id.toString())));
+      assert.equal(res.status, 201);
+      return (await res.json()).product;
+    }
+
+    test("PUT with only basePrice succeeds (200) and preserves category", async () => {
+      product = await freshProduct();
+      try {
+        const res = await productPUT(
+          requestAs({ method: "PUT", url: `http://test/api/products/${product._id}`, session: await createTestSession(admin._id), body: { basePrice: 999 } }),
+          { params: Promise.resolve({ idOrSlug: product._id }) },
+        );
+        assert.equal(res.status, 200);
+        const json = await res.json();
+        assert.equal(json.product.basePrice, 999);
+        assert.equal(String(json.product.category), child._id.toString());
+      } finally {
+        await Product.deleteOne({ _id: product._id });
+      }
+    });
+
+    test("PUT with only isFeatured succeeds (200) and preserves category", async () => {
+      product = await freshProduct();
+      try {
+        const res = await productPUT(
+          requestAs({ method: "PUT", url: `http://test/api/products/${product._id}`, session: await createTestSession(admin._id), body: { isFeatured: true } }),
+          { params: Promise.resolve({ idOrSlug: product._id }) },
+        );
+        assert.equal(res.status, 200);
+        const json = await res.json();
+        assert.equal(json.product.isFeatured, true);
+        assert.equal(String(json.product.category), child._id.toString());
+      } finally {
+        await Product.deleteOne({ _id: product._id });
+      }
+    });
+
+    test("PUT with an explicit malformed category still 400", async () => {
+      product = await freshProduct();
+      try {
+        const res = await productPUT(
+          requestAs({ method: "PUT", url: `http://test/api/products/${product._id}`, session: await createTestSession(admin._id), body: { category: "not-an-object-id" } }),
+          { params: Promise.resolve({ idOrSlug: product._id }) },
+        );
+        assert.equal(res.status, 400);
+      } finally {
+        await Product.deleteOne({ _id: product._id });
+      }
+    });
+
+    test("PUT with an explicit valid-but-nonexistent category still 400 (not-found contract unchanged)", async () => {
+      product = await freshProduct();
+      try {
+        const fakeId = new (await import("mongoose")).default.Types.ObjectId().toString();
+        const res = await productPUT(
+          requestAs({ method: "PUT", url: `http://test/api/products/${product._id}`, session: await createTestSession(admin._id), body: { category: fakeId } }),
+          { params: Promise.resolve({ idOrSlug: product._id }) },
+        );
+        assert.equal(res.status, 400);
+      } finally {
+        await Product.deleteOne({ _id: product._id });
+      }
+    });
+
+    test("PUT of a missing product still 404", async () => {
+      const fakeId = new (await import("mongoose")).default.Types.ObjectId().toString();
+      const res = await productPUT(
+        requestAs({ method: "PUT", url: `http://test/api/products/${fakeId}`, session: await createTestSession(admin._id), body: { basePrice: 5 } }),
+        { params: Promise.resolve({ idOrSlug: fakeId }) },
+      );
+      assert.equal(res.status, 404);
+    });
+  });
 });

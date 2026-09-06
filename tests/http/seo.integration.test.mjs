@@ -57,6 +57,10 @@ async function cookieHeaderFor(userId) {
 // once its 300s TTL naturally expires. Same reasoning Phase 8's own
 // cache-behavior tests already established for this exact class of
 // problem.
+//
+// Deliberately a genuine PARTIAL update (basePrice only, category
+// omitted) — this doubles as a live regression proof for
+// updateProduct()'s optional-category contract (services/productService.js).
 async function forceCatalogInvalidation(adminUserId, product) {
   const { createSession } = await import("../../lib/session.js");
   const session = await createSession(adminUserId, { userAgent: "phase10-test-suite" });
@@ -69,7 +73,7 @@ async function forceCatalogInvalidation(adminUserId, product) {
       origin: BASE_URL,
       "x-csrf-token": session.rawCsrfToken,
     },
-    body: JSON.stringify({ basePrice: product.basePrice, category: product.category.toString() }),
+    body: JSON.stringify({ basePrice: product.basePrice }),
   });
   assert.equal(res.status, 200, "the catalog-invalidating admin PUT must itself succeed");
 }
