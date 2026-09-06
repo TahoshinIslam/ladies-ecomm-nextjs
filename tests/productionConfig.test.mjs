@@ -77,6 +77,47 @@ describe("validateProductionEnv — rejects localhost/placeholder/example values
   });
 });
 
+describe("validateProductionEnv — CLOUDINARY_API_KEY is a non-secret identifier, not a strength-checked secret", () => {
+  test("a realistic synthetic 15-digit Cloudinary API key passes (previously wrongly failed the >=16-char secret heuristic)", () => {
+    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "123456789012345" };
+    assert.deepEqual(validateProductionEnv(env), []);
+  });
+
+  test("rejects an empty CLOUDINARY_API_KEY", () => {
+    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_KEY:")));
+  });
+
+  test("rejects a whitespace-only CLOUDINARY_API_KEY", () => {
+    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "   " };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_KEY:")));
+  });
+
+  test("rejects a placeholder-shaped CLOUDINARY_API_KEY", () => {
+    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "changeme" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_KEY:")));
+  });
+
+  test("a weak/short CLOUDINARY_API_SECRET is still rejected (the real secret keeps strong validation)", () => {
+    const env = { ...VALID_ENV, CLOUDINARY_API_SECRET: "short" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_SECRET:")));
+  });
+
+  test("every reported problem is a field-name + reason string only, never the offending value", () => {
+    const secretSentinel = "zqx9f2"; // short (triggers looksWeak) and not an English word, so it can't coincidentally appear in a reason string
+    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "changeme", CLOUDINARY_API_SECRET: secretSentinel, SMTP_PASS: secretSentinel };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.length >= 3, "expected all three fixtures to actually fail, or this test proves nothing");
+    for (const p of problems) {
+      assert.doesNotMatch(p, new RegExp(secretSentinel), "problem string must never echo back the actual submitted value");
+    }
+  });
+});
+
 describe("validateProductionEnv — cross-variable checks", () => {
   test("rejects MONGO_URI equal to MONGO_URI_TEST", () => {
     const env = { ...VALID_ENV, MONGO_URI_TEST: VALID_ENV.MONGO_URI };

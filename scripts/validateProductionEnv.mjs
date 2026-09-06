@@ -49,6 +49,29 @@ function looksWeak(value) {
   return false;
 }
 
+// CLOUDINARY_API_KEY is a non-secret identifier (Cloudinary's own docs:
+// https://cloudinary.com/documentation/developer_onboarding_faq_find_credentials
+// — "the API key ... may be exposed client-side", unlike the API secret,
+// which must remain protected). It is commonly a 15-digit number today,
+// but nothing here hardcodes that shape as a requirement — Cloudinary
+// documents the key only as "the key," not a fixed digit count, and this
+// validator must not fail a real key just because a future/different
+// account format doesn't match today's common shape. So this checks only
+// that the value is a real, present, well-formed identifier — not that it
+// is "strong" (the generic looksWeak() length/entropy heuristic below is
+// for actual secrets, and previously ran against this non-secret field by
+// mistake, wrongly failing a real ~15-digit key).
+function looksLikeControlChars(value) {
+  return /[\x00-\x1f\x7f]/.test(value);
+}
+
+function looksLikeInvalidIdentifier(value) {
+  if (!value || !value.trim()) return "must not be empty or whitespace-only";
+  if (looksLikeControlChars(value)) return "must not contain control characters";
+  if (looksLikePlaceholder(value)) return "looks like a placeholder value";
+  return true;
+}
+
 function isHttpsUrl(value) {
   try {
     const u = new URL(value);
@@ -111,7 +134,7 @@ const RULES = [
     name: "CLOUDINARY_CLOUD_NAME",
     check: (v) => (looksLikePlaceholder(v) ? "looks like a placeholder value" : true),
   },
-  { name: "CLOUDINARY_API_KEY", check: (v) => (looksWeak(v) ? "looks too short/weak to be a real API key" : true) },
+  { name: "CLOUDINARY_API_KEY", check: (v) => looksLikeInvalidIdentifier(v) },
   { name: "CLOUDINARY_API_SECRET", check: (v) => (looksWeak(v) ? "looks too short/weak to be a real API secret" : true) },
   {
     name: "SMTP_HOST",
