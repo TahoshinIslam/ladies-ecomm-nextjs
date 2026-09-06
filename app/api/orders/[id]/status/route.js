@@ -13,11 +13,13 @@ export const PUT = withRoute(async (request, { params }) => {
   await requirePermission(request, PERMISSIONS.ORDERS_MANAGE);
   const { id } = await params;
   const body = await parseJsonBody(request, updateOrderStatusSchema);
-  const order = await updateOrderStatus(id, body);
-  // A status transition always affects order-status-breakdown analytics;
-  // it does not touch stock itself (cancellation-with-stock-restoration
-  // has its own dedicated route/service — cancelOrder() — this one is a
-  // pure status-machine move, see services/orderService.js).
-  invalidateCacheTags([CACHE_TAGS.ADMIN_ANALYTICS]);
+  const { order, changed } = await updateOrderStatus(id, body);
+  // A REAL status/tracking change affects order-status-breakdown
+  // analytics; a true no-op (see updateOrderStatus()'s own comment) must
+  // not invalidate anything. It does not touch stock itself
+  // (cancellation-with-stock-restoration has its own dedicated
+  // route/service — cancelOrder() — this one is a pure status-machine
+  // move, see services/orderService.js).
+  if (changed) invalidateCacheTags([CACHE_TAGS.ADMIN_ANALYTICS]);
   return NextResponse.json({ success: true, order });
 });

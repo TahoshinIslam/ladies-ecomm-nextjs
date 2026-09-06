@@ -1,5 +1,5 @@
 import { requireStaff } from "../../../../lib/auth.js";
-import { withRoute } from "../../../../lib/http.js";
+import { HttpError, withRoute } from "../../../../lib/http.js";
 import { ADMIN_CHANNEL, readEventsSince, resolveStartCursor } from "../../../../lib/events.js";
 
 // Route Handlers can be statically evaluated/buffered by default; an SSE
@@ -45,6 +45,18 @@ const STREAM_MAX_MS = 4 * 60 * 1000;
 export const GET = withRoute(async (request) => {
   await requireStaff(request);
 
+  // Phase 12 remediation: resolved BEFORE the stream/Response is ever
+  // constructed — see app/api/orders/[id]/events/route.js's identical
+  // comment. A genuine DB failure here must fail the request closed with
+  // a sanitized error, never silently fall back to a full-history replay
+  // after the SSE headers have already been sent.
+  let afterId;
+  try {
+    afterId = await resolveStartCursor(ADMIN_CHANNEL, request.headers.get("last-event-id"));
+  } catch {
+    throw new HttpError(503, "Realtime stream temporarily unavailable, please retry");
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
@@ -61,17 +73,6 @@ export const GET = withRoute(async (request) => {
 
       safeEnqueue(sseLine("connected", {}));
 
-      // Declared (not yet assigned) BEFORE `cleanup`/the abort listener:
-      // resolveStartCursor() below is an `await`, so the request's abort
-      // signal can fire while this function is still suspended there —
-      // if `cleanup` closed over `const heartbeatTimer`/`pollTimer`
-      // declared further down, referencing them from an abort that fires
-      // during that await would throw (temporal dead zone), the timers
-      // would then still get created moments later once the await
-      // resolves, and — since `closed` was already set true by the time
-      // that throw happened — never get cleared again: a leaked interval
-      // that keeps the stream (and, in a test, the whole process) alive
-      // forever. `let` here, assigned after, closes that gap.
       let heartbeatTimer;
       let pollTimer;
 
@@ -88,17 +89,6 @@ export const GET = withRoute(async (request) => {
       };
 
       request.signal.addEventListener("abort", cleanup);
-
-      let afterId;
-      try {
-        afterId = await resolveStartCursor(ADMIN_CHANNEL, request.headers.get("last-event-id"));
-      } catch {
-        afterId = null;
-      }
-
-      // The abort could have fired while the await above was pending —
-      // don't start timers for a connection that's already closed.
-      if (closed) return;
 
       heartbeatTimer = setInterval(() => {
         safeEnqueue(encoder.encode(": ping\n\n"));

@@ -187,4 +187,64 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
     assert.equal(orderChannel("abc123"), "order:abc123");
     assert.equal(ADMIN_CHANNEL, "admin");
   });
+
+  // Phase 12 remediation — resolveStartCursor now verifies a supplied
+  // Last-Event-ID actually belongs to the requested channel before
+  // trusting it, and documents the safe fallback for every unusual input.
+  test("a malformed Last-Event-ID falls back to new-subscriber (latest) semantics, not an error", async () => {
+    const channel = "phase11-distributed-events-test:malformed";
+    const ev = await Event.create({ channel, type: "X", payload: {}, expiresAt: new Date(Date.now() + 60000) });
+    const cursor = await resolveStartCursor(channel, "not-a-valid-object-id");
+    assert.equal(cursor.toString(), ev._id.toString(), "a malformed id is treated exactly like no id at all");
+  });
+
+  test("a well-formed but nonexistent (deleted/expired) Last-Event-ID falls back to new-subscriber semantics", async () => {
+    const channel = "phase11-distributed-events-test:deleted";
+    const ev = await Event.create({ channel, type: "X", payload: {}, expiresAt: new Date(Date.now() + 60000) });
+    const neverExistedId = new (await import("mongoose")).default.Types.ObjectId();
+    const cursor = await resolveStartCursor(channel, neverExistedId.toString());
+    assert.equal(cursor.toString(), ev._id.toString(), "an unknown id must never be trusted as a real resume point");
+  });
+
+  test("a well-formed Last-Event-ID from a DIFFERENT channel is rejected as a resume point (foreign-channel isolation)", async () => {
+    const ownChannel = "phase11-distributed-events-test:foreign-own";
+    const otherChannel = "phase11-distributed-events-test:foreign-other";
+    const ownLatest = await Event.create({ channel: ownChannel, type: "OWN", payload: {}, expiresAt: new Date(Date.now() + 60000) });
+    const foreignEvent = await Event.create({ channel: otherChannel, type: "FOREIGN", payload: {}, expiresAt: new Date(Date.now() + 60000) });
+
+    const cursor = await resolveStartCursor(ownChannel, foreignEvent._id.toString());
+    assert.equal(cursor.toString(), ownLatest._id.toString(), "a foreign-channel id must never be accepted as this channel's resume cursor");
+  });
+
+  test("a genuine DB failure during cursor resolution propagates (never silently returns null / a full-history replay)", async (t) => {
+    const channel = "phase11-distributed-events-test:db-failure";
+    const originalFindOne = Event.findOne;
+    t.mock.method(Event, "findOne", () => {
+      throw new Error("simulated transient DB failure");
+    });
+    try {
+      await assert.rejects(() => resolveStartCursor(channel, null), /simulated transient DB failure/);
+    } finally {
+      Event.findOne = originalFindOne;
+    }
+  });
+});
+
+describe("Phase 12 — SSE routes resolve the cursor BEFORE opening the stream and fail closed", () => {
+  for (const rel of ["app/api/admin/events/route.js", "app/api/orders/[id]/events/route.js"]) {
+    test(`${rel}: resolveStartCursor is called and awaited before \`new ReadableStream(\`, not inside it`, () => {
+      const content = fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+      const cursorCallIndex = content.indexOf("await resolveStartCursor(");
+      const streamConstructIndex = content.indexOf("new ReadableStream(");
+      assert.ok(cursorCallIndex !== -1, "resolveStartCursor must still be called");
+      assert.ok(streamConstructIndex !== -1, "the route must still construct a ReadableStream");
+      assert.ok(cursorCallIndex < streamConstructIndex, `${rel}: resolveStartCursor must be resolved before the stream is constructed, so a failure can produce a real error status instead of silently degrading an already-open stream`);
+    });
+
+    test(`${rel}: a resolveStartCursor failure throws an HttpError instead of falling back to a null cursor`, () => {
+      const content = fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+      assert.doesNotMatch(content, /catch\s*\{\s*afterId = null;?\s*\}/, `${rel} must not silently reinterpret a resume failure as "start of time"`);
+      assert.match(content, /throw new HttpError\(503,/, `${rel} must fail closed with a sanitized 503`);
+    });
+  }
 });

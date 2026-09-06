@@ -432,8 +432,17 @@ export async function createOrder(
     }).catch(() => {});
 
     // Low-stock check happens after the transaction commits — this reads the
-    // post-decrement stock, it doesn't need to be part of the atomic write.
-    checkLowStock(createdOrder.items).catch(() => {});
+    // post-decrement stock, it doesn't need to be part of the atomic write
+    // (and must not roll back or fail the already-committed order). Phase 12
+    // remediation: previously an un-awaited `.catch(() => {})` — a failure
+    // here could be silently lost forever if the serverless instance froze
+    // or was recycled the instant after the HTTP response flushed, with no
+    // log line at all. AWAITED via emitBestEffort (the same safe-catch/log
+    // utility every other post-commit best-effort write in this file uses)
+    // so a failure is guaranteed to be observed and logged — safely, never
+    // a raw stack/credential — before this function returns, without ever
+    // failing the order itself.
+    await emitBestEffort(checkLowStock(createdOrder.items));
 
     return { order: redactIdempotencyFields(createdOrder), replayed: false };
   } finally {
@@ -626,6 +635,23 @@ function isOrderStatusTransitionAllowed(from, to) {
   return (ORDER_STATUS_TRANSITIONS[from] || []).includes(to);
 }
 
+// Phase 12 remediation: a request whose `status` already matches the
+// order's current status must be a genuine no-op — no re-save, no
+// deliveredAt/timestamp rewrite, no re-fired event/notification, no cache
+// invalidation. Repeated admin double-clicks or two admin tabs submitting
+// the same transition were previously indistinguishable from a real
+// transition and silently corrupted `deliveredAt` / spammed
+// cancelled-or-refunded notifications every time.
+//
+// A concurrently-supplied `trackingNumber` is treated as its own,
+// independent, genuinely-optional update: it's only considered "changed"
+// when a non-empty value actually differs from what's already stored
+// (matching the pre-existing truthy-only-overwrite contract), and a
+// same-status-but-new-tracking-number request is NOT treated as another
+// status transition — it does not rewrite `deliveredAt`, does not touch
+// the admin channel or create a notification, and only refreshes the
+// customer-facing order-status stream (whose payload already includes
+// `trackingNumber`) so the customer's own tracking view updates live.
 export async function updateOrderStatus(orderId, { status, trackingNumber }) {
   requireObjectIdFormat(orderId, "orderId");
   const order = await Order.findById(orderId);
@@ -635,13 +661,22 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
     throw new HttpError(409, `Cannot change order status from "${order.status}" to "${status}"`);
   }
 
-  order.status = status;
-  if (trackingNumber) order.trackingNumber = trackingNumber;
-  if (status === "delivered") order.deliveredAt = new Date();
+  const isSameStatus = order.status === status;
+  const trackingChanged = !!trackingNumber && trackingNumber !== order.trackingNumber;
+
+  if (isSameStatus && !trackingChanged) {
+    // True no-op — nothing to persist, notify, or invalidate.
+    return { order, changed: false };
+  }
+
+  if (!isSameStatus) order.status = status;
+  if (trackingChanged) order.trackingNumber = trackingNumber;
+  if (!isSameStatus && status === "delivered") order.deliveredAt = new Date();
   await order.save();
 
-  // COD: when delivered, mark Payment as completed.
-  if (status === "delivered") {
+  // COD: when delivered (a genuine, first-time transition only), mark
+  // Payment as completed.
+  if (!isSameStatus && status === "delivered") {
     await Payment.updateOne(
       { order: order._id, method: "cod", status: "pending" },
       { $set: { status: "completed", paidAt: new Date() } },
@@ -657,24 +692,25 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
   // this function returns, but a failure here must not fail the status
   // update itself — see emitBestEffort()'s own comment for why.
   //
-  // Customer-facing channel — unchanged, already worked.
+  // Customer-facing channel — refreshed for a real status transition OR a
+  // tracking-only update (the customer's tracking view needs to know).
   await emitBestEffort(emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber }));
 
-  // Admin-facing: always refresh any open admin order list live (no
-  // notification noise for a routine processing → shipped click — the
-  // person who just clicked it doesn't need to be told they clicked it).
-  // Only status changes another admin/employee genuinely needs surfaced —
-  // refunded reaching here (cancelled is routed through cancelOrder() by
-  // the admin UI, but this stays defensive in case anything else calls
-  // this directly) — also write a real notification.
-  const orderNumber = orderId.toString().slice(-6);
-  await emitBestEffort(emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }));
-  if (["cancelled", "refunded"].includes(status)) {
-    createAdminNotification({
-      message: `Order #${orderNumber} marked as ${status}`,
-      url: "/admin/orders",
-    }).catch(() => {});
+  // Admin-facing: only a REAL status transition refreshes the admin order
+  // list / creates a notification — a tracking-only update on an
+  // unchanged status is not "another status change" the admin team needs
+  // surfaced, and repeating an already-notified terminal status must
+  // never create a second notification.
+  if (!isSameStatus) {
+    const orderNumber = orderId.toString().slice(-6);
+    await emitBestEffort(emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }));
+    if (["cancelled", "refunded"].includes(status)) {
+      createAdminNotification({
+        message: `Order #${orderNumber} marked as ${status}`,
+        url: "/admin/orders",
+      }).catch(() => {});
+    }
   }
 
-  return order;
+  return { order, changed: true };
 }

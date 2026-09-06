@@ -190,9 +190,13 @@ wrong) into two groups:
   routes only ever see data through an independent read (`readEventsSince`
   polling), and MongoDB transactions are invisible to other readers until
   they commit, so this property is automatic.
-- **Non-transactional, best-effort (7 sites: low-stock alerts, order
-  status changes with no surrounding transaction, product create/update,
-  new-review admin notification).** These mutations are single-document
+- **Non-transactional, best-effort (7 `emitBestEffort()` call sites, verified
+  by direct grep as of Phase 12's remediation pass: `services/orderService.js`
+  — the post-commit low-stock check itself (now awaited, see below) and the
+  `LOW_STOCK_ALERT` event inside it, plus the customer/admin order-status
+  events in `updateOrderStatus()`; `services/productService.js` — product
+  create and update; `services/reviewService.js` — new-review admin
+  notification).** These mutations are single-document
   writes or have no transaction to join. Each event write is now awaited
   via `emitBestEffort()` before the calling function returns — so a
   failure is guaranteed to be observed and logged (`lib/logger.js`'s

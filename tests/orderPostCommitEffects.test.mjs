@@ -20,6 +20,7 @@
 
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import {
   dbReady,
@@ -38,10 +39,14 @@ const reason = skipReason;
 let notificationCalls = [];
 let adminEventCalls = [];
 let orderEventCalls = [];
+let notificationDelayMs = 0;
+let failAdminEventTypes = new Set();
+let loggedFailures = [];
 
 mock.module("../services/notificationService.js", {
   namedExports: {
     createAdminNotification: async (payload) => {
+      if (notificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, notificationDelayMs));
       notificationCalls.push(payload);
     },
     getNotifications: async () => ({ total: 0, unreadCount: 0, page: 1, pages: 1, notifications: [] }),
@@ -53,6 +58,9 @@ mock.module("../lib/events.js", {
     orderChannel: (orderId) => `order:${orderId}`,
     ADMIN_CHANNEL: "admin",
     emitAdminEvent: (payload) => {
+      if (failAdminEventTypes.has(payload.type)) {
+        return Promise.reject(new Error(`simulated failure for ${payload.type}`));
+      }
       adminEventCalls.push(payload);
       return Promise.resolve();
     },
@@ -60,11 +68,14 @@ mock.module("../lib/events.js", {
       orderEventCalls.push({ orderId, payload });
       return Promise.resolve();
     },
+    // Mirrors lib/events.js's real emitBestEffort exactly (catch + safe
+    // log, never rethrow) so services/orderService.js's real call sites
+    // (including the Phase 12 checkLowStock fix) behave identically here.
     emitBestEffort: async (promise) => {
       try {
         await promise;
-      } catch {
-        // matches lib/events.js's real emitBestEffort: never rethrows
+      } catch (err) {
+        loggedFailures.push(err.message);
       }
     },
   },
@@ -205,5 +216,138 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       await Product.deleteOne({ _id: product._id });
       await User.deleteOne({ _id: buyer._id });
     }
+  });
+
+  // Phase 12 remediation — checkLowStock() must be genuinely awaited by
+  // createOrder() before the response returns (previously an un-awaited
+  // `.catch(() => {})`). LOW_STOCK_THRESHOLD is 4 (services/orderService.js);
+  // ordering a product down to a remaining stock of <=4 triggers the alert.
+  describe("checkLowStock() is genuinely awaited (Phase 12 remediation)", () => {
+    after(() => {
+      notificationDelayMs = 0;
+      failAdminEventTypes = new Set();
+    });
+
+    test("a deliberately delayed low-stock notification is already recorded by the time createOrder's response resolves", async () => {
+      notificationCalls = [];
+      adminEventCalls = [];
+      notificationDelayMs = 150;
+      const buyer = await createTestUser({ role: "customer" });
+      const product = await createTestProduct({ stock: 5 }); // 5 - 2 = 3, <= threshold(4)
+      try {
+        const session = await createTestSession(buyer._id);
+        const body = {
+          items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 2 }],
+          shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
+        };
+        const res = await createOrderPOST(
+          requestAs({ method: "POST", url: "http://test/api/orders", session, body, idempotencyKey: "lowstock-await-proof-0123" }),
+        );
+        assert.equal(res.status, 201);
+        const lowStockNotifications = notificationCalls.filter((n) => /^(Low stock|Out of stock):/.test(n.message));
+        assert.equal(lowStockNotifications.length, 1, "the delayed low-stock notification must already have completed before the HTTP response resolved");
+        const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
+        assert.equal(lowStockEvents.length, 1, "exactly one LOW_STOCK_ALERT event for a genuine new order");
+      } finally {
+        notificationDelayMs = 0;
+        await Order.deleteMany({ user: buyer._id });
+        await Product.deleteOne({ _id: product._id });
+        await User.deleteOne({ _id: buyer._id });
+      }
+    });
+
+    test("a forced LOW_STOCK_ALERT event failure is safely absorbed: order still succeeds, stock is still correctly decremented, and the failure is logged without exposing raw error detail to the client", async () => {
+      notificationCalls = [];
+      adminEventCalls = [];
+      loggedFailures = [];
+      failAdminEventTypes = new Set(["LOW_STOCK_ALERT"]);
+      const buyer = await createTestUser({ role: "customer" });
+      const product = await createTestProduct({ stock: 5 });
+      try {
+        const session = await createTestSession(buyer._id);
+        const body = {
+          items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 2 }],
+          shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
+        };
+        const res = await createOrderPOST(
+          requestAs({ method: "POST", url: "http://test/api/orders", session, body, idempotencyKey: "lowstock-failure-proof-012" }),
+        );
+        // The already-committed order must never be rolled back or fail
+        // because of a post-commit low-stock alert failure.
+        assert.equal(res.status, 201);
+        const json = await res.json();
+        assert.equal(json.order.status, "pending");
+        const responseText = JSON.stringify(json);
+        assert.doesNotMatch(responseText, /simulated failure/, "the client response must never carry the raw internal error message");
+
+        const persisted = await Product.findById(product._id).lean();
+        assert.equal(persisted.variants[0].stock, 3, "stock must still be correctly decremented despite the low-stock alert failing");
+        assert.equal(loggedFailures.length, 1, "the failure must be observed/logged (via emitBestEffort), not silently swallowed with no trace at all");
+      } finally {
+        failAdminEventTypes = new Set();
+        await Order.deleteMany({ user: buyer._id });
+        await Product.deleteOne({ _id: product._id });
+        await User.deleteOne({ _id: buyer._id });
+      }
+    });
+
+    test("sequential replay of an order that triggered a low-stock alert does not duplicate it", async () => {
+      notificationCalls = [];
+      adminEventCalls = [];
+      const buyer = await createTestUser({ role: "customer" });
+      const product = await createTestProduct({ stock: 5 });
+      try {
+        const session = await createTestSession(buyer._id);
+        const body = {
+          items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 2 }],
+          shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
+        };
+        const key = "lowstock-seq-replay-01234";
+        const res1 = await createOrderPOST(requestAs({ method: "POST", url: "http://test/api/orders", session, body, idempotencyKey: key }));
+        assert.equal(res1.status, 201);
+        const res2 = await createOrderPOST(requestAs({ method: "POST", url: "http://test/api/orders", session, body, idempotencyKey: key }));
+        assert.equal(res2.status, 200);
+
+        const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
+        assert.equal(lowStockEvents.length, 1, "a replayed request must not re-run low-stock processing");
+      } finally {
+        await Order.deleteMany({ user: buyer._id });
+        await Product.deleteOne({ _id: product._id });
+        await User.deleteOne({ _id: buyer._id });
+      }
+    });
+
+    test("concurrent replay of an order that triggers a low-stock alert does not duplicate it", async () => {
+      notificationCalls = [];
+      adminEventCalls = [];
+      const buyer = await createTestUser({ role: "customer" });
+      const product = await createTestProduct({ stock: 5 });
+      try {
+        const session = await createTestSession(buyer._id);
+        const body = {
+          items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 2 }],
+          shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
+        };
+        const key = "lowstock-concurrent-replay-0";
+        const [r1, r2] = await Promise.all([
+          createOrderPOST(requestAs({ method: "POST", url: "http://test/api/orders", session, body, idempotencyKey: key })),
+          createOrderPOST(requestAs({ method: "POST", url: "http://test/api/orders", session, body, idempotencyKey: key })),
+        ]);
+        assert.ok([r1.status, r2.status].every((s) => s === 200 || s === 201));
+
+        const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
+        assert.equal(lowStockEvents.length, 1, "concurrent replay must not duplicate the low-stock alert");
+      } finally {
+        await Order.deleteMany({ user: buyer._id });
+        await Product.deleteOne({ _id: product._id });
+        await User.deleteOne({ _id: buyer._id });
+      }
+    });
+
+    test("source regression guard: the outer checkLowStock() call site is awaited via emitBestEffort, never a bare un-awaited .catch()", () => {
+      const src = fs.readFileSync(new URL("../services/orderService.js", import.meta.url), "utf8");
+      assert.match(src, /await emitBestEffort\(checkLowStock\(createdOrder\.items\)\)/, "the outer call must be awaited through emitBestEffort");
+      assert.doesNotMatch(src, /checkLowStock\(createdOrder\.items\)\.catch\(\(\) => \{\}\)/, "the old un-awaited fire-and-forget pattern must not reappear");
+    });
   });
 });

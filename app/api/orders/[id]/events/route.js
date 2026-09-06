@@ -42,6 +42,20 @@ export const GET = withRoute(async (request, { params }) => {
 
   const channel = orderChannel(id);
 
+  // Phase 12 remediation: the starting cursor is now resolved BEFORE the
+  // stream/Response is ever constructed — a genuine DB failure here
+  // (never "not found", which resolveStartCursor already handles safely)
+  // must fail the request closed with a sanitized error, not silently
+  // fall back to a full-history replay after the 200/text-event-stream
+  // headers have already been sent (which, once the stream body exists,
+  // can no longer be changed to an error status).
+  let afterId;
+  try {
+    afterId = await resolveStartCursor(channel, request.headers.get("last-event-id"));
+  } catch {
+    throw new HttpError(503, "Realtime stream temporarily unavailable, please retry");
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       let closed = false;
@@ -58,11 +72,6 @@ export const GET = withRoute(async (request, { params }) => {
 
       safeEnqueue(sseLine("connected", { orderId: id }));
 
-      // See app/api/admin/events/route.js's identical comment: `let`,
-      // declared before `cleanup`, avoids a temporal-dead-zone throw (and
-      // a resulting leaked, never-cleared interval) if request.signal
-      // aborts while the resolveStartCursor() await below is still
-      // pending.
       let heartbeatTimer;
       let pollTimer;
 
@@ -79,15 +88,6 @@ export const GET = withRoute(async (request, { params }) => {
       };
 
       request.signal.addEventListener("abort", cleanup);
-
-      let afterId;
-      try {
-        afterId = await resolveStartCursor(channel, request.headers.get("last-event-id"));
-      } catch {
-        afterId = null;
-      }
-
-      if (closed) return;
 
       heartbeatTimer = setInterval(() => {
         safeEnqueue(encoder.encode(": ping\n\n"));
