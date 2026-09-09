@@ -26,7 +26,7 @@ import EmptyState from "../../components/ui/EmptyState.jsx";
 import Breadcrumb from "../../components/ui/Breadcrumb.jsx";
 import { useGetProductsQuery, useLazyGetProductsQuery, useGetProductGroupingsQuery } from "../../store/productApi.js";
 import { useGetBrandsQuery, useGetCategoriesQuery, useGetAttributesQuery } from "../../store/shopApi.js";
-import { cn } from "../../lib/utils.js";
+import { cn, responsiveBatchSize, visibleBufferCount } from "../../lib/utils.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
@@ -47,11 +47,41 @@ const AGE_GROUP_OPTIONS = [
   { value: "girls", labelKey: "filters.girls" },
   { value: "adult", labelKey: "filters.adults" },
 ];
-const COLLECTION_OPTIONS = [
+// Single-select tab list — "" is the "All" tab (clears `collection`
+// entirely), matching the department chips' own "All" convention.
+const COLLECTION_TABS = [
+  { value: "", labelKey: "shop.all" },
   { value: "new", labelKey: "filters.new" },
   { value: "featured", labelKey: "filters.featured" },
   { value: "discount", labelKey: "filters.discount" },
 ];
+const AVAILABILITY_OPTIONS = [
+  { value: "in_stock", labelKey: "filters.inStock" },
+  { value: "out_of_stock", labelKey: "filters.outOfStock" },
+];
+const RATING_THRESHOLDS = [5, 4, 3, 2, 1];
+
+// Pure, DOM-free responsive visibility class for the server-rendered
+// up-to-12 product buffer (v3-1): cards 1-8 (index 0-7) always visible,
+// the 9th (index 8) visible from `md` (tablet), the 10th-12th
+// (index 9-11) visible from `lg` (desktop) — exactly the required 8/9/12
+// visible-product counts, decided entirely by CSS so server and client
+// render identical markup on first paint (zero hydration mismatch, zero
+// layout shift). `revealedExtra` (only ever non-zero after a "Load more"
+// click on a narrower breakpoint, see showMore()) forces cards beyond the
+// always-visible 8 to render unconditionally, ahead of their normal
+// breakpoint. Cards beyond the initial 12 (fetched via "Load more") are
+// always visible immediately — the responsive clamp only ever applies to
+// the original server-rendered buffer.
+function initialCardVisibilityClass(index, revealedExtra = 0) {
+  if (index >= 12) return "";
+  if (index < 8 + revealedExtra) return "";
+  // `md:flex`/`lg:flex` (not `block`) — ProductCard's own root element is
+  // `flex flex-col`; toggling to `block` instead of `flex` once revealed
+  // would silently drop that internal layout for exactly this card.
+  if (index === 8) return "hidden md:flex";
+  return "hidden lg:flex";
+}
 
 const SORTS = [
   { value: "-createdAt", labelKey: "sort.newest" },
@@ -107,6 +137,29 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   const [triggerGetProducts] = useLazyGetProductsQuery();
   const hasMore = products.length < total;
 
+  // Responsive visible-count (12 desktop / 9 tablet / 8 mobile): the FIRST
+  // paint is pure server-rendered CSS (per-card nth-position classes below
+  // — identical DOM on server and client, zero hydration risk). This hook
+  // is only ever consulted post-mount, only to decide how many additional
+  // cards a "Load more" click reveals/fetches — never what's in the DOM on
+  // first render, so an SSR/client breakpoint mismatch here is harmless.
+  const [breakpoint, setBreakpoint] = useState("desktop");
+  useEffect(() => {
+    const compute = () => {
+      if (window.matchMedia("(min-width: 1024px)").matches) setBreakpoint("desktop");
+      else if (window.matchMedia("(min-width: 768px)").matches) setBreakpoint("tablet");
+      else setBreakpoint("mobile");
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+  // How many of the server-rendered up-to-12 buffer are currently forced
+  // visible beyond the CSS-driven responsive default (0 until "Load more"
+  // is clicked at least once on a narrower breakpoint).
+  const [revealedExtra, setRevealedExtra] = useState(0);
+  const visibleBuffered = visibleBufferCount(breakpoint, revealedExtra, Math.min(products.length, PAGE_SIZE));
+
   const { data: brandsData } = useGetBrandsQuery();
   const { data: catsData, isLoading: catsLoading } = useGetCategoriesQuery();
   // Unfiltered sample of catalog used only to draw the price histogram so the
@@ -158,13 +211,34 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
     setParam(key, next.join(","));
   };
 
+  // Canonical, single-select collection tabs (v3-2/v3-6): always clears
+  // the legacy new/featured/discount booleans, so the new tab UI never
+  // emits a request mixing both shapes (parseProductListQuery rejects that
+  // combination outright — this just means the UI never generates it).
+  const setCollection = (value) => {
+    const next = new URLSearchParams(sp);
+    next.delete("new");
+    next.delete("featured");
+    next.delete("discount");
+    if (!value) next.delete("collection");
+    else next.set("collection", value);
+    next.delete("page");
+    setSp(next);
+  };
+
   // Switching department invalidates every style/attribute selection made
-  // under the previous one — reset to just the new department (keep sort,
-  // search, price, Age Group, and Product Collection, since none of those
-  // are department-specific the way Style/attribute facets are).
+  // under the previous one — reset to just the new department. Kept
+  // params are the ones that are genuinely cross-department (common
+  // filters): sort, search, price, Age Group, Collection (both the
+  // canonical param and the legacy booleans), Availability, and Rating.
+  // Everything else (style, brand, and every department-specific
+  // attribute facet like fabric/shade/shoeSize) is dropped — the same
+  // stale-filter-removal guarantee services/productService.js's
+  // stripInapplicableAttributeFilters() also enforces server-side as a
+  // defensive backstop.
   const selectDepartment = (deptId) => {
     const next = new URLSearchParams();
-    for (const k of ["sort", "search", "priceMin", "priceMax", "ageGroup", "new", "featured", "discount"]) {
+    for (const k of ["sort", "search", "priceMin", "priceMax", "ageGroup", "collection", "new", "featured", "discount", "availability", "ratingGte"]) {
       if (sp.get(k)) next.set(k, sp.get(k));
     }
     if (deptId) next.set("category", deptId);
@@ -184,6 +258,15 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   };
 
   const showMore = async () => {
+    // First, reveal whatever's still sitting in the server-rendered buffer
+    // (up to 12) but responsively hidden — no fetch needed for that. Only
+    // once the buffer is fully visible does a click fetch a new page.
+    const bufferedHidden = Math.min(products.length, PAGE_SIZE) - visibleBuffered;
+    if (bufferedHidden > 0) {
+      setRevealedExtra((r) => r + Math.min(bufferedHidden, responsiveBatchSize(breakpoint)));
+      return;
+    }
+
     setLoadingMore(true);
     try {
       const query = {};
@@ -192,6 +275,15 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
         else if (k === "priceMax") query.basePrice = { ...(query.basePrice || {}), lte: v };
         else query[k] = v;
       }
+      // Server pagination stays a constant PAGE_SIZE (12) per page — the
+      // same limit the SSR first page used — so `page`/`skip` math never
+      // desyncs (a varying limit here would either skip or re-fetch items
+      // relative to the fixed-size first page). Every item from a
+      // client-fetched page is immediately visible once it arrives (no
+      // further breakpoint-based hiding — the responsive clamp only ever
+      // applies to the original server-rendered buffer, see
+      // visibleBufferCount()), so the responsive batch size only governs
+      // how much of THAT buffer a click reveals, not how much is fetched.
       query.limit = PAGE_SIZE;
       query.page = page + 1;
       if (!query.sort) query.sort = "-createdAt";
@@ -221,10 +313,26 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
       }
     }
 
-    for (const opt of COLLECTION_OPTIONS) {
-      if (sp.get(opt.value) === "true") {
-        chips.push({ id: opt.value, label: t(opt.labelKey), onRemove: () => setParam(opt.value, "") });
+    for (const opt of COLLECTION_TABS) {
+      if (!opt.value) continue; // "All" — nothing to show as a removable chip
+      if (sp.get("collection") === opt.value || sp.get(opt.value) === "true") {
+        chips.push({ id: `collection:${opt.value}`, label: t(opt.labelKey), onRemove: () => setCollection("") });
       }
+    }
+
+    const availabilityVal = sp.get("availability");
+    if (availabilityVal) {
+      const opt = AVAILABILITY_OPTIONS.find((o) => o.value === availabilityVal);
+      if (opt) chips.push({ id: "availability", label: t(opt.labelKey), onRemove: () => setParam("availability", "") });
+    }
+
+    const ratingVal = sp.get("ratingGte");
+    if (ratingVal) {
+      chips.push({
+        id: "ratingGte",
+        label: t("filters.ratingAndUp", { count: ratingVal }),
+        onRemove: () => setParam("ratingGte", ""),
+      });
     }
 
     const styleId = sp.get("style");
@@ -347,6 +455,7 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
           sp={sp}
           setSp={setSp}
           setParam={setParam}
+          setCollection={setCollection}
           toggleFacetValue={toggleFacetValue}
           clearAll={clearAll}
           brandsData={brandsData}
@@ -371,6 +480,7 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
               sp={sp}
               setSp={setSp}
               setParam={setParam}
+              setCollection={setCollection}
               toggleFacetValue={toggleFacetValue}
               clearAll={clearAll}
               brandsData={brandsData}
@@ -401,7 +511,7 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
             <>
               <div
                 className={cn(
-                  "grid grid-cols-2 gap-5 lg:grid-cols-3 xl:grid-cols-4 transition-opacity",
+                  "grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4 transition-opacity",
                   loadingMore && "opacity-60"
                 )}
               >
@@ -410,16 +520,37 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
                   // no hero image, so this grid's own first card is this
                   // route's genuine LCP candidate (see ProductCard.jsx's
                   // own comment on why every other grid on the site omits
-                  // this prop).
-                  <ProductCard key={p._id} product={p} index={i} attributeMeta={cardAttributeMeta} priority />
+                  // this prop). `initialCardVisibilityClass` is pure,
+                  // server-rendered CSS (identical DOM on server and
+                  // client) — cards 1-8 always visible, the 9th from `md`,
+                  // 10th-12th from `lg`, matching the required 8/9/12
+                  // visible-product counts with zero hydration risk; a
+                  // "Load more" click can later force cards 9-12 visible
+                  // early via `revealedExtra` (see showMore()) without
+                  // ever touching first-paint markup.
+                  <ProductCard
+                    key={p._id}
+                    product={p}
+                    index={i}
+                    attributeMeta={cardAttributeMeta}
+                    priority
+                    className={initialCardVisibilityClass(i, revealedExtra)}
+                  />
                 ))}
               </div>
 
-              {/* Show more */}
-              {hasMore && (
+              {/* Show more — visible whenever there's still something to
+                  reveal: either buffered-but-responsively-hidden cards
+                  (revealed instantly, no fetch) or a real next page. */}
+              {(visibleBuffered < Math.min(products.length, PAGE_SIZE) || hasMore) && (
                 <div className="mt-10 flex flex-col items-center gap-2">
                   <p className="text-xs text-muted-foreground">
-                    {t("shop.showingOfTotal", { count: products.length, total })}
+                    {t("shop.showingOfTotal", {
+                      count: Math.min(products.length, PAGE_SIZE) === products.length
+                        ? visibleBuffered
+                        : visibleBuffered + (products.length - Math.min(products.length, PAGE_SIZE)),
+                      total,
+                    })}
                   </p>
                   <Button
                     variant="outline"
@@ -571,10 +702,17 @@ function FilterSheetMobile({ open, onClose, activeFilterCount, children }) {
   );
 }
 
+// True only when the current result set actually has more than one
+// non-zero Age Group bucket — Cosmetics/Shoes/Sunglasses (every product
+// defaulted to "adult") naturally never satisfy this, so the filter simply
+// doesn't render there, with no per-department hardcoding at all.
+const hasMeaningfulAgeGroupVariety = (counts) => Object.values(counts || {}).filter((c) => c > 0).length > 1;
+
 function FilterPanel({
   sp,
   setSp,
   setParam,
+  setCollection,
   toggleFacetValue,
   clearAll,
   brandsData,
@@ -590,10 +728,11 @@ function FilterPanel({
   facets,
 }) {
   const { t, locale } = useLocale();
-  // Filter layout: Category, Age Group, Product Collection, [Style /
-  // attribute facets / Brand — only once a department narrows what's
-  // available], Price Range. Age Group and Product Collection are
-  // permanently visible regardless of department selection.
+  // Filter layout: Category, Age Group (only when meaningful), Collection,
+  // Availability, Rating, [Style / attribute facets / Brand — only once a
+  // department narrows what's available], Price Range. Collection/
+  // Availability/Rating are permanently visible regardless of department
+  // selection — they're common filters, not department-specific ones.
   if (!selectedDept) {
     return (
       <>
@@ -603,8 +742,12 @@ function FilterPanel({
           selectedDept={selectedDept}
           onSelect={selectDepartment}
         />
-        <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
-        <ProductCollectionFilterGroup sp={sp} setParam={setParam} counts={facets?.collection} />
+        {hasMeaningfulAgeGroupVariety(facets?.ageGroup) && (
+          <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
+        )}
+        <CollectionTabs sp={sp} setCollection={setCollection} counts={facets?.collection} />
+        <AvailabilityFilterGroup sp={sp} setParam={setParam} counts={facets?.availability} />
+        <RatingFilterGroup sp={sp} setParam={setParam} counts={facets?.ratingGte} />
         <PriceRange sp={sp} setSp={setSp} histogramProducts={histogramProducts} />
         <Button variant="outline" size="sm" onClick={clearAll} className="w-full">
           {t("common.clearAll")}
@@ -624,8 +767,12 @@ function FilterPanel({
         onSelect={selectDepartment}
       />
 
-      <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
-      <ProductCollectionFilterGroup sp={sp} setParam={setParam} counts={facets?.collection} />
+      {hasMeaningfulAgeGroupVariety(facets?.ageGroup) && (
+        <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
+      )}
+      <CollectionTabs sp={sp} setCollection={setCollection} counts={facets?.collection} />
+      <AvailabilityFilterGroup sp={sp} setParam={setParam} counts={facets?.availability} />
+      <RatingFilterGroup sp={sp} setParam={setParam} counts={facets?.ratingGte} />
 
       {(groupingsLoading || groupings.length > 0) && (
         <FilterGroup title={t("shop.style")}>
@@ -793,17 +940,85 @@ function AgeGroupFilterGroup({ sp, toggleFacetValue, counts }) {
   );
 }
 
-// Permanently visible, third group — New / Featured / Discount. Each is its
-// own boolean URL param (not a CSV multi-value field like ageGroup), and
-// checking more than one ORs them together server-side (see
-// services/productService.js's buildFilter: 2+ of new/featured/discount
-// become a $or block instead of independent AND'd conditions).
-function ProductCollectionFilterGroup({ sp, setParam, counts }) {
+// Permanently visible, third group — All / New Arrivals / Featured /
+// Discounts as a real single-select tab control (role="tablist"/"tab",
+// aria-selected, Left/Right/Home/End keyboard nav — exactly one active tab
+// at a time), not a checkbox group: selecting one always replaces the
+// previous selection via the canonical `?collection=` param, never ORs
+// multiple together the way the legacy boolean params could.
+function CollectionTabs({ sp, setCollection, counts }) {
   const { t } = useLocale();
+  const active = sp.get("collection") || "";
+  const tabRefs = useRef([]);
+
+  const focusAndSelect = (idx) => {
+    const tab = COLLECTION_TABS[idx];
+    tabRefs.current[idx]?.focus();
+    setCollection(tab.value);
+  };
+
+  const onKeyDown = (e, idx) => {
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      focusAndSelect((idx + 1) % COLLECTION_TABS.length);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      focusAndSelect((idx - 1 + COLLECTION_TABS.length) % COLLECTION_TABS.length);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      focusAndSelect(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      focusAndSelect(COLLECTION_TABS.length - 1);
+    }
+  };
+
   return (
-    <FilterGroup title={t("filters.productCollection")}>
-      {COLLECTION_OPTIONS.map((opt) => {
-        const checked = sp.get(opt.value) === "true";
+    <div className="mb-5 border-b border-border pb-5">
+      <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+        {t("filters.productCollection")}
+      </h3>
+      <div role="tablist" aria-label={t("filters.productCollection")} className="flex flex-wrap gap-2">
+        {COLLECTION_TABS.map((tab, idx) => {
+          const isActive = active === tab.value;
+          const count = tab.value ? (counts?.[tab.value] ?? 0) : null;
+          return (
+            <button
+              key={tab.value || "all"}
+              ref={(el) => (tabRefs.current[idx] = el)}
+              type="button"
+              role="tab"
+              id={`collection-tab-${tab.value || "all"}`}
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => setCollection(tab.value)}
+              onKeyDown={(e) => onKeyDown(e, idx)}
+              className={cn(
+                "h-9 rounded-full border px-3.5 text-xs font-medium transition-colors focus-ring",
+                isActive ? "border-ink bg-ink text-canvas" : "border-line text-ink hover:border-ink",
+              )}
+            >
+              {t(tab.labelKey)}
+              {count !== null ? ` (${count})` : ""}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Common filter, permanently visible: in-stock vs out-of-stock, computed
+// server-side from real purchasable variant stock (see
+// services/productService.js's buildFilter — "at least one variant has
+// stock > 0"), never a per-department concept.
+function AvailabilityFilterGroup({ sp, setParam, counts }) {
+  const { t } = useLocale();
+  const selected = sp.get("availability") || "";
+  return (
+    <FilterGroup title={t("filters.availability")}>
+      {AVAILABILITY_OPTIONS.map((opt) => {
+        const checked = selected === opt.value;
         const count = counts?.[opt.value] ?? 0;
         return (
           <CheckBox
@@ -811,7 +1026,32 @@ function ProductCollectionFilterGroup({ sp, setParam, counts }) {
             label={`${t(opt.labelKey)} (${count})`}
             checked={checked}
             disabled={count === 0 && !checked}
-            onChange={(v) => setParam(opt.value, v ? "true" : "")}
+            onChange={(v) => setParam("availability", v ? opt.value : "")}
+          />
+        );
+      })}
+    </FilterGroup>
+  );
+}
+
+// Common filter, permanently visible: one minimum-rating threshold at a
+// time (5 / 4+ / 3+ / 2+ / 1+) — an unrated product (rating: 0, the schema
+// default) never matches any of these, including "1 & up".
+function RatingFilterGroup({ sp, setParam, counts }) {
+  const { t } = useLocale();
+  const selected = sp.get("ratingGte") || "";
+  return (
+    <FilterGroup title={t("filters.rating")}>
+      {RATING_THRESHOLDS.map((n) => {
+        const checked = selected === String(n);
+        const count = counts?.[n] ?? 0;
+        return (
+          <CheckBox
+            key={n}
+            label={`${t("filters.ratingAndUp", { count: n })} (${count})`}
+            checked={checked}
+            disabled={count === 0 && !checked}
+            onChange={(v) => setParam("ratingGte", v ? String(n) : "")}
           />
         );
       })}
