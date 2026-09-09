@@ -362,6 +362,44 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
   });
 
   describe("The real Cosmetics migration script — CLI dry-run/apply/idempotency, plan correctness, and forced-failure rollback", () => {
+    // The migration script has a real, documented dependency: a Cosmetics
+    // department (Category slug "cosmetics") must already exist. On a
+    // developer machine that's already run scripts/seedCatalog.mjs, it
+    // does — but CI provisions a fresh, empty test database per run, so
+    // this suite must never assume ambient seed data exists (confirmed by
+    // a real CI failure: the dry-run exited 1 there with "Cosmetics
+    // department not found," while passing locally against pre-seeded
+    // data). Create a minimal fixture only when nothing real is already
+    // there, and only clean up what this block itself created.
+    let ownsCosmeticsFixture = false;
+    let fixtureLeafIds = [];
+
+    before(async () => {
+      const existing = await Category.findOne({ slug: "cosmetics", parent: null }).lean();
+      if (existing) return;
+      ownsCosmeticsFixture = true;
+      // findOneAndUpdate (a query op), not Category.create — the schema's
+      // pre("validate") document-middleware hook treats every field on a
+      // brand-new document as "modified" and silently overwrites an
+      // explicit slug with an auto-generated one (the exact bug this
+      // migration script itself had — see its own comment). Same
+      // upsert-by-slug pattern used there and in scripts/seedCatalog.mjs.
+      const upsertCategory = (slug, data) =>
+        Category.findOneAndUpdate({ slug }, { $set: data }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true });
+      const cosmetics = await upsertCategory("cosmetics", { name: "Cosmetics", parent: null });
+      const lipstick = await upsertCategory("cosmetics-lipstick", { name: "Lipstick", parent: cosmetics._id });
+      const foundation = await upsertCategory("cosmetics-foundation", { name: "Foundation", parent: cosmetics._id });
+      const facewash = await upsertCategory("cosmetics-facewash", { name: "Facewash", parent: cosmetics._id });
+      fixtureLeafIds = [lipstick._id, foundation._id, facewash._id];
+    });
+
+    after(async () => {
+      if (!ownsCosmeticsFixture) return;
+      await Product.deleteMany({ category: { $in: fixtureLeafIds } });
+      await Category.deleteMany({ slug: { $regex: /^cosmetics(-|$)/ } });
+      await AttributeDefinition.deleteOne({ key: "finish" });
+    });
+
     test("dry-run reports a real plan without writing anything", async () => {
       const dry = await runMigrationCli();
       const output = (dry.stdout || "") + (dry.stderr || "");
@@ -386,11 +424,11 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
 
     test("a forced mid-transaction failure leaves zero partial state (full rollback)", async () => {
       // Reset to a pre-migration state for a clean forced-failure test —
-      // safe because this whole describe block only ever touches the real
-      // seeded "cosmetics" tree via this script's own idempotent plan/apply
-      // functions, never ad hoc direct writes.
+      // safe because this whole describe block only ever touches the
+      // "cosmetics" tree (real seeded data or this block's own fixture,
+      // per the before() hook above) via this script's own idempotent
+      // plan/apply functions, never ad hoc direct writes.
       const cosmetics = await Category.findOne({ slug: "cosmetics", parent: null }).lean();
-      if (!cosmetics) return; // scripts/seedCatalog.mjs hasn't been run against this test DB — nothing to roll back
       await Category.deleteMany({ slug: { $in: ["cosmetics-face", "cosmetics-eyes", "cosmetics-lips", "cosmetics-skin"] } });
       await Category.updateMany(
         { slug: { $in: ["cosmetics-lipstick", "cosmetics-foundation", "cosmetics-facewash"] } },
