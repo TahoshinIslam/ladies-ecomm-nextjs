@@ -100,9 +100,13 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
     ({ default: Product } = await import("../../models/productModel.js"));
     ({ default: Category } = await import("../../models/categoryModel.js"));
 
-    const burqa = await Category.findOne({ slug: "burqa", parent: null }).lean();
-    const hijab = await Category.findOne({ slug: "hijab", parent: null }).lean();
-    assert.ok(burqa && hijab, "seed data must include Burqa and Hijab top-level departments — the harness runs scripts/seedCatalog.mjs before this file");
+    // Burqa/Hijab are real departments — one hop below the "Clothes"
+    // division, not top-level roots themselves (see services/
+    // categoryService.js's department-vs-division distinction) — so this
+    // must not constrain `parent: null`.
+    const burqa = await Category.findOne({ slug: "burqa" }).lean();
+    const hijab = await Category.findOne({ slug: "hijab" }).lean();
+    assert.ok(burqa && hijab, "seed data must include Burqa and Hijab departments — the harness runs scripts/seedCatalog.mjs before this file");
 
     const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
     assert.ok(burqaLeaf, "Burqa needs at least one subcategory to attach test products to");
@@ -118,8 +122,16 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
     // scope" department, then wrongly assert that an IN-scope product had
     // "leaked" — a false test failure, not a real app bug. Importing the
     // real constant instead of re-guessing it keeps this from drifting again.
+    // Excludes "clothes" alongside the real in-scope departments — Clothes
+    // is a root, but it's a division (its children are departments like
+    // Burqa, not leaves), never itself a valid out-of-scope department to
+    // pick here. Only a genuine root DEPARTMENT (children are leaves) not
+    // in STOREFRONT_DEPARTMENT_SLUGS should ever match.
     const { STOREFRONT_DEPARTMENT_SLUGS } = await import("../../services/productService.js");
-    const outOfScopeDept = await Category.findOne({ parent: null, slug: { $nin: STOREFRONT_DEPARTMENT_SLUGS } }).lean();
+    const outOfScopeDept = await Category.findOne({
+      parent: null,
+      slug: { $nin: [...STOREFRONT_DEPARTMENT_SLUGS, "clothes"] },
+    }).lean();
     if (outOfScopeDept) {
       const outOfScopeLeaf = await Category.findOne({ parent: outOfScopeDept._id }).lean();
       outOfScopeLeafCategoryId = outOfScopeLeaf?._id ?? null;

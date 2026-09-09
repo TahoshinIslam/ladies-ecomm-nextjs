@@ -73,7 +73,7 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
     // there, not a bug. Attach it to a real "burqa" subcategory instead,
     // matching tests/http/productFilters.integration.test.mjs's own
     // fixture pattern.
-    const burqa = await Category.findOne({ slug: "burqa", parent: null }).lean();
+    const burqa = await Category.findOne({ slug: "burqa" }).lean();
     assert.ok(burqa, "seed data must include the Burqa department");
     const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
     assert.ok(burqaLeaf, "Burqa needs at least one subcategory to attach a test product to");

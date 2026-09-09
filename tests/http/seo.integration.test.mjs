@@ -109,7 +109,7 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     ({ default: Order } = await import("../../models/orderModel.js"));
     ({ default: User } = await import("../../models/userModel.js"));
 
-    const burqa = await Category.findOne({ slug: "burqa", parent: null }).lean();
+    const burqa = await Category.findOne({ slug: "burqa" }).lean();
     assert.ok(burqa, "seed data must include the Burqa department");
     const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
     burqaDeptId = burqa._id.toString();

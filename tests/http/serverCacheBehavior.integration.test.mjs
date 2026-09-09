@@ -113,7 +113,7 @@ describe("Phase 8 — real cache hit/invalidation behavior (real MongoDB, via HT
     ({ default: Category } = await import("../../models/categoryModel.js"));
     ({ default: Order } = await import("../../models/orderModel.js"));
 
-    const burqa = await Category.findOne({ slug: "burqa", parent: null }).lean();
+    const burqa = await Category.findOne({ slug: "burqa" }).lean();
     assert.ok(burqa, "seed data must include the Burqa department");
     const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
     assert.ok(burqaLeaf, "Burqa needs a subcategory to attach test products to");
