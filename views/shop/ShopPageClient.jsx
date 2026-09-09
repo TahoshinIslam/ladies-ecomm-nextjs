@@ -59,8 +59,6 @@ const AVAILABILITY_OPTIONS = [
   { value: "in_stock", labelKey: "filters.inStock" },
   { value: "out_of_stock", labelKey: "filters.outOfStock" },
 ];
-const RATING_THRESHOLDS = [5, 4, 3, 2, 1];
-
 // Pure, DOM-free responsive visibility class for the server-rendered
 // up-to-12 product buffer (v3-1): cards 1-8 (index 0-7) always visible,
 // the 9th (index 8) visible from `md` (tablet), the 10th-12th
@@ -324,15 +322,6 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
     if (availabilityVal) {
       const opt = AVAILABILITY_OPTIONS.find((o) => o.value === availabilityVal);
       if (opt) chips.push({ id: "availability", label: t(opt.labelKey), onRemove: () => setParam("availability", "") });
-    }
-
-    const ratingVal = sp.get("ratingGte");
-    if (ratingVal) {
-      chips.push({
-        id: "ratingGte",
-        label: t("filters.ratingAndUp", { count: ratingVal }),
-        onRemove: () => setParam("ratingGte", ""),
-      });
     }
 
     const styleId = sp.get("style");
@@ -747,7 +736,6 @@ function FilterPanel({
         )}
         <CollectionTabs sp={sp} setCollection={setCollection} counts={facets?.collection} />
         <AvailabilityFilterGroup sp={sp} setParam={setParam} counts={facets?.availability} />
-        <RatingFilterGroup sp={sp} setParam={setParam} counts={facets?.ratingGte} />
         <PriceRange sp={sp} setSp={setSp} histogramProducts={histogramProducts} />
         <Button variant="outline" size="sm" onClick={clearAll} className="w-full">
           {t("common.clearAll")}
@@ -772,7 +760,6 @@ function FilterPanel({
       )}
       <CollectionTabs sp={sp} setCollection={setCollection} counts={facets?.collection} />
       <AvailabilityFilterGroup sp={sp} setParam={setParam} counts={facets?.availability} />
-      <RatingFilterGroup sp={sp} setParam={setParam} counts={facets?.ratingGte} />
 
       {(groupingsLoading || groupings.length > 0) && (
         <FilterGroup title={t("shop.style")}>
@@ -1027,31 +1014,6 @@ function AvailabilityFilterGroup({ sp, setParam, counts }) {
             checked={checked}
             disabled={count === 0 && !checked}
             onChange={(v) => setParam("availability", v ? opt.value : "")}
-          />
-        );
-      })}
-    </FilterGroup>
-  );
-}
-
-// Common filter, permanently visible: one minimum-rating threshold at a
-// time (5 / 4+ / 3+ / 2+ / 1+) — an unrated product (rating: 0, the schema
-// default) never matches any of these, including "1 & up".
-function RatingFilterGroup({ sp, setParam, counts }) {
-  const { t } = useLocale();
-  const selected = sp.get("ratingGte") || "";
-  return (
-    <FilterGroup title={t("filters.rating")}>
-      {RATING_THRESHOLDS.map((n) => {
-        const checked = selected === String(n);
-        const count = counts?.[n] ?? 0;
-        return (
-          <CheckBox
-            key={n}
-            label={`${t("filters.ratingAndUp", { count: n })} (${count})`}
-            checked={checked}
-            disabled={count === 0 && !checked}
-            onChange={(v) => setParam("ratingGte", v ? String(n) : "")}
           />
         );
       })}
