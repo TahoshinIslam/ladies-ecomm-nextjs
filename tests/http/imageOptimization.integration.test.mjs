@@ -126,9 +126,17 @@ describe("Phase 9 — real HTTP: next/image produces responsive, optimized marku
       if (!decodedUrl) continue;
       // Every optimized remote image on this page must come from a
       // configured, allowlisted origin — proving no raw external image
-      // source bypassed next/image's own host allowlist.
+      // source bypassed next/image's own host allowlist. Mirrors
+      // next.config.mjs's remotePatterns exactly: res.cloudinary.com
+      // (admin uploads), placehold.co (the seed catalog's original
+      // placeholder images), and images.unsplash.com (the Cosmetics
+      // seed's real product photos — now visible on the home page too,
+      // via the Cosmetics showcase section).
       assert.ok(
-        decodedUrl.includes("res.cloudinary.com") || decodedUrl.includes("placehold.co") || decodedUrl.startsWith("/"),
+        decodedUrl.includes("res.cloudinary.com") ||
+          decodedUrl.includes("placehold.co") ||
+          decodedUrl.includes("images.unsplash.com") ||
+          decodedUrl.startsWith("/"),
         `unexpected unoptimized/non-allowlisted image origin: ${decodedUrl}`,
       );
     }

@@ -30,7 +30,12 @@ async function connectDB() {
   console.log(`MongoDB connected: ${conn.connection.host}`);
 }
 
-const IMG = (seed) => `https://placehold.co/800x1000?text=${encodeURIComponent(seed)}`;
+// `.png` (not the bare, extension-less URL) — placehold.co's default
+// response is `image/svg+xml`, which Next's image optimizer rejects
+// unless dangerouslyAllowSVG is set (a security tradeoff not worth
+// making for a placeholder image source); `.png` gets a real raster
+// response Next can optimize normally.
+const IMG = (seed) => `https://placehold.co/800x1000.png?text=${encodeURIComponent(seed)}`;
 
 // Real, free-license stock photos (Unsplash) for the Cosmetics seed
 // products — verified in-browser to actually depict lipstick/foundation

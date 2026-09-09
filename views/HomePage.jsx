@@ -2,8 +2,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Banknote, RefreshCw, Sparkles, Gem } from "lucide-react";
 
-import ProductCard from "../components/product/ProductCard.jsx";
-import EmptyState from "../components/ui/EmptyState.jsx";
 import Button from "../components/ui/Button.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
 import ProductTabsSection from "./home/ProductTabsSection.jsx";
@@ -84,42 +82,48 @@ export default async function HomePage() {
   const hijab = categories.find((d) => d.slug === "hijab");
   const khimar = categories.find((d) => d.slug === "khimar");
   const cosmetics = departments.find((d) => d.slug === "cosmetics");
-  const bothIds = [burqa?._id, hijab?._id].filter(Boolean).join(",");
+  const clothes = departments.find((d) => d.slug === "clothes");
 
   // Phase 8 — every one of this page's product queries below is a fixed,
-  // low-cardinality shape (limit + sort, or limit + one/two department
-  // ids + featured/discount) that always passes lib/shopCacheEligibility
-  // .js's policy — cached accordingly, same as the shop page.
+  // low-cardinality shape (limit + sort, or limit + category + collection)
+  // that always passes lib/shopCacheEligibility.js's policy — cached
+  // accordingly, same as the shop page.
+  // The home page never reads `result.facets` (no sidebar filters here) —
+  // includeFacets: false skips listProducts()'s four extra facet-count
+  // aggregates on every one of the dozen product-list calls this page
+  // makes, cutting concurrent DB load on render significantly.
   const fetchProducts = async (query) => {
     const cacheKey = getShopCacheKey(query, { isAdmin: false });
     const result = cacheKey
-      ? await getCachedProductList(query, cacheKey)
-      : serializeForClient(await listProducts(query, { isAdmin: false }));
+      ? await getCachedProductList(query, cacheKey, { includeFacets: false })
+      : serializeForClient(await listProducts(query, { isAdmin: false, includeFacets: false }));
     return localizeProductList(result.products, locale);
   };
 
-  const [
-    arrivals,
-    heroBurqa,
-    heroAbaya,
-    heroHijab,
-    heroKhimar,
-    featuredProducts,
-    discountProducts,
-    burqaProducts,
-    hijabProducts,
-    cosmeticsProducts,
-  ] = await Promise.all([
-    fetchProducts({ limit: 8, sort: "-createdAt" }),
+  // Each department showcase (Clothes, Cosmetics) has 4 tabs — New Arrival/
+  // Featured/Discount use the shop's own canonical `collection=` values;
+  // "Bestseller" has no such canonical value (it isn't one of the shop's
+  // New/Featured/Discount tabs), so it's defined by sort=-rating instead —
+  // the same real, honest "best" signal already used above to pick each
+  // department's hero image, not a fabricated sales-count field this
+  // schema doesn't have.
+  const fetchDeptTabs = (dept) =>
+    dept
+      ? Promise.all([
+          fetchProducts({ limit: 8, category: dept._id, collection: "new" }),
+          fetchProducts({ limit: 8, category: dept._id, collection: "featured" }),
+          fetchProducts({ limit: 8, category: dept._id, sort: "-rating" }),
+          fetchProducts({ limit: 8, category: dept._id, collection: "discount" }),
+        ]).then(([newArr, featured, bestseller, discount]) => ({ new: newArr, featured, bestseller, discount }))
+      : Promise.resolve({ new: [], featured: [], bestseller: [], discount: [] });
+
+  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, clothesTabProducts, cosmeticsTabProducts] = await Promise.all([
     burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
     abaya ? fetchProducts({ limit: 1, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
     hijab ? fetchProducts({ limit: 1, category: hijab._id, sort: "-rating" }) : Promise.resolve([]),
     khimar ? fetchProducts({ limit: 1, category: khimar._id, sort: "-rating" }) : Promise.resolve([]),
-    bothIds ? fetchProducts({ limit: 8, featured: "true", category: bothIds }) : Promise.resolve([]),
-    bothIds ? fetchProducts({ limit: 8, discount: "true", category: bothIds }) : Promise.resolve([]),
-    burqa ? fetchProducts({ limit: 8, category: burqa._id }) : Promise.resolve([]),
-    hijab ? fetchProducts({ limit: 8, category: hijab._id }) : Promise.resolve([]),
-    cosmetics ? fetchProducts({ limit: 8, category: cosmetics._id }) : Promise.resolve([]),
+    fetchDeptTabs(clothes),
+    fetchDeptTabs(cosmetics),
   ]);
 
   const heroImageBySlug = {
@@ -127,14 +131,6 @@ export default async function HomePage() {
     abaya: heroAbaya[0]?.images?.[0] || null,
     hijab: heroHijab[0]?.images?.[0] || null,
     khimar: heroKhimar[0]?.images?.[0] || null,
-  };
-
-  const tabPanels = {
-    featured: { products: featuredProducts, viewAllHref: "/shop?featured=true", emptyMessageKey: "home.noFeaturedBurqaHijab" },
-    discount: { products: discountProducts, viewAllHref: "/shop?discount=true", emptyMessageKey: "home.noDiscountItems" },
-    burqa: { products: burqaProducts, viewAllHref: burqa ? `/shop?category=${burqa._id}` : "/shop", emptyMessageKey: "home.noBurqaItems" },
-    hijab: { products: hijabProducts, viewAllHref: hijab ? `/shop?category=${hijab._id}` : "/shop", emptyMessageKey: "home.noHijabItems" },
-    cosmetics: { products: cosmeticsProducts, viewAllHref: cosmetics ? `/shop?category=${cosmetics._id}` : "/shop", emptyMessageKey: "home.noCosmeticsItems" },
   };
 
   return (
@@ -269,66 +265,31 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* New arrivals */}
-      <section id="new-arrivals" aria-labelledby="new-h" className="container-x pt-32">
-        <SectionHead
+      {/* Clothes showcase — New Arrival / Featured / Bestseller / Discount */}
+      {clothes && (
+        <ProductTabsSection
+          sectionId="clothes-showcase"
+          headingId="clothes-showcase-h"
           eyebrow={t("home.newArrivalsEyebrow")}
           title={t("home.justLanded")}
           sub={t("home.justLandedSub")}
-          id="new-h"
-          bordered
-          action={
-            <Link href="/shop?sort=-createdAt">
-              <Button variant="subtle" size="lg">
-                {t("home.shopAllNewArrivals")}
-                <ArrowRight className="h-[15px] w-[15px]" />
-              </Button>
-            </Link>
-          }
+          deptId={clothes._id}
+          products={clothesTabProducts}
         />
-        <div className="mt-9 grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {arrivals.map((p, i) => <ProductCard key={p._id} product={p} index={i} />)}
-        </div>
-      </section>
+      )}
 
-      {/* Featured picks — real isFeatured products only, scoped to
-          Burqa + Hijab (the departments this catalog covers). No fallback
-          content: a genuinely empty result renders EmptyState. */}
-      <section id="featured-picks" aria-labelledby="featured-h" className="container-x pt-32">
-        <SectionHead
-          eyebrow={t("home.featuredPicksEyebrow")}
-          title={t("home.editorsPicks")}
-          sub={t("home.featuredPicksSub")}
-          id="featured-h"
-          bordered
-          action={
-            <Link href="/shop?featured=true">
-              <Button variant="subtle" size="lg">
-                {t("home.shopAllFeatured")}
-                <ArrowRight className="h-[15px] w-[15px]" />
-              </Button>
-            </Link>
-          }
+      {/* Cosmetics showcase — same tab set, scoped to Cosmetics */}
+      {cosmetics && (
+        <ProductTabsSection
+          sectionId="cosmetics-showcase"
+          headingId="cosmetics-showcase-h"
+          eyebrow={t("home.cosmeticsShowcaseEyebrow")}
+          title={t("home.cosmeticsShowcaseTitle")}
+          sub={t("home.cosmeticsShowcaseSub")}
+          deptId={cosmetics._id}
+          products={cosmeticsTabProducts}
         />
-        <div className="mt-9">
-          {featuredProducts.length === 0 ? (
-            <EmptyState
-              icon={Sparkles}
-              title={t("home.noFeaturedTitle")}
-              message={t("home.noFeaturedMessage")}
-            />
-          ) : (
-            <div className="grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {featuredProducts.map((p, i) => (
-                <ProductCard key={p._id} product={p} index={i} />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Featured / Discount / Dept tabs */}
-      <ProductTabsSection panels={tabPanels} />
+      )}
 
       {/* Fabric story */}
       <section aria-labelledby="fabric-h" className="container-x pt-32">

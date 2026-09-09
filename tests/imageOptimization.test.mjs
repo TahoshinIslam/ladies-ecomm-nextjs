@@ -319,7 +319,6 @@ describe("Phase 9 — loading priority is scoped to genuine LCP images only", ()
   test("only /shop's own grid opts ProductCard into priority — every other call site (home sections, related/recently-viewed rails, wishlist) omits it and stays plain lazy/auto regardless of local index", () => {
     const CALL_SITES = {
       "views/shop/ShopPageClient.jsx": true,
-      "views/HomePage.jsx": false,
       "views/home/ProductTabsSection.jsx": false,
       "components/product/ProductRail.jsx": false,
       "views/WishlistPage.jsx": false,

@@ -107,11 +107,42 @@ export const STOREFRONT_DEPARTMENT_SLUGS = [
 // Niqab/Abaya/Khimar/Modest-Sets/T-shirt now sit under a "Clothes" division
 // (parent set), while Cosmetics/Shoes/Sunglasses stay root departments
 // (parent: null) — both are equally valid "departments" here.
+// A plain, uncached query here re-runs on every single non-admin
+// listProducts() call. The home page's Clothes/Cosmetics tab showcases
+// now fire a dozen listProducts() calls in one Promise.all (up from ~9
+// before that redesign), each independently re-querying this same
+// static allowlist — a real, observable source of concurrent DB load on
+// a fresh instance's first render (reproduced directly: the home page's
+// HTTP integration test flaked on exactly this query burst). A
+// short-lived, single-flight cache (one real query shared by every
+// concurrent caller, refreshed at most once per TTL window) removes the
+// redundant load without weakening correctness — a department renamed
+// mid-window is visible again within TTL_MS, the same tradeoff every
+// other cached read in this app already makes.
+const STOREFRONT_DEPT_IDS_TTL_MS = 60_000;
+let storefrontDeptIdsCache = { ids: null, expiresAt: 0, inFlight: null };
+
 export async function getStorefrontDepartmentIds() {
-  const departments = await Category.find({ slug: { $in: STOREFRONT_DEPARTMENT_SLUGS } })
+  const now = Date.now();
+  if (storefrontDeptIdsCache.ids && storefrontDeptIdsCache.expiresAt > now) {
+    return storefrontDeptIdsCache.ids;
+  }
+  if (storefrontDeptIdsCache.inFlight) {
+    return storefrontDeptIdsCache.inFlight;
+  }
+  storefrontDeptIdsCache.inFlight = Category.find({ slug: { $in: STOREFRONT_DEPARTMENT_SLUGS } })
     .select("_id")
-    .lean();
-  return departments.map((d) => d._id.toString());
+    .lean()
+    .then((departments) => {
+      const ids = departments.map((d) => d._id.toString());
+      storefrontDeptIdsCache = { ids, expiresAt: Date.now() + STOREFRONT_DEPT_IDS_TTL_MS, inFlight: null };
+      return ids;
+    })
+    .catch((err) => {
+      storefrontDeptIdsCache.inFlight = null;
+      throw err;
+    });
+  return storefrontDeptIdsCache.inFlight;
 }
 
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -691,7 +722,7 @@ function resolveSingleDepartmentId(query) {
   return ids.length === 1 && isObjectIdFormat(ids[0]) ? ids[0] : null;
 }
 
-export async function listProducts(query, { isAdmin = false } = {}) {
+export async function listProducts(query, { isAdmin = false, includeFacets = true } = {}) {
   query = await expandCategoryQueryParam(query);
   query = await stripInapplicableAttributeFilters(query, resolveSingleDepartmentId(query));
   const baseFilter = isAdmin ? {} : { isActive: true };
@@ -704,6 +735,10 @@ export async function listProducts(query, { isAdmin = false } = {}) {
 
   // Admin's product table has no use for storefront facet counts — skip the
   // extra aggregate queries on every admin list/search/paginate request.
+  // Same for any other caller that will never read `facets` at all (e.g.
+  // the home page's department showcases, which render fixed product
+  // lists with no sidebar filters) — `includeFacets: false` skips the
+  // same four extra Product.aggregate() round trips.
   const [products, total, facets] = await Promise.all([
     Product.find(filter)
       .sort(sortStr)
@@ -714,7 +749,7 @@ export async function listProducts(query, { isAdmin = false } = {}) {
       .populate("category", "name slug")
       .lean(),
     Product.countDocuments(filter),
-    isAdmin ? null : buildFacetCounts(query, baseFilter, scopeIds),
+    isAdmin || !includeFacets ? null : buildFacetCounts(query, baseFilter, scopeIds),
   ]);
 
   return {
