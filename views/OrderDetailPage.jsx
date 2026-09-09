@@ -15,7 +15,7 @@ import { requireServerUser } from "../lib/serverPageAuth.js";
 import { serializeForClient } from "../lib/serialize.js";
 import { HttpError } from "../lib/http.js";
 import { isObjectIdFormat } from "../lib/validation.js";
-import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
+import { formatCurrency, cn, resolveImage, formatVariantAttributes } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
 
@@ -133,9 +133,7 @@ export default async function OrderDetailPage({ params }) {
                     <div className="flex-1">
                       <p className="font-semibold">{it.snapshot?.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {[it.snapshot?.color, it.snapshot?.size, it.snapshot?.fabric]
-                          .filter(Boolean)
-                          .join(" · ")}
+                        {formatVariantAttributes(it.snapshot?.attributes)}
                         {" · "}{t("checkout.qty")}{" "}
                         {it.quantity}
                       </p>

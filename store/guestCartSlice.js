@@ -24,16 +24,15 @@ const snapshotProduct = (p) => ({
 });
 
 // Snapshot of the specific variant added — this is what makes a cart line
-// unique and correct (color/size/fabric, its own price override, its own
+// unique and correct (its arbitrary attributes bag, own price override, own
 // image) instead of the old bare size string that couldn't tell two
-// different-colored variants apart. See Phase 4 audit.
+// different-colored variants apart. See Phase 4 audit. Mirrors
+// services/cartService.js's snapshotVariant on the server.
 const snapshotVariant = (v) => ({
   variantId: v._id,
   sku: v.sku,
   variantName: v.variantName,
-  color: v.attributes?.color || "",
-  size: v.attributes?.size || "",
-  fabric: v.attributes?.fabric || "",
+  attributes: { ...v.attributes },
   price: v.price ?? null,
   discountPrice: v.discountPrice ?? null,
   image: v.images?.[0] || "",

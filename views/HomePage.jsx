@@ -74,10 +74,16 @@ export default async function HomePage() {
   const categories = localizeCategoryList(rawCategories, locale);
   const departments = categories.filter((c) => !c.parent);
 
-  const burqa = departments.find((d) => d.slug === "burqa");
-  const abaya = departments.find((d) => d.slug === "abaya");
-  const hijab = departments.find((d) => d.slug === "hijab");
-  const khimar = departments.find((d) => d.slug === "khimar");
+  // Burqa/Hijab/Abaya/Khimar are real departments (one hop below the
+  // "Clothes" root division — see services/categoryService.js's
+  // department-vs-division distinction), not roots themselves, so they
+  // must be looked up in the full `categories` list, not `departments`
+  // (which only ever holds Clothes/Cosmetics/Shoes/Sunglasses).
+  const burqa = categories.find((d) => d.slug === "burqa");
+  const abaya = categories.find((d) => d.slug === "abaya");
+  const hijab = categories.find((d) => d.slug === "hijab");
+  const khimar = categories.find((d) => d.slug === "khimar");
+  const cosmetics = departments.find((d) => d.slug === "cosmetics");
   const bothIds = [burqa?._id, hijab?._id].filter(Boolean).join(",");
 
   // Phase 8 — every one of this page's product queries below is a fixed,
@@ -102,6 +108,7 @@ export default async function HomePage() {
     discountProducts,
     burqaProducts,
     hijabProducts,
+    cosmeticsProducts,
   ] = await Promise.all([
     fetchProducts({ limit: 8, sort: "-createdAt" }),
     burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
@@ -112,6 +119,7 @@ export default async function HomePage() {
     bothIds ? fetchProducts({ limit: 8, discount: "true", category: bothIds }) : Promise.resolve([]),
     burqa ? fetchProducts({ limit: 8, category: burqa._id }) : Promise.resolve([]),
     hijab ? fetchProducts({ limit: 8, category: hijab._id }) : Promise.resolve([]),
+    cosmetics ? fetchProducts({ limit: 8, category: cosmetics._id }) : Promise.resolve([]),
   ]);
 
   const heroImageBySlug = {
@@ -126,6 +134,7 @@ export default async function HomePage() {
     discount: { products: discountProducts, viewAllHref: "/shop?discount=true", emptyMessageKey: "home.noDiscountItems" },
     burqa: { products: burqaProducts, viewAllHref: burqa ? `/shop?category=${burqa._id}` : "/shop", emptyMessageKey: "home.noBurqaItems" },
     hijab: { products: hijabProducts, viewAllHref: hijab ? `/shop?category=${hijab._id}` : "/shop", emptyMessageKey: "home.noHijabItems" },
+    cosmetics: { products: cosmeticsProducts, viewAllHref: cosmetics ? `/shop?category=${cosmetics._id}` : "/shop", emptyMessageKey: "home.noCosmeticsItems" },
   };
 
   return (

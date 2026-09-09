@@ -40,7 +40,7 @@ import {
   useGetCategoriesQuery,
   useGetAttributesQuery,
 } from "../../store/shopApi.js";
-import { cn, resolveImage } from "../../lib/utils.js";
+import { cn, resolveImage, isDepartmentCategory } from "../../lib/utils.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 import { usePermission } from "../../hooks/usePermission.js";
@@ -52,9 +52,10 @@ const STEPS = ["Basic info", "Attributes", "Variants"];
 const variantSchema = z.object({
   variantName: z.string().min(1, "Required"),
   sku: z.string().min(1, "Required"),
-  color: z.string().optional(),
-  size: z.string().optional(),
-  fabric: z.string().optional(),
+  // Arbitrary key/value bag (color/size/fabric for clothing, shade/
+  // volumeMl for cosmetics, ...) driven by AttributeDefinition.derivedFromVariant
+  // — see the dynamic ComboField rendering in step 2 below.
+  attributes: z.record(z.string()).default({}),
   price: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
   discountPrice: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
   stock: z.coerce.number().int().min(0, "Required"),
@@ -115,7 +116,8 @@ export default function AdminProductsPage() {
   });
 
   const { data: catsData } = useGetCategoriesQuery();
-  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
+  const allCategories = catsData?.categories ?? [];
+  const departments = allCategories.filter((c) => isDepartmentCategory(c, allCategories));
   const categoryName = (id) => catsData?.categories?.find((c) => c._id === id)?.name || "—";
 
   const { data, isLoading, isFetching, isError, error, refetch } = useGetProductsQuery({
@@ -395,7 +397,7 @@ function ProductFormModal({ product, onClose }) {
   // render, invalidating the useMemo at the bottom of this component that
   // depends on `categories` for no real reason.
   const categories = useMemo(() => catsData?.categories ?? [], [catsData]);
-  const departments = categories.filter((c) => !c.parent);
+  const departments = categories.filter((c) => isDepartmentCategory(c, categories));
 
   // Editing an existing product: resolve its department from the leaf
   // category so the cascading select starts on the right branch.
@@ -425,9 +427,7 @@ function ProductFormModal({ product, onClose }) {
         variants: (product.variants || []).map((v) => ({
           variantName: v.variantName,
           sku: v.sku,
-          color: v.attributes?.color || "",
-          size: v.attributes?.size || "",
-          fabric: v.attributes?.fabric || "",
+          attributes: { ...v.attributes },
           price: v.price ?? "",
           discountPrice: v.discountPrice ?? "",
           stock: v.stock,
@@ -454,7 +454,7 @@ function ProductFormModal({ product, onClose }) {
         chest: "",
         sleeveLength: "",
         includedItems: "",
-        variants: [{ variantName: "", sku: "", color: "", size: "", fabric: "", price: "", discountPrice: "", stock: 0, images: [] }],
+        variants: [{ variantName: "", sku: "", attributes: {}, price: "", discountPrice: "", stock: 0, images: [] }],
       };
 
   const {
@@ -484,25 +484,34 @@ function ProductFormModal({ product, onClose }) {
 
   const { data: attrData } = useGetAttributesQuery(department, { skip: !department });
   const attributeDefs = (attrData?.attributes ?? []).filter((d) => !d.derivedFromVariant);
-  const colorDef = (attrData?.attributes ?? []).find((d) => d.key === "color");
-  const sizeDef = (attrData?.attributes ?? []).find((d) => d.key === "size");
-  const fabricDef = (attrData?.attributes ?? []).find((d) => d.key === "fabric");
+  // Variant-identity fields for this department — color/size/fabric for
+  // clothing, shade/volumeMl for cosmetics, ... — driven entirely by
+  // AttributeDefinition.derivedFromVariant so a new department needs no
+  // change here, only new AttributeDefinition documents.
+  const variantAttrDefs = (attrData?.attributes ?? []).filter((d) => d.derivedFromVariant);
+  // The first swatch-type variant-identity field (color for clothing, shade
+  // for cosmetics) drives the "images grouped by X" step below, if this
+  // department has one at all — departments with no swatch field (e.g. a
+  // shoe-size-only footwear line) simply skip that grouping.
+  const swatchDef = variantAttrDefs.find((d) => d.type === "swatch");
+  const swatchKey = swatchDef?.key;
 
-  // Distinct colors currently used across variant rows — one image group per
-  // color, shared by every size/fabric variant of that color (Step 3 design).
-  const distinctColors = useMemo(
-    () => [...new Set((variants || []).map((v) => v.color).filter(Boolean))],
-    [variants],
+  // Distinct swatch values currently used across variant rows — one image
+  // group per value, shared by every other-axis variant of that value
+  // (Step 3 design).
+  const distinctSwatchValues = useMemo(
+    () => (swatchKey ? [...new Set((variants || []).map((v) => v.attributes?.[swatchKey]).filter(Boolean))] : []),
+    [variants, swatchKey],
   );
-  const colorImagesKey = (color) => `colorImages.${color}`;
   const [colorImages, setColorImagesState] = useState(() => {
     const map = {};
     for (const v of defaults.variants) {
-      if (v.color && v.images?.length) map[v.color] = v.images;
+      const swatchValue = swatchKey ? v.attributes?.[swatchKey] : null;
+      if (swatchValue && v.images?.length) map[swatchValue] = v.images;
     }
     return map;
   });
-  const setColorImages = (color, imgs) => setColorImagesState((m) => ({ ...m, [color]: imgs }));
+  const setColorImages = (value, imgs) => setColorImagesState((m) => ({ ...m, [value]: imgs }));
 
   const goNext = async () => {
     const ok = await trigger(STEP_FIELDS[step]);
@@ -544,15 +553,18 @@ function ProductFormModal({ product, onClose }) {
       attributes,
       isFeatured: data.isFeatured,
       isActive: data.isActive,
-      variants: data.variants.map((v) => ({
-        variantName: v.variantName,
-        sku: v.sku,
-        attributes: { color: v.color || "", size: v.size || "", fabric: v.fabric || "" },
-        price: v.price === "" ? null : v.price,
-        discountPrice: v.discountPrice === "" ? null : v.discountPrice,
-        stock: v.stock,
-        images: v.color ? colorImages[v.color] || [] : v.images || [],
-      })),
+      variants: data.variants.map((v) => {
+        const swatchValue = swatchKey ? v.attributes?.[swatchKey] : null;
+        return {
+          variantName: v.variantName,
+          sku: v.sku,
+          attributes: { ...v.attributes },
+          price: v.price === "" ? null : v.price,
+          discountPrice: v.discountPrice === "" ? null : v.discountPrice,
+          stock: v.stock,
+          images: swatchValue ? colorImages[swatchValue] || [] : v.images || [],
+        };
+      }),
     };
 
     try {
@@ -700,19 +712,19 @@ function ProductFormModal({ product, onClose }) {
               {errors.images && <p className="mt-1 text-xs text-danger">{errors.images.message}</p>}
             </div>
 
-            {distinctColors.length > 0 && (
+            {distinctSwatchValues.length > 0 && (
               <div>
-                <label className="mb-2 block text-sm font-medium">Images by color</label>
+                <label className="mb-2 block text-sm font-medium">Images by {swatchDef?.label?.toLowerCase() || "swatch"}</label>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Uploaded once per color — shared across every size/fabric variant of that color.
+                  Uploaded once per {swatchDef?.label?.toLowerCase() || "value"} — shared across every other variant of that value.
                 </p>
                 <div className="space-y-3">
-                  {distinctColors.map((color) => (
-                    <div key={color} className="rounded-lg border border-border p-3">
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{color}</p>
+                  {distinctSwatchValues.map((value) => (
+                    <div key={value} className="rounded-lg border border-border p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{value}</p>
                       <ImageDropzone
-                        value={colorImages[color] || []}
-                        onChange={(next) => setColorImages(color, next)}
+                        value={colorImages[value] || []}
+                        onChange={(next) => setColorImages(value, next)}
                         folder="products/variants"
                       />
                     </div>
@@ -728,7 +740,7 @@ function ProductFormModal({ product, onClose }) {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={() => appendVariant({ variantName: "", sku: "", color: "", size: "", fabric: "", price: "", discountPrice: "", stock: 0, images: [] })}
+                  onClick={() => appendVariant({ variantName: "", sku: "", attributes: {}, price: "", discountPrice: "", stock: 0, images: [] })}
                 >
                   <Plus className="h-3 w-3" /> Add variant
                 </Button>
@@ -737,10 +749,19 @@ function ProductFormModal({ product, onClose }) {
               <div className="space-y-3">
                 {variantFields.map((field, i) => (
                   <div key={field.id} className="rounded-lg border border-border p-3">
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <ComboField label="Color" def={colorDef} error={errors.variants?.[i]?.color?.message} {...register(`variants.${i}.color`)} />
-                      <ComboField label={sizeDef?.label || "Size"} def={sizeDef} error={errors.variants?.[i]?.size?.message} {...register(`variants.${i}.size`)} />
-                      <ComboField label="Fabric" def={fabricDef} error={errors.variants?.[i]?.fabric?.message} {...register(`variants.${i}.fabric`)} />
+                    <div className={cn("grid gap-2", variantAttrDefs.length ? "sm:grid-cols-3" : "")}>
+                      {variantAttrDefs.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Pick a department on Step 1 to see its variant fields.</p>
+                      )}
+                      {variantAttrDefs.map((def) => (
+                        <ComboField
+                          key={def.key}
+                          label={def.label}
+                          def={def}
+                          error={errors.variants?.[i]?.attributes?.[def.key]?.message}
+                          {...register(`variants.${i}.attributes.${def.key}`)}
+                        />
+                      ))}
                     </div>
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <Input label="Variant name" error={errors.variants?.[i]?.variantName?.message} {...register(`variants.${i}.variantName`)} />

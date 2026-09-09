@@ -149,9 +149,7 @@ const calcTotals = async (
       snapshot: {
         name: product.name,
         sku: variant.sku || "",
-        color: variant.attributes?.color || "",
-        size: variant.attributes?.size || "",
-        fabric: variant.attributes?.fabric || "",
+        attributes: { ...variant.attributes },
         price,
         image: variant.images?.[0] || product.images?.[0] || "",
       },

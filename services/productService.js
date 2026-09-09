@@ -11,6 +11,7 @@ import "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
 import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
+import { isLeafCategory } from "./categoryService.js";
 import {
   PRODUCT_SORT_FIELDS,
   PRODUCT_SELECT_FIELDS,
@@ -61,15 +62,32 @@ export function getNewArrivalCutoff(now = Date.now()) {
 // catalog, including any pre-existing product outside this scope). All 6
 // launch departments are live; narrow this list again to soft-launch a
 // subset.
-export const STOREFRONT_DEPARTMENT_SLUGS = ["burqa", "hijab", "niqab", "abaya", "khimar", "modest-sets"];
+export const STOREFRONT_DEPARTMENT_SLUGS = [
+  "burqa",
+  "hijab",
+  "niqab",
+  "abaya",
+  "khimar",
+  "modest-sets",
+  "t-shirt",
+  "shirts",
+  "jeans",
+  "cosmetics",
+  "shoes",
+  "sunglasses",
+];
 
 // Every product's `topCategory` is already denormalized to its department
 // id (see productModel.js's pre-validate hook; resolveLeafCategory below
 // guarantees a product can only ever be assigned a *subcategory*, never a
-// bare department) — so the two department ids alone are a complete,
-// correct scope filter with no need to also resolve their child categories.
+// bare department or division) — so these department ids alone are a
+// complete, correct scope filter with no need to also resolve their child
+// categories. Matched by slug alone (not `parent: null`) — Burqa/Hijab/
+// Niqab/Abaya/Khimar/Modest-Sets/T-shirt now sit under a "Clothes" division
+// (parent set), while Cosmetics/Shoes/Sunglasses stay root departments
+// (parent: null) — both are equally valid "departments" here.
 export async function getStorefrontDepartmentIds() {
-  const departments = await Category.find({ slug: { $in: STOREFRONT_DEPARTMENT_SLUGS }, parent: null })
+  const departments = await Category.find({ slug: { $in: STOREFRONT_DEPARTMENT_SLUGS } })
     .select("_id")
     .lean();
   return departments.map((d) => d._id.toString());
@@ -436,7 +454,37 @@ export async function parseProductListQuery(query) {
   return out;
 }
 
+// If `categoryId` is a division (Clothes) whose children are themselves
+// departments (Burqa, with further leaf children of its own) rather than
+// leaves, no product's `topCategory` is ever the division's own id — it
+// expands to the division's direct children (the real departments)
+// instead. A root department (Cosmetics, whose children — Lipstick,
+// Foundation — are leaves) or an already-department id (Burqa) is
+// returned unchanged, matching today's single-id behavior exactly.
+async function expandCategoryScope(categoryId) {
+  const children = await Category.find({ parent: categoryId }).select("_id").lean();
+  if (!children.length) return [categoryId];
+  const isDivision = await Category.exists({ parent: { $in: children.map((c) => c._id) } });
+  return isDivision ? children.map((c) => c._id.toString()) : [categoryId];
+}
+
+// `?category=` (aliased to `topCategory` inside buildFilter) is the one
+// query param that can name either a department or a division — every
+// other structural/facet field already means exactly what it says.
+// Expands it here, once, before buildFilter/buildFacetCounts ever see the
+// query, reusing buildFilter's existing CSV-to-$in handling rather than
+// needing a signature change there.
+async function expandCategoryQueryParam(query) {
+  const raw = query?.category;
+  if (!raw || typeof raw !== "string") return query;
+  const ids = raw.split(",").map((v) => v.trim()).filter(Boolean);
+  if (ids.length !== 1 || !isObjectIdFormat(ids[0])) return query;
+  const expanded = await expandCategoryScope(ids[0]);
+  return expanded.length > 1 ? { ...query, category: expanded.join(",") } : query;
+}
+
 export async function listProducts(query, { isAdmin = false } = {}) {
+  query = await expandCategoryQueryParam(query);
   const baseFilter = isAdmin ? {} : { isActive: true };
   const scopeIds = isAdmin ? null : await getStorefrontDepartmentIds();
   const filter = buildFilter(query, baseFilter, scopeIds);
@@ -516,9 +564,13 @@ export async function listFeatured(limit = 8) {
 
 // Sneaker-era "distinct model names scoped by brand" replaced with its
 // modest-fashion equivalent: product groupings by category. With no
-// `category` param, groups at the department level (6 top-level counts);
-// with one, groups by the subcategories under that department. Only
-// categories/departments with at least one active product are included.
+// `category` param, groups at the top level (one count per division/root
+// department, e.g. Clothes/Cosmetics/Shoes/Sunglasses); with one, groups by
+// that category's direct children — which, since Clothes introduced a real
+// 3rd level, can themselves be either departments (Burqa under Clothes,
+// still with further leaf children of their own) or genuine leaves/styles
+// (Lipstick under Cosmetics). Only categories/departments with at least
+// one active product are included.
 export async function listGroupings(categoryId) {
   if (categoryId) requireObjectIdFormat(categoryId, "category");
   const parentFilter = categoryId ? { parent: categoryId } : { parent: null };
@@ -526,14 +578,29 @@ export async function listGroupings(categoryId) {
 
   const groupings = await Promise.all(
     categories.map(async (c) => {
-      const scopeIds = categoryId
-        ? [c._id]
-        : [c._id, ...(await Category.find({ parent: c._id }).distinct("_id"))];
+      if (!categoryId) {
+        // Top level: c is a division (Clothes) or a root department
+        // (Cosmetics/Shoes/Sunglasses). A real product's topCategory is at
+        // most one hop below c either way — c's own id (a root department
+        // like Cosmetics) or one of c's direct children (a division's
+        // departments, like Burqa under Clothes) — so counting across c
+        // plus its direct children covers both shapes in one query.
+        const scopeIds = [c._id, ...(await Category.find({ parent: c._id }).distinct("_id"))];
+        const count = await Product.countDocuments({ isActive: true, topCategory: { $in: scopeIds } });
+        return { _id: c._id, name: c.name, nameBn: c.nameBn, slug: c.slug, count, isLeaf: false };
+      }
+      // Drilling into a specific category: c is either a real leaf/style
+      // (matched via `category`, e.g. Cosmetics' Lipstick or a clothing
+      // style) or itself a department with further leaf children of its
+      // own (matched via `topCategory`, e.g. Clothes' child Burqa) — no
+      // product's `category` field is ever a department, so the two must
+      // be told apart per-child rather than assumed from `categoryId` alone.
+      const isLeaf = await isLeafCategory(c._id);
       const count = await Product.countDocuments({
         isActive: true,
-        [categoryId ? "category" : "topCategory"]: categoryId ? c._id : { $in: scopeIds },
+        [isLeaf ? "category" : "topCategory"]: c._id,
       });
-      return { _id: c._id, name: c.name, nameBn: c.nameBn, slug: c.slug, count };
+      return { _id: c._id, name: c.name, nameBn: c.nameBn, slug: c.slug, count, isLeaf };
     }),
   );
 
@@ -654,14 +721,17 @@ const pickWritable = (body) => {
   return out;
 };
 
-// Resolves the leaf category and validates it's actually a leaf (a bare
-// department can't be assigned directly to a product) — also returns the
-// department id for the required-attribute check below.
+// Resolves the leaf category and validates it's actually a leaf (a
+// department, or a division like Clothes, can't be assigned directly to a
+// product) — also returns the department id for the required-attribute
+// check below. "Leaf" means "has no children of its own" — NOT "has a
+// parent", since a department (e.g. Burqa) now has a parent (Clothes) too
+// but still isn't a valid product category.
 async function resolveLeafCategory(categoryId) {
   if (!isObjectIdFormat(categoryId)) throw new HttpError(400, "Invalid category id");
   const category = await Category.findById(categoryId).lean();
   if (!category) throw new HttpError(400, "Category not found");
-  if (!category.parent) {
+  if (!(await isLeafCategory(category._id))) {
     throw new HttpError(400, `"${category.name}" is a department, not a style — assign a subcategory instead`);
   }
   return category;

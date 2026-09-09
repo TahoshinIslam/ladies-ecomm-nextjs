@@ -60,7 +60,9 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const { t, locale } = useLocale();
   const settings = useSettings();
   const freeShipAmount = settings.freeShippingPitch();
-  const attrDefs = attrDefsProp ?? [];
+  // Stable empty-array identity when there's no prop, so the useMemo below
+  // (which depends on attrDefs) doesn't invalidate on every render.
+  const attrDefs = useMemo(() => attrDefsProp ?? [], [attrDefsProp]);
 
   // Records the view only once, on mount — the server already guaranteed
   // this is a real, currently-displayed product (see the Server Component's
@@ -88,14 +90,18 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const [quantity, setQuantity] = useState(1);
 
   const variants = useMemo(() => product?.variants ?? [], [product]);
-  const axes = useMemo(() => getVariantAxes(variants), [variants]);
-  const [selection, setSelection] = useState(() => getDefaultVariantSelection(variants));
+  // Candidate variant axes for this product's department come from
+  // AttributeDefinition.derivedFromVariant (color/size/fabric for clothing,
+  // shade/volumeMl for cosmetics, ...) — never a fixed clothing-only list.
+  const candidateAxes = useMemo(() => attrDefs.filter((d) => d.derivedFromVariant).map((d) => d.key), [attrDefs]);
+  const axes = useMemo(() => getVariantAxes(variants, candidateAxes), [variants, candidateAxes]);
+  const [selection, setSelection] = useState(() => getDefaultVariantSelection(variants, candidateAxes));
 
-  const selectedVariant = useMemo(() => resolveVariant(variants, selection), [variants, selection]);
+  const selectedVariant = useMemo(() => resolveVariant(variants, selection, axes), [variants, selection, axes]);
   const pricing = resolveVariantPricing(product ?? {}, selectedVariant);
 
   const setAxisValue = (axis, value) => {
-    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }));
+    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes));
     setSelectedImage(0);
     setImageFailed(false);
     setQuantity(1);
@@ -163,11 +169,12 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
     }
   };
 
-  // Product-level info rows — fabric/coverage/closure/lining/occasion, from
-  // the denormalized attributes array. Color/size (the interactive
-  // selectors below) and careInstructions (its own paragraph) are excluded.
+  // Product-level info rows — coverage/closure/lining/occasion for clothing,
+  // skinType for cosmetics, ..., from the denormalized attributes array.
+  // Whichever axes are rendered as interactive selectors above (`axes`) and
+  // careInstructions (its own paragraph) are excluded so nothing duplicates.
   const infoRows = (product.attributes ?? [])
-    .filter((a) => !["color", "size", "careInstructions"].includes(a.key))
+    .filter((a) => !axes.includes(a.key) && a.key !== "careInstructions")
     .map((a) => ({
       key: a.key,
       label: attrLabel(a.key) || a.key,
@@ -374,36 +381,21 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
             <>
               {/* Variant selectors — only the axes that actually vary on
                   this product get a control (see lib/utils.js
-                  getVariantAxes). Never renders a combination that doesn't
-                  exist as a real variant — only stock=0 ones, disabled. */}
-              {axes.includes("color") && (
+                  getVariantAxes), driven by AttributeDefinition rather than
+                  a fixed clothing-only list. Never renders a combination
+                  that doesn't exist as a real variant — only stock=0 ones,
+                  disabled. */}
+              {axes.map((axis) => (
                 <VariantAxisRow
-                  label={attrLabel("color") || t("product.color")}
-                  options={getAxisOptions(variants, "color", selection)}
-                  displayOptions={attrOptions("color")}
-                  swatch
-                  selected={selection.color}
-                  onSelect={(v) => setAxisValue("color", v)}
+                  key={axis}
+                  label={attrLabel(axis) || axis}
+                  options={getAxisOptions(variants, axis, selection, axes)}
+                  displayOptions={attrOptions(axis)}
+                  swatch={attrDefs.find((d) => d.key === axis)?.type === "swatch"}
+                  selected={selection[axis]}
+                  onSelect={(v) => setAxisValue(axis, v)}
                 />
-              )}
-              {axes.includes("size") && (
-                <VariantAxisRow
-                  label={attrLabel("size") || t("product.size")}
-                  options={getAxisOptions(variants, "size", selection)}
-                  displayOptions={attrOptions("size")}
-                  selected={selection.size}
-                  onSelect={(v) => setAxisValue("size", v)}
-                />
-              )}
-              {axes.includes("fabric") && (
-                <VariantAxisRow
-                  label={attrLabel("fabric") || t("product.fabric")}
-                  options={getAxisOptions(variants, "fabric", selection)}
-                  displayOptions={attrOptions("fabric")}
-                  selected={selection.fabric}
-                  onSelect={(v) => setAxisValue("fabric", v)}
-                />
-              )}
+              ))}
 
               {selectedVariant && (
                 <p className="mt-2 text-xs text-muted-foreground">

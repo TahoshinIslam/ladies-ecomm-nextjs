@@ -24,7 +24,7 @@ import {
   useUpdateAttributeMutation,
   useDeleteAttributeMutation,
 } from "../../store/shopApi.js";
-import { cn } from "../../lib/utils.js";
+import { cn, isDepartmentCategory, categoryDepth } from "../../lib/utils.js";
 
 const TABS = [
   { id: "categories", label: "Departments & categories", icon: Folder },
@@ -71,36 +71,42 @@ export default function AdminCategoriesPage() {
 }
 
 /* =========================================================================
-   Departments & categories — the real parent-based hierarchy (parent: null
-   = department, parent: <deptId> = subcategory one level deep, enforced by
-   services/categoryService.js). Replaces the old isUserGenerated filter,
-   which matched a field that never existed on any real category and left
-   every one of the 42 seeded categories permanently invisible here.
+   Departments & categories — the real parent-based hierarchy. Up to 3
+   levels: a root/division (parent: null, e.g. Clothes or Cosmetics) ->
+   a department (Burqa under Clothes, or Cosmetics itself) -> a leaf/style
+   (enforced by services/categoryService.js's validateParent). Rendered
+   recursively so any depth the data actually has shows up, rather than
+   hardcoding "departments, then their direct children" as the only two
+   renderable levels.
    ========================================================================= */
 
 function CategoryTree() {
   const { data, isLoading } = useGetCategoriesQuery();
   // Stable reference across renders when `data` is undefined/loading —
   // `data?.categories ?? []` would otherwise create a new array every
-  // render, invalidating the departments useMemo below for no real reason.
+  // render, invalidating the memos below for no real reason.
   const categories = useMemo(() => data?.categories ?? [], [data]);
-  const departments = useMemo(() => categories.filter((c) => !c.parent), [categories]);
-  const childrenOf = (deptId) => categories.filter((c) => String(c.parent) === String(deptId));
+  const roots = useMemo(() => categories.filter((c) => !c.parent), [categories]);
+  const childrenOf = (parentId) => categories.filter((c) => String(c.parent) === String(parentId));
 
-  // Client-side search — the department/category tree is a small, bounded
-  // set by design (services/categoryService.js enforces exactly two levels,
-  // and the storefront nav/filter chips depend on fetching it whole), so
-  // there's no server-side page to request here; filtering the
-  // already-loaded tree is the correct scope for this dataset, not a
-  // shortcut around a large one.
+  // Client-side search — the category tree is a small, bounded set by
+  // design (services/categoryService.js caps depth at 3, and the
+  // storefront nav/filter chips depend on fetching it whole), so there's no
+  // server-side page to request here; filtering the already-loaded tree is
+  // the correct scope for this dataset, not a shortcut around a large one.
   const [search, setSearch] = useState("");
   const term = search.trim().toLowerCase();
   const matches = (name) => !term || name.toLowerCase().includes(term);
-  const visibleDepartments = useMemo(() => {
-    if (!term) return departments;
-    return departments.filter((d) => matches(d.name) || childrenOf(d._id).some((c) => matches(c.name)));
+  // A subtree matches if its own name matches, or any descendant's does.
+  const subtreeMatches = (category) => {
+    if (matches(category.name)) return true;
+    return childrenOf(category._id).some((c) => subtreeMatches(c));
+  };
+  const visibleRoots = useMemo(() => {
+    if (!term) return roots;
+    return roots.filter((r) => subtreeMatches(r));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [departments, categories, term]);
+  }, [roots, categories, term]);
 
   const [expanded, setExpanded] = useState(() => new Set());
   const toggleExpanded = (id) =>
@@ -156,110 +162,37 @@ function CategoryTree() {
             <Skeleton key={i} className="h-14 w-full" />
           ))}
         </div>
-      ) : departments.length === 0 ? (
+      ) : roots.length === 0 ? (
         <EmptyState icon={Folder} title="No departments yet" message="Add your first department to get started." />
-      ) : visibleDepartments.length === 0 ? (
+      ) : visibleRoots.length === 0 ? (
         <EmptyState icon={Search} title="No matches" message="Try a different search." />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-background">
-          {visibleDepartments.map((dept, i) => {
-            const kids = childrenOf(dept._id);
-            // Force-open a department whose own name didn't match but one
-            // of its subcategories did — otherwise the search would hide
-            // the very match it just found.
-            const isOpen = expanded.has(dept._id) || (!!term && !matches(dept.name));
-            return (
-              <div key={dept._id} className={cn(i > 0 && "border-t border-border")}>
-                <div className="flex items-center gap-2 p-3">
-                  <button
-                    onClick={() => toggleExpanded(dept._id)}
-                    className="rounded p-1 text-muted-foreground hover:bg-muted"
-                    aria-label={isOpen ? "Collapse" : "Expand"}
-                    disabled={kids.length === 0}
-                  >
-                    {kids.length === 0 ? (
-                      <span className="inline-block h-4 w-4" />
-                    ) : isOpen ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
-                    )}
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">{dept.name}</span>
-                      {!dept.isActive && <Badge variant="outline">Inactive</Badge>}
-                      <span className="text-xs text-muted-foreground">{dept.slug}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {kids.length} subcategor{kids.length === 1 ? "y" : "ies"} · sort {dept.sortOrder ?? 0}
-                    </p>
-                  </div>
-                  <div className="flex flex-shrink-0 gap-1">
-                    <Button size="sm" variant="outline" onClick={() => openCreate(dept._id)}>
-                      <Plus className="h-3 w-3" /> Subcategory
-                    </Button>
-                    <button
-                      onClick={() => setEditing(dept)}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label="Edit"
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setConfirmDelete(dept)}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger"
-                      aria-label="Delete"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {isOpen && kids.length > 0 && (
-                  <div className="divide-y divide-border border-t border-border bg-muted/10 pl-9">
-                    {kids.map((c) => (
-                      <div key={c._id} className="flex items-center gap-2 p-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{c.name}</span>
-                            {!c.isActive && <Badge variant="outline">Inactive</Badge>}
-                            <span className="text-xs text-muted-foreground">{c.slug}</span>
-                          </div>
-                          {c.description && (
-                            <p className="line-clamp-1 text-xs text-muted-foreground">{c.description}</p>
-                          )}
-                        </div>
-                        <div className="flex flex-shrink-0 gap-1">
-                          <button
-                            onClick={() => setEditing(c)}
-                            className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                            aria-label="Edit"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => setConfirmDelete(c)}
-                            className="rounded p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger"
-                            aria-label="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {visibleRoots.map((root, i) => (
+            <div key={root._id} className={cn(i > 0 && "border-t border-border")}>
+              <CategoryNode
+                category={root}
+                depth={0}
+                categories={categories}
+                childrenOf={childrenOf}
+                expanded={expanded}
+                toggleExpanded={toggleExpanded}
+                term={term}
+                matches={matches}
+                subtreeMatches={subtreeMatches}
+                onEdit={setEditing}
+                onDelete={setConfirmDelete}
+                onAddChild={openCreate}
+              />
+            </div>
+          ))}
         </div>
       )}
 
       {(createOpen || editing) && (
         <CategoryFormModal
           category={editing}
-          departments={departments}
+          categories={categories}
           defaultParent={createParent}
           onClose={() => {
             setCreateOpen(false);
@@ -280,7 +213,116 @@ function CategoryTree() {
   );
 }
 
-function CategoryFormModal({ category, departments, defaultParent, onClose }) {
+// One row of the tree, rendering itself then recursing into its own
+// children — replaces the old hardcoded "departments, then their direct
+// children" two-tier JSX so a 3rd level (e.g. Burqa's styles, under
+// Clothes) renders and is manageable the same way any other level is,
+// instead of silently having no UI at all.
+function CategoryNode({
+  category,
+  depth,
+  categories,
+  childrenOf,
+  expanded,
+  toggleExpanded,
+  term,
+  matches,
+  subtreeMatches,
+  onEdit,
+  onDelete,
+  onAddChild,
+}) {
+  const kids = childrenOf(category._id);
+  // Force-open a node whose own name didn't match but a descendant's did —
+  // otherwise the search would hide the very match it just found.
+  const isOpen = expanded.has(category._id) || (!!term && !matches(category.name));
+  // Matches services/categoryService.js's validateParent cap (3 levels
+  // total, depth 0/1/2) — a depth-2 node adding a child would be a 4th
+  // level, which the server rejects, so don't offer the dead-end action.
+  const canAddChild = categoryDepth(category, categories) < 2;
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 p-3" style={{ paddingLeft: `${12 + depth * 28}px` }}>
+        <button
+          onClick={() => toggleExpanded(category._id)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted"
+          aria-label={isOpen ? "Collapse" : "Expand"}
+          disabled={kids.length === 0}
+        >
+          {kids.length === 0 ? (
+            <span className="inline-block h-4 w-4" />
+          ) : isOpen ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className={depth === 0 ? "font-semibold" : "font-medium"}>{category.name}</span>
+            {!category.isActive && <Badge variant="outline">Inactive</Badge>}
+            <span className="text-xs text-muted-foreground">{category.slug}</span>
+          </div>
+          {depth === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {kids.length} subcategor{kids.length === 1 ? "y" : "ies"} · sort {category.sortOrder ?? 0}
+            </p>
+          ) : (
+            category.description && <p className="line-clamp-1 text-xs text-muted-foreground">{category.description}</p>
+          )}
+        </div>
+        <div className="flex flex-shrink-0 gap-1">
+          {canAddChild && (
+            <Button size="sm" variant="outline" onClick={() => onAddChild(category._id)}>
+              <Plus className="h-3 w-3" /> Subcategory
+            </Button>
+          )}
+          <button
+            onClick={() => onEdit(category)}
+            className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="Edit"
+          >
+            <Edit2 className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => onDelete(category)}
+            className="rounded p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+            aria-label="Delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {isOpen && kids.length > 0 && (
+        <div className="divide-y divide-border border-t border-border bg-muted/10">
+          {kids
+            .filter((c) => !term || subtreeMatches(c))
+            .map((c) => (
+              <CategoryNode
+                key={c._id}
+                category={c}
+                depth={depth + 1}
+                categories={categories}
+                childrenOf={childrenOf}
+                expanded={expanded}
+                toggleExpanded={toggleExpanded}
+                term={term}
+                matches={matches}
+                subtreeMatches={subtreeMatches}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onAddChild={onAddChild}
+              />
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryFormModal({ category, categories, defaultParent, onClose }) {
   const isEdit = !!category;
   const [name, setName] = useState(category?.name || "");
   const [nameBn, setNameBn] = useState(category?.nameBn || "");
@@ -293,6 +335,12 @@ function CategoryFormModal({ category, departments, defaultParent, onClose }) {
   const [createCategory, { isLoading: creating }] = useCreateCategoryMutation();
   const [updateCategory, { isLoading: updating }] = useUpdateCategoryMutation();
   const loading = creating || updating;
+
+  // A category can be a parent as long as its own depth is < 2 — matches
+  // services/categoryService.js's validateParent cap (3 levels total), so
+  // both a root (Cosmetics) and a department (Burqa, itself under Clothes)
+  // are valid choices, but a leaf/style is not.
+  const parentOptions = categories.filter((c) => c._id !== category?._id && categoryDepth(c, categories) < 2);
 
   const save = async () => {
     if (!name.trim()) {
@@ -334,18 +382,17 @@ function CategoryFormModal({ category, departments, defaultParent, onClose }) {
           onChange={(e) => setNameBn(e.target.value)}
         />
         <Select
-          label="Department (leave blank for a top-level department)"
+          label="Parent category (leave blank for a top-level department/division)"
           value={parent}
           onChange={(e) => setParent(e.target.value)}
         >
-          <option value="">— Top-level department —</option>
-          {departments
-            .filter((d) => d._id !== category?._id)
-            .map((d) => (
-              <option key={d._id} value={d._id}>
-                {d.name}
-              </option>
-            ))}
+          <option value="">— Top-level —</option>
+          {parentOptions.map((d) => (
+            <option key={d._id} value={d._id}>
+              {"— ".repeat(categoryDepth(d, categories))}
+              {d.name}
+            </option>
+          ))}
         </Select>
         <Textarea
           label="Description (optional)"
@@ -402,7 +449,11 @@ const ATTR_TYPES = ["select", "swatch", "boolean", "text"];
 function AttributeManager() {
   const { data, isLoading } = useGetAttributesQuery(); // no category param -> full raw list
   const { data: catsData } = useGetCategoriesQuery();
-  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
+  const allCategories = catsData?.categories ?? [];
+  // Must be real department ids — the only ids Product.topCategory (and so
+  // AttributeDefinition.appliesToCategories) ever equals — never a division
+  // like Clothes, which no product's topCategory is ever set to.
+  const departments = allCategories.filter((c) => isDepartmentCategory(c, allCategories));
   const attributes = data?.attributes ?? [];
 
   // Same reasoning as CategoryTree: AttributeDefinition is a small, curated

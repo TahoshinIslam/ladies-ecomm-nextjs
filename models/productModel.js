@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import slugify from "slugify";
 
 import Category from "./categoryModel.js";
+import AttributeDefinition from "./attributeDefinitionModel.js";
 
 const variantSchema = new mongoose.Schema({
   // Admin-facing label, e.g. "Black / XL / Nida". Kept as its own field
@@ -17,12 +18,15 @@ const variantSchema = new mongoose.Schema({
     required: [true, "Variant SKU is required"],
     trim: true,
   },
+  // Arbitrary key/value bag, e.g. { color: "Black", size: "XL", fabric:
+  // "Nida" } for clothing or { shade: "Ruby Red", volumeMl: "30ml" } for
+  // cosmetics. Which keys apply to a given department is driven entirely by
+  // AttributeDefinition.derivedFromVariant (see the pre-validate hook
+  // below) — this schema itself imposes no fixed shape, so a new category
+  // needs no change here, only new AttributeDefinition documents.
   attributes: {
-    color: { type: String, default: "" },
-    // Also carries "length" values for categories where size and length are
-    // the same dimension (Khimar, Burqa) — see AttributeDefinition.labelOverrides.
-    size: { type: String, default: "" },
-    fabric: { type: String, default: "" },
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
   },
   // Overrides — effective price = price ?? product.basePrice, and the same
   // for discountPrice. Absent (null) means "use the product's price."
@@ -223,13 +227,25 @@ productSchema.pre("validate", async function () {
     this.topCategory = category?.parent ?? category?._id ?? this.category;
   }
 
-  // Sync color/size/fabric facets from the variant list; merge with (never
-  // overwrite) the admin-set descriptive attributes.
-  const derived = {
-    color: dedupe(this.variants.map((v) => v.attributes?.color)),
-    size: dedupe(this.variants.map((v) => v.attributes?.size)),
-    fabric: dedupe(this.variants.map((v) => v.attributes?.fabric)),
-  };
+  // Sync variant-derived facets (color/size/fabric for clothing, shade/
+  // volumeMl for cosmetics, ...) from the variant list; merge with (never
+  // overwrite) the admin-set descriptive attributes. Which keys count as
+  // "variant-derived" for this product's department is read from
+  // AttributeDefinition rather than hardcoded, so a new category needs no
+  // change here.
+  const defs = await AttributeDefinition.find({ derivedFromVariant: true })
+    .select("key appliesToCategories")
+    .lean();
+  const topCategoryId = this.topCategory ? String(this.topCategory) : null;
+  const applicableDefs = defs.filter(
+    (d) =>
+      !d.appliesToCategories?.length ||
+      d.appliesToCategories.some((c) => String(c) === topCategoryId),
+  );
+  const derived = {};
+  for (const { key } of applicableDefs) {
+    derived[key] = dedupe(this.variants.map((v) => v.attributes?.[key]));
+  }
   const byKey = new Map(this.attributes.map((a) => [a.key, a.values]));
   for (const [key, values] of Object.entries(derived)) {
     if (values.length) byKey.set(key, values);

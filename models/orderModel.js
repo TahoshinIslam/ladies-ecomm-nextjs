@@ -25,9 +25,10 @@ const orderItemSchema = new mongoose.Schema(
     snapshot: {
       name: { type: String, required: [true, "Product name is required"] },
       sku: { type: String, default: "" },
-      color: { type: String, default: "" },
-      size: { type: String, default: "" },
-      fabric: { type: String, default: "" },
+      // Arbitrary key/value bag mirroring the variant's own `attributes`
+      // (color/size/fabric for clothing, shade/volumeMl for cosmetics, ...)
+      // — see models/productModel.js's variantSchema.
+      attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
       price: { type: Number, required: [true, "Price is required"] },
       image: { type: String, default: "" },
     },

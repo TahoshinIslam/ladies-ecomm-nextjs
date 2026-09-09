@@ -45,11 +45,15 @@ export default function QuickAddSheet() {
 
   const open = !!product;
   const variants = product?.variants ?? [];
-  const axes = getVariantAxes(variants);
   const { data: attrData } = useGetAttributesQuery(product?.topCategory, {
     skip: !product?.topCategory,
   });
   const attrDefs = attrData?.attributes ?? [];
+  // Candidate variant axes for this product's department come from
+  // AttributeDefinition.derivedFromVariant — never a fixed clothing-only
+  // list — same as ProductDetailInteractive.jsx.
+  const candidateAxes = attrDefs.filter((d) => d.derivedFromVariant).map((d) => d.key);
+  const axes = getVariantAxes(variants, candidateAxes);
   // The DB always stores these in English — translateAttrLabel/Value
   // overlay a Bangla translation for every known seeded key/value (see
   // lib/i18n/catalog.js), same fix as ProductDetailPage.jsx.
@@ -61,12 +65,17 @@ export default function QuickAddSheet() {
     }));
 
   // Reseed the selection whenever the open product changes (a new product,
-  // or closing back to none) — React's "adjust state on prop change" shape,
-  // same pattern already used for the sheet's open/close transitions.
-  const [lastProductId, setLastProductId] = useState(product?._id ?? null);
-  if ((product?._id ?? null) !== lastProductId) {
-    setLastProductId(product?._id ?? null);
-    setSelection(product ? getDefaultVariantSelection(product.variants ?? []) : {});
+  // or closing back to none), or once candidateAxes finishes loading for the
+  // same product (useGetAttributesQuery resolves after this sheet's first
+  // render, so an empty candidateAxes on that first pass must not stick) —
+  // React's "adjust state on prop change" shape, same pattern already used
+  // for the sheet's open/close transitions.
+  const axesKey = candidateAxes.join(",");
+  const [lastSeed, setLastSeed] = useState(() => `${product?._id ?? null}|${axesKey}`);
+  const seedKey = `${product?._id ?? null}|${axesKey}`;
+  if (seedKey !== lastSeed) {
+    setLastSeed(seedKey);
+    setSelection(product ? getDefaultVariantSelection(product.variants ?? [], candidateAxes) : {});
     setAdding(false);
   }
 
@@ -79,11 +88,11 @@ export default function QuickAddSheet() {
   if (!product) return null;
 
   const close = () => dispatch(closeQuickAdd());
-  const selectedVariant = resolveVariant(variants, selection);
+  const selectedVariant = resolveVariant(variants, selection, axes);
   const pricing = resolveVariantPricing(product, selectedVariant);
 
   const setAxisValue = (axis, value) => {
-    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }));
+    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes));
   };
 
   const confirm = async () => {
@@ -199,9 +208,9 @@ export default function QuickAddSheet() {
                     aria-label={t("quickAddSheet.availableOption", { option: attrLabel(axis) || axis })}
                     className="mt-3 grid grid-cols-5 gap-2"
                   >
-                    {getAxisOptions(variants, axis, selection).map((opt) => {
+                    {getAxisOptions(variants, axis, selection, axes).map((opt) => {
                       const low = !opt.disabled && (() => {
-                        const v = resolveVariant(variants, { ...selection, [axis]: opt.value });
+                        const v = resolveVariant(variants, { ...selection, [axis]: opt.value }, axes);
                         return v && v.stock > 0 && v.stock <= 2;
                       })();
                       const active = selection[axis] === opt.value;

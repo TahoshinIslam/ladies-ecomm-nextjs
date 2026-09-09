@@ -31,10 +31,13 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
 
-// The storefront only ever shows these departments and their subcategories
-// (see services/productService.js's STOREFRONT_DEPARTMENT_SLUGS, the source
-// of truth the backend enforces this same scope against).
-const STOREFRONT_DEPARTMENT_SLUGS = new Set(["burqa", "hijab", "niqab", "abaya", "khimar", "modest-sets"]);
+// The top-nav divisions the storefront shows — root categories only
+// (`!c.parent`, see `departments` below). "Clothes" is the root that groups
+// Burqa/Hijab/Niqab/Abaya/Khimar/Modest-Sets/T-shirt (each now a child of
+// Clothes, not a root itself — see services/productService.js's
+// STOREFRONT_DEPARTMENT_SLUGS for the full department-level scope list the
+// backend enforces); Cosmetics/Shoes/Sunglasses stay root departments.
+const STOREFRONT_DEPARTMENT_SLUGS = new Set(["clothes", "cosmetics", "shoes", "sunglasses"]);
 
 // `value` is the stable filter/query value (see section 7 of the
 // localization audit — never translated); `labelKey` is resolved via t()
@@ -59,11 +62,16 @@ const SORTS = [
 ];
 const PAGE_SIZE = 12;
 
-const computeTitle = (sp, departments, t, locale) => {
+// `allCategories` (not just the top-nav `departments` list) so a
+// department reached by drilling into a division (e.g. ?category=<BurqaId>
+// after selecting Clothes) still gets its own real title instead of
+// falling back to "Shop All" — Burqa isn't a root category any more, but
+// it's still a valid, nameable selection.
+const computeTitle = (sp, allCategories, t, locale) => {
   const search = sp.get("search");
   if (search) return t("shop.resultsFor", { query: search });
   const deptId = sp.get("category");
-  const dept = deptId ? departments.find((d) => d._id === deptId) : null;
+  const dept = deptId ? allCategories.find((d) => d._id === deptId) : null;
   if (dept) return departmentName(locale, dept.slug, dept.name);
   return t("shop.shopAll");
 };
@@ -198,8 +206,8 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
     }
   };
 
-  const title = computeTitle(sp, departments, t, locale);
-  const selectedDeptObj = selectedDept ? departments.find((d) => d._id === selectedDept) : null;
+  const title = computeTitle(sp, catsData?.categories ?? [], t, locale);
+  const selectedDeptObj = selectedDept ? (catsData?.categories ?? []).find((d) => d._id === selectedDept) : null;
 
   // Individually removable chips for every active product-filter param —
   // built from the same URL state and lookup data the sidebar renders
@@ -628,8 +636,18 @@ function FilterPanel({
               <CheckBox
                 key={g._id}
                 label={`${g.name} (${g.count})`}
-                checked={sp.get("style") === g._id}
-                onChange={(v) => setParam("style", v ? g._id : "")}
+                // A leaf grouping (a real style, e.g. Cosmetics' Lipstick)
+                // is a facet within the selected department — toggle
+                // `?style=`. A non-leaf grouping (a department under a
+                // division, e.g. Burqa under Clothes) isn't a style at
+                // all — it's a further department to drill into, so it
+                // replaces the department selection instead (same as
+                // clicking it in the top Category filter).
+                checked={g.isLeaf ? sp.get("style") === g._id : selectedDept === g._id}
+                onChange={(v) => {
+                  if (g.isLeaf) setParam("style", v ? g._id : "");
+                  else if (v) selectDepartment(g._id);
+                }}
               />
             ))
           )}

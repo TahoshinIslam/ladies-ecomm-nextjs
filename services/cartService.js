@@ -18,9 +18,7 @@ function findVariant(product, variantId) {
 function snapshotVariant(variant) {
   return {
     sku: variant.sku || "",
-    color: variant.attributes?.color || "",
-    size: variant.attributes?.size || "",
-    fabric: variant.attributes?.fabric || "",
+    attributes: { ...variant.attributes },
     price: variant.price ?? null,
     image: variant.images?.[0] || "",
   };

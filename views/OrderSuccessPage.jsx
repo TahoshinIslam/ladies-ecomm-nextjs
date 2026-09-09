@@ -10,7 +10,7 @@ import Button from "../components/ui/Button.jsx";
 import Skeleton from "../components/ui/Skeleton.jsx";
 import OrderTimeline from "../components/order/OrderTimeline.jsx";
 import { useGetOrderQuery } from "../store/shopApi.js";
-import { formatCurrency, resolveImage } from "../lib/utils.js";
+import { formatCurrency, resolveImage, formatVariantAttributes } from "../lib/utils.js";
 import { useOrderStatusStream } from "../hooks/useOrderStatusStream.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
 
@@ -130,7 +130,7 @@ export default function OrderSuccessPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{it.snapshot?.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {[it.snapshot?.color, it.snapshot?.size, it.snapshot?.fabric].filter(Boolean).join(" · ")}
+                  {formatVariantAttributes(it.snapshot?.attributes)}
                   {" · "}{t("checkout.qty")}{" "}
                   {it.quantity}
                 </p>

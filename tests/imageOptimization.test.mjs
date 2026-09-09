@@ -208,19 +208,30 @@ describe("Phase 9 — image-origin configuration stays HTTPS-only and minimally 
     assert.ok(!content.includes("dangerouslyAllowSVG"));
   });
 
-  test("images.unsplash.com is not a configured remotePattern — confirmed unused anywhere in live code or seed data", () => {
+  test("images.unsplash.com, where configured, is only ever referenced from scripts/seedCatalog.mjs — never hardcoded into live app request-handling code", () => {
+    // Phase 9 originally kept this hostname OUT of remotePatterns entirely
+    // (confirmed zero references anywhere). The Cosmetics seed products
+    // (Lipstick/Foundation) now use real Unsplash stock photos instead of
+    // placehold.co text placeholders, so the hostname is allowlisted again
+    // — this test keeps the original scoping guarantee narrowed instead:
+    // the only place that ever names this host is the seed script itself,
+    // never a live app/views/components/lib/services/models code path.
     const content = read("next.config.mjs");
     const block = content.match(/remotePatterns:\s*\[([\s\S]*?)\]/)[1];
-    assert.ok(!block.includes("unsplash"), "images.unsplash.com must not be an active remotePattern entry");
+    const unsplashConfigured = block.includes("images.unsplash.com");
 
-    const dirs = ["app", "views", "components", "lib", "services", "models", "scripts"].map((d) => abs(d));
+    const dirs = ["app", "views", "components", "lib", "services", "models"].map((d) => abs(d));
     const offenders = [];
     for (const dir of dirs) {
       for (const file of findFiles(dir, { extRe: /\.(js|jsx|mjs)$/ })) {
         if (fs.readFileSync(file, "utf8").includes("images.unsplash.com")) offenders.push(file);
       }
     }
-    assert.deepEqual(offenders, []);
+    assert.deepEqual(offenders, [], "images.unsplash.com must never be hardcoded into live app code — seed data only");
+
+    if (!unsplashConfigured) return; // fine either way — just never in live code
+    const seedContent = read("scripts/seedCatalog.mjs");
+    assert.ok(seedContent.includes("images.unsplash.com"), "if allowlisted, expected scripts/seedCatalog.mjs to be the one real user");
   });
 
   test("no general-purpose external-image proxy route was introduced", () => {
