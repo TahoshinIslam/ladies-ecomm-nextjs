@@ -32,11 +32,30 @@ async function connectDB() {
 
 const IMG = (seed) => `https://placehold.co/800x1000?text=${encodeURIComponent(seed)}`;
 
+// Real, free-license stock photos (Unsplash) for the Cosmetics seed
+// products — verified in-browser to actually depict lipstick/foundation
+// before use, unlike the rest of the catalog's text placeholders. Requires
+// `images.unsplash.com` in next.config.mjs's image remotePatterns.
+const UNSPLASH = (id) => `https://images.unsplash.com/photo-${id}?w=800&q=80&auto=format&fit=crop`;
+const COSMETICS_IMAGES = {
+  lipstick: UNSPLASH("1596462502278-27bfdc403348"), // lipstick swipe/smear
+  lipstickFlatlay: UNSPLASH("1512496015851-a90fb38ba796"), // cosmetics flatlay
+  foundation: UNSPLASH("1557205465-f3762edea6d3"), // foundation bottles
+};
+
 // ---------------------------------------------------------------------------
 // Category taxonomy
 // ---------------------------------------------------------------------------
 
-const CATEGORY_TREE = [
+// Clothes is a real division (parent: null) whose children are themselves
+// departments (Burqa, Hijab, ...), each with their own leaf styles — a
+// genuine 3rd level, not just a UI grouping. Every department here keeps
+// its original slug/_id (upserted by slug, same as before), so no existing
+// product's `topCategory` (denormalized one hop above its leaf, i.e. still
+// the department, never Clothes) needs to change — see
+// services/categoryService.js/productService.js for the department-vs-
+// division distinction this relies on.
+const CLOTHES_DEPARTMENTS = [
   {
     slug: "burqa",
     name: "Burqa",
@@ -109,13 +128,121 @@ const CATEGORY_TREE = [
       { slug: "modest-sets-occasion", name: "Eid / Occasion Set" },
     ],
   },
+  {
+    slug: "t-shirt",
+    name: "T-Shirt",
+    children: [
+      { slug: "tshirt-crew-neck", name: "Crew Neck T-Shirt" },
+      { slug: "tshirt-graphic", name: "Graphic T-Shirt" },
+      { slug: "tshirt-polo", name: "Polo T-Shirt" },
+    ],
+  },
+  // A department's leaf subcategories are just data — nothing in the shop
+  // filter, admin dropdowns, or attribute scoping hardcodes "t-shirt" or
+  // any other slug (see services/productService.js's listGroupings and
+  // AttributeDefinition.appliesToCategories) — so Shirts/Jeans, each with
+  // their own leaf subsections, need no code changes at all, only these
+  // category entries.
+  {
+    slug: "shirts",
+    name: "Shirts",
+    children: [
+      { slug: "shirts-formal", name: "Formal Shirt" },
+      { slug: "shirts-casual", name: "Casual Shirt" },
+    ],
+  },
+  {
+    slug: "jeans",
+    name: "Jeans",
+    children: [
+      { slug: "jeans-skinny", name: "Skinny Jeans" },
+      { slug: "jeans-straight", name: "Straight Jeans" },
+    ],
+  },
 ];
+
+// Flat (2-level) departments — each is itself a root category whose direct
+// children are real leaf styles, same shape Cosmetics has always had.
+// Unlike CLOTHES_DEPARTMENTS above, these are NOT nested under a division.
+const FLAT_DEPARTMENTS = [
+  // First non-clothing department — proves the variant-attribute
+  // generalization (see models/productModel.js's variantSchema.attributes)
+  // needs no code changes for a new vertical, only these seed documents.
+  {
+    slug: "cosmetics",
+    name: "Cosmetics",
+    children: [
+      { slug: "cosmetics-lipstick", name: "Lipstick" },
+      { slug: "cosmetics-foundation", name: "Foundation" },
+      { slug: "cosmetics-facewash", name: "Facewash" },
+    ],
+  },
+  {
+    slug: "shoes",
+    name: "Shoes",
+    children: [
+      { slug: "shoes-sneakers", name: "Sneakers" },
+      { slug: "shoes-sandals", name: "Sandals" },
+      { slug: "shoes-formal", name: "Formal Shoes" },
+    ],
+  },
+  {
+    slug: "sunglasses",
+    name: "Sunglasses",
+    children: [
+      { slug: "sunglasses-aviator", name: "Aviator Sunglasses" },
+      { slug: "sunglasses-wayfarer", name: "Wayfarer Sunglasses" },
+    ],
+  },
+];
+
+// Every clothing department slug — used below to scope the color/size/
+// fabric AttributeDefinitions away from non-clothing departments (they'd
+// otherwise stay universal and wrongly show up on the Cosmetics/Shoes/
+// Sunglasses variant forms too, since their appliesToCategories was empty/
+// universal before Cosmetics existed).
+const CLOTHING_DEPARTMENT_SLUGS = ["burqa", "hijab", "niqab", "abaya", "khimar", "modest-sets", "t-shirt", "shirts", "jeans"];
 
 async function seedCategories() {
   const topBySlug = new Map();
   let sortOrder = 0;
 
-  for (const dept of CATEGORY_TREE) {
+  // Clothes: one division (parent: null), its departments as children
+  // (parent: Clothes._id), each department's own leaf styles as
+  // grandchildren (parent: department._id) — the real 3rd level.
+  const clothes = await Category.findOneAndUpdate(
+    { slug: "clothes" },
+    { $set: { name: "Clothes", parent: null, sortOrder: sortOrder++ } },
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+  );
+
+  for (const dept of CLOTHES_DEPARTMENTS) {
+    const top = await Category.findOneAndUpdate(
+      { slug: dept.slug },
+      { $set: { name: dept.name, parent: clothes._id, sortOrder: sortOrder++ } },
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+    );
+    topBySlug.set(dept.slug, top);
+
+    let childOrder = 0;
+    for (const child of dept.children) {
+      await Category.findOneAndUpdate(
+        { slug: child.slug },
+        {
+          $set: {
+            name: child.name,
+            parent: top._id,
+            sortOrder: childOrder++,
+          },
+        },
+        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
+      );
+    }
+  }
+
+  // Flat departments: each is its own root (parent: null), leaves as
+  // direct children — same shape as before Clothes existed.
+  for (const dept of FLAT_DEPARTMENTS) {
     const top = await Category.findOneAndUpdate(
       { slug: dept.slug },
       { $set: { name: dept.name, parent: null, sortOrder: sortOrder++ } },
@@ -149,6 +276,14 @@ async function seedCategories() {
 
 function buildAttributeDefs(topBySlug) {
   const topId = (slug) => topBySlug.get(slug)._id;
+  const clothingDeptIds = CLOTHING_DEPARTMENT_SLUGS.map(topId);
+  // "color" is shared across clothing, Shoes, and Sunglasses — one key/
+  // option-set reused across departments, same pattern "size" already uses
+  // via labelOverrides. Shoes/Sunglasses deliberately get no other
+  // variant-identity attribute of their own for now (no shoe sizing, no
+  // sunglasses-specific descriptive attribute) — not requested; flagged as
+  // an assumption, easy to extend later.
+  const colorDeptIds = [...clothingDeptIds, topId("shoes"), topId("sunglasses")];
 
   return [
     {
@@ -156,7 +291,7 @@ function buildAttributeDefs(topBySlug) {
       label: "Color",
       type: "swatch",
       derivedFromVariant: true,
-      appliesToCategories: [],
+      appliesToCategories: colorDeptIds,
       options: [
         { value: "black", label: "Black", swatchHex: "#1a1a1a" },
         { value: "navy", label: "Navy", swatchHex: "#1f2a44" },
@@ -166,6 +301,8 @@ function buildAttributeDefs(topBySlug) {
         { value: "maroon", label: "Maroon", swatchHex: "#7b2d26" },
         { value: "dusty-rose", label: "Dusty Rose", swatchHex: "#c9a0a0" },
         { value: "white", label: "White", swatchHex: "#ffffff" },
+        { value: "red", label: "Red", swatchHex: "#c0392b" },
+        { value: "blue", label: "Blue", swatchHex: "#2c5faa" },
       ],
     },
     {
@@ -173,7 +310,7 @@ function buildAttributeDefs(topBySlug) {
       label: "Size",
       type: "select",
       derivedFromVariant: true,
-      appliesToCategories: [],
+      appliesToCategories: clothingDeptIds,
       labelOverrides: [
         { category: topId("burqa"), label: "Length" },
         { category: topId("khimar"), label: "Length" },
@@ -197,7 +334,7 @@ function buildAttributeDefs(topBySlug) {
       label: "Fabric",
       type: "select",
       derivedFromVariant: true,
-      appliesToCategories: [],
+      appliesToCategories: clothingDeptIds,
       options: [
         { value: "nida", label: "Nida" },
         { value: "crepe", label: "Crepe" },
@@ -274,6 +411,52 @@ function buildAttributeDefs(topBySlug) {
       filterable: false,
       appliesToCategories: [],
       options: [],
+    },
+    // --- Cosmetics — proves AttributeDefinition.derivedFromVariant works
+    // for a variant dimension that isn't color/size/fabric, with no code
+    // change (see models/productModel.js's pre-validate facet-sync hook
+    // and views/admin/ProductsPage.jsx's dynamic Variants step). ---
+    {
+      key: "shade",
+      label: "Shade",
+      type: "swatch",
+      derivedFromVariant: true,
+      appliesToCategories: [topId("cosmetics")],
+      options: [
+        { value: "ruby-red", label: "Ruby Red", swatchHex: "#9b111e" },
+        { value: "nude-blush", label: "Nude Blush", swatchHex: "#dca8a0" },
+        { value: "coral-pop", label: "Coral Pop", swatchHex: "#ff6f61" },
+        { value: "ivory", label: "Ivory", swatchHex: "#f2e6d8" },
+        { value: "honey", label: "Honey", swatchHex: "#c68a4e" },
+      ],
+    },
+    {
+      key: "volumeMl",
+      label: "Volume",
+      type: "select",
+      derivedFromVariant: true,
+      appliesToCategories: [topId("cosmetics")],
+      options: [
+        { value: "15ml", label: "15ml" },
+        { value: "30ml", label: "30ml" },
+        { value: "50ml", label: "50ml" },
+      ],
+    },
+    {
+      key: "skinType",
+      label: "Skin Type",
+      type: "select",
+      // Admin-set descriptive attribute, not variant-derived — every shade/
+      // volume of a given foundation suits the same skin types, so this
+      // isn't a purchasing axis the way shade is.
+      appliesToCategories: [topId("cosmetics")],
+      options: [
+        { value: "oily", label: "Oily" },
+        { value: "dry", label: "Dry" },
+        { value: "combination", label: "Combination" },
+        { value: "sensitive", label: "Sensitive" },
+        { value: "all", label: "All skin types" },
+      ],
     },
   ];
 }
@@ -545,6 +728,241 @@ function buildProducts(categoryBySlug) {
       availability: "preOrder",
       tags: ["modest-sets", "eid", "bundle"],
     },
+    // --- Cosmetics test case ---
+    {
+      // Multi-variant: proves the shade axis (a non-color/size/fabric
+      // AttributeDefinition.derivedFromVariant key) drives the storefront
+      // selector, the "images by shade" admin grouping, and the cart/order
+      // snapshot the same way color does for clothing.
+      name: "Matte Liquid Lipstick",
+      description: "Long-wearing matte liquid lipstick in five true-to-tone shades.",
+      category: cat("cosmetics-lipstick"),
+      basePrice: 12,
+      images: [COSMETICS_IMAGES.lipstick, COSMETICS_IMAGES.lipstickFlatlay],
+      variants: [
+        {
+          variantName: "Ruby Red",
+          sku: "COS-LIP-RUBY",
+          attributes: { shade: "ruby-red" },
+          stock: 25,
+          images: [COSMETICS_IMAGES.lipstick],
+        },
+        {
+          variantName: "Nude Blush",
+          sku: "COS-LIP-NUDE",
+          attributes: { shade: "nude-blush" },
+          stock: 30,
+          images: [COSMETICS_IMAGES.lipstick],
+        },
+        {
+          variantName: "Coral Pop",
+          sku: "COS-LIP-CORAL",
+          attributes: { shade: "coral-pop" },
+          stock: 18,
+          images: [COSMETICS_IMAGES.lipstick],
+        },
+      ],
+      tags: ["cosmetics", "lipstick", "matte"],
+    },
+    {
+      // Single-variant: proves a product needs no multi-value variant axis
+      // at all — one "Default" variant still satisfies the schema's
+      // "at least one variant" requirement while carrying descriptive
+      // (skinType) and derived (shade/volumeMl) attributes together.
+      name: "Hydrating Liquid Foundation",
+      description: "Buildable, hydrating foundation with a natural satin finish.",
+      category: cat("cosmetics-foundation"),
+      basePrice: 22,
+      images: [COSMETICS_IMAGES.foundation],
+      variants: [
+        {
+          variantName: "Ivory / 30ml",
+          sku: "COS-FND-IVORY-30",
+          attributes: { shade: "ivory", volumeMl: "30ml" },
+          stock: 15,
+          images: [COSMETICS_IMAGES.foundation],
+        },
+      ],
+      attributes: attrs([["skinType", ["all"]]]),
+      tags: ["cosmetics", "foundation"],
+    },
+    // --- T-shirt (a new department under the Clothes division) ---
+    {
+      name: "Classic Crew Neck T-Shirt",
+      description: "Everyday cotton crew neck, true-to-size and pre-shrunk.",
+      category: cat("tshirt-crew-neck"),
+      basePrice: 8,
+      images: [IMG("Tshirt")],
+      variants: [
+        {
+          variantName: "Black / M",
+          sku: "TSH-CREW-BLK-M",
+          attributes: { color: "black", size: "m" },
+          stock: 40,
+          images: [IMG("Tshirt+Black")],
+        },
+        {
+          variantName: "Red / L",
+          sku: "TSH-CREW-RED-L",
+          attributes: { color: "red", size: "l" },
+          stock: 22,
+          images: [IMG("Tshirt+Red")],
+        },
+      ],
+      tags: ["clothes", "t-shirt"],
+    },
+    // --- Shoes (new, flat department) ---
+    {
+      name: "Everyday Canvas Sneakers",
+      description: "Lightweight canvas sneakers with a cushioned sole.",
+      category: cat("shoes-sneakers"),
+      basePrice: 35,
+      images: [IMG("Sneakers")],
+      variants: [
+        {
+          variantName: "Black",
+          sku: "SHO-SNK-BLK",
+          attributes: { color: "black" },
+          stock: 20,
+          images: [IMG("Sneakers+Black")],
+        },
+        {
+          variantName: "Blue",
+          sku: "SHO-SNK-BLU",
+          attributes: { color: "blue" },
+          stock: 16,
+          images: [IMG("Sneakers+Blue")],
+        },
+      ],
+      tags: ["shoes", "sneakers"],
+    },
+    // --- Sunglasses (new, flat department) ---
+    {
+      name: "Classic Aviator Sunglasses",
+      description: "UV-protective aviator sunglasses with a metal frame.",
+      category: cat("sunglasses-aviator"),
+      basePrice: 15,
+      images: [IMG("Sunglasses")],
+      variants: [
+        {
+          variantName: "Black",
+          sku: "SUN-AVI-BLK",
+          attributes: { color: "black" },
+          stock: 25,
+          images: [IMG("Sunglasses+Black")],
+        },
+      ],
+      tags: ["sunglasses", "aviator"],
+    },
+    // --- Shirts (new department, split into Formal / Casual subsections —
+    // both come from Category documents alone, nothing hardcoded) ---
+    {
+      name: "Oxford Formal Shirt",
+      description: "Crisp cotton Oxford shirt, tailored fit for office and formal wear.",
+      category: cat("shirts-formal"),
+      basePrice: 20,
+      images: [IMG("Formal+Shirt")],
+      variants: [
+        {
+          variantName: "Black / M",
+          sku: "SHR-FRM-BLK-M",
+          attributes: { color: "black", size: "m" },
+          stock: 18,
+          images: [IMG("Formal+Shirt+Black")],
+        },
+        {
+          variantName: "Blue / L",
+          sku: "SHR-FRM-BLU-L",
+          attributes: { color: "blue", size: "l" },
+          stock: 14,
+          images: [IMG("Formal+Shirt+Blue")],
+        },
+      ],
+      tags: ["clothes", "shirts", "formal"],
+    },
+    {
+      name: "Relaxed Casual Shirt",
+      description: "Breathable cotton-blend casual shirt for everyday wear.",
+      category: cat("shirts-casual"),
+      basePrice: 16,
+      images: [IMG("Casual+Shirt")],
+      variants: [
+        {
+          variantName: "Red / M",
+          sku: "SHR-CAS-RED-M",
+          attributes: { color: "red", size: "m" },
+          stock: 20,
+          images: [IMG("Casual+Shirt+Red")],
+        },
+      ],
+      tags: ["clothes", "shirts", "casual"],
+    },
+    // --- Jeans (new department) ---
+    {
+      name: "Slim Fit Skinny Jeans",
+      description: "Stretch-denim skinny jeans with a slim, tapered leg.",
+      category: cat("jeans-skinny"),
+      basePrice: 28,
+      images: [IMG("Skinny+Jeans")],
+      variants: [
+        {
+          variantName: "Black / M",
+          sku: "JNS-SKN-BLK-M",
+          attributes: { color: "black", size: "m" },
+          stock: 16,
+          images: [IMG("Skinny+Jeans+Black")],
+        },
+      ],
+      tags: ["clothes", "jeans", "skinny"],
+    },
+    {
+      name: "Relaxed Straight Jeans",
+      description: "Classic straight-leg denim with a relaxed fit through the thigh.",
+      category: cat("jeans-straight"),
+      basePrice: 30,
+      images: [IMG("Straight+Jeans")],
+      variants: [
+        {
+          variantName: "Blue / L",
+          sku: "JNS-STR-BLU-L",
+          attributes: { color: "blue", size: "l" },
+          stock: 12,
+          images: [IMG("Straight+Jeans+Blue")],
+        },
+      ],
+      tags: ["clothes", "jeans", "straight"],
+    },
+    // --- Facewash (new Cosmetics subcategory) — proves a variant's own
+    // `price` overrides the product's basePrice per volumeMl, exactly the
+    // "100ml vs 200ml, priced differently" case you described. No code
+    // change needed for this — services/orderService.js's chargePriceUsd
+    // already resolves "variant.price ?? product.basePrice" for every
+    // product, this is just real data exercising it.
+    {
+      name: "Hydrating Gel Facewash",
+      description: "Gentle, hydrating gel facewash for daily use — available in two sizes.",
+      category: cat("cosmetics-facewash"),
+      basePrice: 6,
+      images: [IMG("Facewash")],
+      variants: [
+        {
+          variantName: "100ml",
+          sku: "COS-FCW-100",
+          attributes: { volumeMl: "100ml" },
+          stock: 30,
+          images: [IMG("Facewash+100ml")],
+        },
+        {
+          variantName: "200ml",
+          sku: "COS-FCW-200",
+          attributes: { volumeMl: "200ml" },
+          price: 10,
+          stock: 22,
+          images: [IMG("Facewash+200ml")],
+        },
+      ],
+      tags: ["cosmetics", "facewash"],
+    },
   ];
 }
 
@@ -574,7 +992,7 @@ async function main() {
 
   const { topBySlug, bySlug } = await seedCategories();
   console.log(
-    `Categories: ${CATEGORY_TREE.length} departments, ${bySlug.size} total (departments + styles).`,
+    `Categories: 1 division (Clothes), ${CLOTHES_DEPARTMENTS.length + FLAT_DEPARTMENTS.length} departments, ${bySlug.size} total (division + departments + styles).`,
   );
 
   const attrCount = await seedAttributeDefinitions(topBySlug);

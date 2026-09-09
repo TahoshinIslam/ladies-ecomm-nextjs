@@ -17,7 +17,7 @@ import { addToCompare, removeFromCompare, openQuickAdd } from "../../store/uiSli
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
-import { cn, resolveImage } from "../../lib/utils.js";
+import { cn, resolveImage, effectivePrice, isRealDiscount } from "../../lib/utils.js";
 
 /**
  * The board's card is a 4:5 media plate on the surface colour with the product
@@ -52,9 +52,8 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
     ? product.sizes.every((s) => (s.stock ?? 0) <= 0)
     : product.stock === 0;
 
-  const price = product.discountPrice ?? product.basePrice;
-  const discounted =
-    product.discountPrice && product.discountPrice < product.basePrice;
+  const price = effectivePrice(product);
+  const discounted = isRealDiscount(product);
 
   const categoryName = departmentName(locale, product.category?.slug, product.category?.name);
   const fabric = product.attributes
@@ -306,6 +305,18 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             <h3 className="mt-1.5 text-[17.5px] font-semibold leading-[1.25] tracking-[-0.015em] text-ink">
               {product.name}
             </h3>
+            {product.rating > 0 && (
+              // Accessible rating output: the numeric rating and review
+              // count are real text, not conveyed by star icons/color
+              // alone — a screen reader gets the same information a
+              // sighted shopper does.
+              <p className="mt-1 text-[12.5px] text-stone">
+                {t("product.ratingWithCount", {
+                  rating: product.rating.toFixed(1),
+                  count: product.numReviews ?? 0,
+                })}
+              </p>
+            )}
             <div className="mt-1.5 text-[13.5px] text-stone">
               {[fabric, colorCount > 1 && t("product.colorsCount", { count: colorCount }), product.brand?.name]
                 .filter(Boolean)

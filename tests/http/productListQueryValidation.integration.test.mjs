@@ -241,7 +241,7 @@ describe("Phase 5D — GET /api/products hybrid query contract (real MongoDB, vi
 
   // 22. administrator filter compatibility
   test("22. admin-shaped query (topCategory + isActive + sort) succeeds (200)", async () => {
-    const burqa = await Category.findOne({ slug: "burqa", parent: null }).lean();
+    const burqa = await Category.findOne({ slug: "burqa" }).lean();
     assert.ok(burqa, "seed data must include the Burqa department");
     const { status, json } = await fetchJson(`topCategory=${burqa._id}&isActive=true&sort=-createdAt&limit=20`);
     assert.equal(status, 200);

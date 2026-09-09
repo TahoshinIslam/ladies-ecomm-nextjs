@@ -10,7 +10,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Sparkles, Percent, Shirt } from "lucide-react";
+import { ArrowRight, Sparkles, Percent, Shirt, Palette } from "lucide-react";
 
 import ProductCard from "../../components/product/ProductCard.jsx";
 import Button from "../../components/ui/Button.jsx";
@@ -23,6 +23,7 @@ const HOME_TABS = [
   { key: "discount", labelKey: "home.tabDiscount", icon: Percent },
   { key: "burqa", labelKey: "home.tabBurqa", icon: Shirt },
   { key: "hijab", labelKey: "home.tabHijab", icon: Shirt },
+  { key: "cosmetics", labelKey: "home.tabCosmetics", icon: Palette },
 ];
 
 export default function ProductTabsSection({ panels }) {

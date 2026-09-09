@@ -13,7 +13,7 @@ import Breadcrumb from "@/components/ui/Breadcrumb.jsx";
 import { useCart } from "@/hooks/useCart.js";
 import { useSettings } from "@/context/SettingsContext.jsx";
 import { useLocale } from "@/context/LocaleProvider.jsx";
-import { resolveImage, resolveVariantPricing } from "@/lib/utils.js";
+import { resolveImage, resolveVariantPricing, formatVariantAttributes } from "@/lib/utils.js";
 
 export default function CartPage() {
   const settings = useSettings();
@@ -99,9 +99,7 @@ export default function CartPage() {
             const variantId = item.variantId;
             const busy = pending.has(keyOf(id, variantId));
             const { displayPrice } = resolveVariantPricing(p, item.variant);
-            const variantLine = [item.variant?.color, item.variant?.size, item.variant?.fabric]
-              .filter(Boolean)
-              .join(" · ");
+            const variantLine = formatVariantAttributes(item.variant?.attributes);
 
             return (
               <li

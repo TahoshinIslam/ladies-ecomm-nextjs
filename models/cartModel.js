@@ -25,9 +25,10 @@ const cartItemSchema = new mongoose.Schema(
     },
     snapshot: {
       sku: { type: String, default: "" },
-      color: { type: String, default: "" },
-      size: { type: String, default: "" },
-      fabric: { type: String, default: "" },
+      // Arbitrary key/value bag mirroring the variant's own `attributes`
+      // (color/size/fabric for clothing, shade/volumeMl for cosmetics, ...)
+      // — see models/productModel.js's variantSchema.
+      attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
       price: { type: Number, default: null },
       image: { type: String, default: "" },
     },

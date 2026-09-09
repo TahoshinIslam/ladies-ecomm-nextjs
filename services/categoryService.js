@@ -13,20 +13,33 @@ const pickWritable = (body) => {
   return out;
 };
 
-// Keeps the tree exactly 2 levels: a subcategory's parent must itself be a
-// top-level department (parent: null). A missing `parent` defaults to
-// null (a new top-level department) — this is what lets the existing,
-// unmodified CategoriesPage.jsx form (which has no parent field) still
-// create valid top-level departments.
+// Keeps the tree at most 3 levels: division (parent: null, e.g. Clothes) ->
+// department (e.g. Burqa, or a root like Cosmetics that IS a department) ->
+// style/leaf. A category can be used as a parent as long as ITS OWN parent
+// chain is at most 1 deep already — i.e. rejects only a 4th level. A
+// missing `parent` defaults to null (a new root category) — this is what
+// lets the existing, unmodified CategoriesPage.jsx form (which has no
+// parent field) still create valid root categories.
 async function validateParent(parentId) {
   if (!parentId) return null;
   if (!isObjectIdFormat(parentId)) throw new HttpError(400, "Invalid parent category id");
   const parent = await Category.findById(parentId).lean();
   if (!parent) throw new HttpError(400, "Parent category not found");
   if (parent.parent) {
-    throw new HttpError(400, "Categories can only be nested one level deep (department -> style)");
+    const grandparent = await Category.findById(parent.parent).select("parent").lean();
+    if (grandparent?.parent) {
+      throw new HttpError(400, "Categories can only be nested up to 3 levels deep (division -> department -> style)");
+    }
   }
   return parent._id;
+}
+
+// A category with no children is a real, product-bearing leaf/style.
+// Shared by resolveLeafCategory/listGroupings in productService.js instead
+// of each re-deriving "is this a leaf" from `!category.parent`, which only
+// meant "is a leaf" back when the tree was exactly 2 levels deep.
+export async function isLeafCategory(categoryId) {
+  return !(await Category.exists({ parent: categoryId }));
 }
 
 export async function listCategories() {

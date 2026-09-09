@@ -68,12 +68,8 @@ const nextConfig = {
     root: path.resolve(import.meta.dirname),
   },
   images: {
-    // Phase 9 — HTTPS-only, minimally scoped to the two remote origins
-    // this app actually serves images from. `images.unsplash.com` was
-    // removed: grep across app/views/components/lib/services/models
-    // found zero references to it in live code or seed data — an unused
-    // allowlist entry only widens the image-proxy's attack surface for
-    // no benefit.
+    // Phase 9 — HTTPS-only, minimally scoped to the remote origins this
+    // app actually serves images from.
     //
     // `res.cloudinary.com` is where an admin's own image uploads land
     // (services/uploadService.js). It can't be narrowed further to a
@@ -84,16 +80,17 @@ const nextConfig = {
     // stays correct in every environment without hardcoding an
     // environment-specific value into version-controlled config.
     //
-    // `placehold.co` is the actual, current image host for this
-    // project's seed/demo catalog (see IMG() in scripts/seedCatalog.mjs)
-    // and is what every product-image test fixture across tests/http/*
-    // and tests/helpers/testDb.mjs already uses — confirmed via a
-    // repo-wide grep for every `https://` host literal in
-    // tests/scripts/models/services. Both are real, currently-served
-    // image origins, not speculative allowlisting.
+    // `placehold.co` is the seed/demo catalog's original text-placeholder
+    // image host (see IMG() in scripts/seedCatalog.mjs).
+    //
+    // `images.unsplash.com` was re-added here for the Cosmetics seed
+    // products (Lipstick/Foundation) — real, free-license stock photos
+    // instead of text placeholders. Re-remove this if those seed products
+    // ever go back to placehold.co and nothing else references it.
     remotePatterns: [
       { protocol: "https", hostname: "res.cloudinary.com" },
       { protocol: "https", hostname: "placehold.co" },
+      { protocol: "https", hostname: "images.unsplash.com" },
     ],
   },
   async headers() {

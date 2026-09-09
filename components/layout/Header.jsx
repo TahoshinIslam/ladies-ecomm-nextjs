@@ -744,7 +744,7 @@ function MegaPanel({ children, onMouseEnter }) {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
       onMouseEnter={onMouseEnter}
-      className="hidden border-t border-line bg-surface shadow-soft lg:block"
+      className="absolute inset-x-0 top-full hidden border-t border-line bg-surface shadow-soft lg:block"
     >
       <div className="mx-auto max-w-[1480px] px-5 pb-11 pt-10 sm:px-8 lg:px-14">
         {children}

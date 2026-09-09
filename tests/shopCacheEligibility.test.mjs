@@ -65,3 +65,43 @@ describe("Phase 8 — shop cache eligibility: ineligible queries", () => {
     assert.doesNotThrow(() => getShopCacheKey({ search: "x", weirdUnknownKey: "y" }));
   });
 });
+
+// v3-7 of the shop redesign plan — three new query/cache dimensions:
+// `collection`, `availability`, `ratingGte`. Each must be individually
+// cacheable, and the canonical param must NOT silently collide with the
+// legacy boolean params it replaces (different key names => different
+// cache entries, even when they'd resolve to the same filter).
+describe("Shop redesign — collection/availability/ratingGte cache dimensions", () => {
+  test("collection= is individually cacheable", () => {
+    const a = getShopCacheKey({ collection: "new" });
+    assert.ok(a);
+    assert.notEqual(a, getShopCacheKey({ collection: "featured" }));
+  });
+
+  test("availability= is individually cacheable", () => {
+    const a = getShopCacheKey({ availability: "in_stock" });
+    assert.ok(a);
+    assert.notEqual(a, getShopCacheKey({ availability: "out_of_stock" }));
+  });
+
+  test("ratingGte= is individually cacheable", () => {
+    const a = getShopCacheKey({ ratingGte: "4" });
+    assert.ok(a);
+    assert.notEqual(a, getShopCacheKey({ ratingGte: "3" }));
+  });
+
+  test("the canonical collection= param and the legacy new=true boolean never collide into the same cache key, even though they can resolve to the same filter", () => {
+    const canonical = getShopCacheKey({ collection: "new" });
+    const legacy = getShopCacheKey({ new: "true" });
+    assert.ok(canonical);
+    assert.ok(legacy);
+    assert.notEqual(canonical, legacy);
+  });
+
+  test("combining all three new dimensions with existing ones still produces one stable, order-independent key", () => {
+    const a = getShopCacheKey({ category: "abc123", collection: "discount", availability: "in_stock", ratingGte: "4", sort: "-createdAt" });
+    const b = getShopCacheKey({ ratingGte: "4", sort: "-createdAt", availability: "in_stock", category: "abc123", collection: "discount" });
+    assert.equal(a, b);
+    assert.ok(a);
+  });
+});

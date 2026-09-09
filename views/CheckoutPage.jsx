@@ -39,7 +39,7 @@ import {
 } from "../store/shopApi.js";
 import { selectCurrentUser } from "../store/authSlice.js";
 import { useCart } from "../hooks/useCart.js";
-import { formatCurrency, cn, resolveImage } from "../lib/utils.js";
+import { formatCurrency, cn, resolveImage, formatVariantAttributes } from "../lib/utils.js";
 import { downloadReceipt } from "../lib/receipt.js";
 import { useSettings } from "../context/SettingsContext.jsx";
 import { useLocale } from "../context/LocaleProvider.jsx";
@@ -646,9 +646,7 @@ export default function CheckoutPage() {
                 if (!p) return null;
                 const usdPrice = p.discountPrice ?? p.basePrice;
                 const lineTotal = toCheckoutPrice(usdPrice) * it.quantity;
-                const variantLine = [it.variant?.color, it.variant?.size, it.variant?.fabric]
-                  .filter(Boolean)
-                  .join(" · ");
+                const variantLine = formatVariantAttributes(it.variant?.attributes);
                 return (
                   <li key={`${p._id}-${it.variantId}`} className="py-3">
                     <div className="flex gap-3">
