@@ -610,11 +610,25 @@ export async function parseProductListQuery(query) {
 // instead. A root department (Cosmetics, whose children — Lipstick,
 // Foundation — are leaves) or an already-department id (Burqa) is
 // returned unchanged, matching today's single-id behavior exactly.
+// One aggregation round trip instead of two sequential queries (a plain
+// find() for children plus a separate exists() for grandchildren) — same
+// result, half the latency on every single product-list request that
+// names a category, which matters since this runs unconditionally in
+// listProducts()'s pipeline below.
 async function expandCategoryScope(categoryId) {
-  const children = await Category.find({ parent: categoryId }).select("_id").lean();
-  if (!children.length) return [categoryId];
-  const isDivision = await Category.exists({ parent: { $in: children.map((c) => c._id) } });
-  return isDivision ? children.map((c) => c._id.toString()) : [categoryId];
+  const [result] = await Category.aggregate([
+    { $match: { parent: new mongoose.Types.ObjectId(categoryId) } },
+    { $lookup: { from: Category.collection.name, localField: "_id", foreignField: "parent", as: "grandchildren" } },
+    {
+      $group: {
+        _id: null,
+        ids: { $push: "$_id" },
+        isDivision: { $max: { $gt: [{ $size: "$grandchildren" }, 0] } },
+      },
+    },
+  ]);
+  if (!result) return [categoryId];
+  return result.isDivision ? result.ids.map((id) => id.toString()) : [categoryId];
 }
 
 // Explicit pipeline step (parse -> resolve category context/definitions ->
@@ -634,11 +648,18 @@ async function expandCategoryScope(categoryId) {
 // result set the way an unscoped $elemMatch on a nonexistent key would.
 async function stripInapplicableAttributeFilters(query, deptId) {
   if (!deptId) return query;
+  // Nothing outside the fixed/style keys is present at all — there is no
+  // dynamic attribute facet that could possibly be inapplicable, so skip
+  // the resolveAttributesForCategory() round trip entirely. This is the
+  // overwhelmingly common case (browsing a department with no attribute
+  // filter applied yet), and avoiding the extra DB call here keeps
+  // listProducts() from doing needless work on every single request.
+  const candidateKeys = Object.keys(query).filter((k) => !PRODUCT_LIST_FIXED_KEYS.has(k) && k !== "style");
+  if (candidateKeys.length === 0) return query;
   const defs = await resolveAttributesForCategory(deptId);
   const applicableKeys = new Set(defs.map((d) => d.key));
   const out = { ...query };
-  for (const key of Object.keys(out)) {
-    if (PRODUCT_LIST_FIXED_KEYS.has(key) || key === "style") continue;
+  for (const key of candidateKeys) {
     if (!applicableKeys.has(key)) delete out[key];
   }
   return out;
