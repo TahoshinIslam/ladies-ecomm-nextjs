@@ -101,7 +101,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const pricing = resolveVariantPricing(product ?? {}, selectedVariant);
 
   const setAxisValue = (axis, value) => {
-    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes));
+    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes, axis));
     setSelectedImage(0);
     setImageFailed(false);
     setQuantity(1);
@@ -389,7 +389,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                 <VariantAxisRow
                   key={axis}
                   label={attrLabel(axis) || axis}
-                  options={getAxisOptions(variants, axis, selection, axes)}
+                  options={getAxisOptions(variants, axis)}
                   displayOptions={attrOptions(axis)}
                   swatch={attrDefs.find((d) => d.key === axis)?.type === "swatch"}
                   selected={selection[axis]}

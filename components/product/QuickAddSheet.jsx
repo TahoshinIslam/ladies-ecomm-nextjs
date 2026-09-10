@@ -92,7 +92,7 @@ export default function QuickAddSheet() {
   const pricing = resolveVariantPricing(product, selectedVariant);
 
   const setAxisValue = (axis, value) => {
-    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes));
+    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes, axis));
   };
 
   const confirm = async () => {
@@ -208,7 +208,7 @@ export default function QuickAddSheet() {
                     aria-label={t("quickAddSheet.availableOption", { option: attrLabel(axis) || axis })}
                     className="mt-3 grid grid-cols-5 gap-2"
                   >
-                    {getAxisOptions(variants, axis, selection, axes).map((opt) => {
+                    {getAxisOptions(variants, axis).map((opt) => {
                       const low = !opt.disabled && (() => {
                         const v = resolveVariant(variants, { ...selection, [axis]: opt.value }, axes);
                         return v && v.stock > 0 && v.stock <= 2;
