@@ -44,6 +44,32 @@ const settingsSchema = new mongoose.Schema(
       faviconUrl: { type: String, default: "" },
     },
 
+    // Home page content an admin can change without touching code — a
+    // carousel image override per rotating department slug (falls back to
+    // that department's own top-rated product photo when unset — see
+    // views/home/HeroCarousel.jsx), a single promotional banner, and the
+    // campaign section's copy (views/HomePage.jsx's "Campaign" section
+    // reads these instead of hardcoded strings).
+    homepage: {
+      carouselImages: {
+        burqa: { type: String, default: "" },
+        abaya: { type: String, default: "" },
+        hijab: { type: String, default: "" },
+      },
+      banner: {
+        enabled: { type: Boolean, default: false },
+        imageUrl: { type: String, default: "" },
+        href: { type: String, default: "" },
+      },
+      campaign: {
+        enabled: { type: Boolean, default: false },
+        title: { type: String, default: "" },
+        message: { type: String, default: "" },
+        ctaLabel: { type: String, default: "" },
+        ctaHref: { type: String, default: "" },
+      },
+    },
+
     currency: {
       defaultDisplay: { type: String, default: "BDT", enum: ["BDT", "USD"] },
       usdToBdt: { type: Number, default: 120, min: 1 },

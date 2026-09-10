@@ -10,18 +10,22 @@
 // existing options array rather than creating a whole new attribute.
 import { useState } from "react";
 import Link from "next/link";
-import { Palette, Ruler, Shirt, PackagePlus, Plus, ArrowRight } from "lucide-react";
+import { Palette, Ruler, Shirt, PackagePlus, Plus, ArrowRight, Layers } from "lucide-react";
 import { toast } from "sonner";
 
 import Button from "../../components/ui/Button.jsx";
 import Input from "../../components/ui/Input.jsx";
+import Select from "../../components/ui/Select.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import Skeleton from "../../components/ui/Skeleton.jsx";
 import {
   useGetAttributesQuery,
   useCreateAttributeMutation,
   useUpdateAttributeMutation,
+  useGetCategoriesQuery,
+  useCreateCategoryMutation,
 } from "../../store/shopApi.js";
+import { isDepartmentCategory } from "../../lib/utils.js";
 
 // Plain kebab-case slug from a label — "Dusty Rose" -> "dusty-rose" — this
 // is the stable `option.value` products' variants reference, never shown
@@ -107,6 +111,22 @@ export default function ProductConfigPage() {
               );
             })}
 
+        <button
+          type="button"
+          onClick={() => setOpenKey("model")}
+          className="flex flex-col items-start gap-3 rounded-xl border border-border bg-background p-5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+        >
+          <span className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
+            <Layers className="h-5 w-5" />
+          </span>
+          <div>
+            <div className="font-semibold">Add Model</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Add a product model under a department — e.g. Burqa: Cape Burqa, Koti Burqa; Hijab: Cotton Hijab, Party Hijab.
+            </p>
+          </div>
+        </button>
+
         <Link
           href="/admin/products"
           className="flex flex-col items-start gap-3 rounded-xl border border-border bg-background p-5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
@@ -131,6 +151,7 @@ export default function ProductConfigPage() {
           onClose={() => setOpenKey(null)}
         />
       )}
+      {openKey === "model" && <AddModelModal onClose={() => setOpenKey(null)} />}
     </div>
   );
 }
@@ -250,6 +271,89 @@ function QuickAddOptionModal({ item, attribute, onClose }) {
           <Button onClick={save} disabled={loading}>
             <Plus className="h-4 w-4" />
             Add {item.attrLabel}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// A "model" (Cape Burqa, Koti Burqa, Cotton Hijab, ...) is exactly what
+// the category system already calls a leaf/style category — a child of a
+// department. This is the same create-category operation
+// views/admin/CategoriesPage.jsx's CategoryTree already exposes, just a
+// focused "pick a department, name the model" form instead of the full
+// category tree editor.
+function AddModelModal({ onClose }) {
+  const { data: catsData, isLoading } = useGetCategoriesQuery();
+  const allCategories = catsData?.categories ?? [];
+  const departments = allCategories.filter((c) => isDepartmentCategory(c, allCategories));
+
+  const [departmentId, setDepartmentId] = useState("");
+  const [name, setName] = useState("");
+  const [createCategory, { isLoading: saving }] = useCreateCategoryMutation();
+
+  const department = departments.find((d) => d._id === departmentId);
+  const existingModels = department ? allCategories.filter((c) => c.parent === department._id) : [];
+
+  const save = async () => {
+    if (!departmentId) {
+      toast.error("Pick a department first");
+      return;
+    }
+    const trimmed = name.trim();
+    if (!trimmed) {
+      toast.error("A model name is required");
+      return;
+    }
+    try {
+      await createCategory({ name: trimmed, parent: departmentId }).unwrap();
+      toast.success(`${trimmed} added`);
+      onClose();
+    } catch (e) {
+      toast.error(e?.data?.message || "Could not save");
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Add Model" size="md">
+      <div className="space-y-4 p-5">
+        <Select label="Department" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} disabled={isLoading}>
+          <option value="">Select a department…</option>
+          {departments.map((d) => (
+            <option key={d._id} value={d._id}>
+              {d.name}
+            </option>
+          ))}
+        </Select>
+
+        {department && existingModels.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-muted-foreground">Existing models under {department.name}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {existingModels.map((m) => (
+                <span key={m._id} className="rounded-full border border-border px-2 py-0.5 text-xs">
+                  {m.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <Input
+          label="Model name"
+          placeholder="e.g. Cape Burqa"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            <Plus className="h-4 w-4" />
+            Add Model
           </Button>
         </div>
       </div>

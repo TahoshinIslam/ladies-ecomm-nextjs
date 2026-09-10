@@ -103,6 +103,37 @@ export const updateSettingsSchema = z
       })
       .strict()
       .partial(),
+    homepage: z
+      .object({
+        carouselImages: z
+          .object({
+            burqa: z.string().trim().max(2000),
+            abaya: z.string().trim().max(2000),
+            hijab: z.string().trim().max(2000),
+          })
+          .strict()
+          .partial(),
+        banner: z
+          .object({
+            enabled: z.boolean(),
+            imageUrl: z.string().trim().max(2000),
+            href: z.string().trim().max(500),
+          })
+          .strict()
+          .partial(),
+        campaign: z
+          .object({
+            enabled: z.boolean(),
+            title: z.string().trim().max(200),
+            message: z.string().trim().max(500),
+            ctaLabel: z.string().trim().max(100),
+            ctaHref: z.string().trim().max(500),
+          })
+          .strict()
+          .partial(),
+      })
+      .strict()
+      .partial(),
     currency: z
       .object({
         defaultDisplay: z.enum(["BDT", "USD"]),

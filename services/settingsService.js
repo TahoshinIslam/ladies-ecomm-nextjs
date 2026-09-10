@@ -9,6 +9,7 @@ export async function getPublicSettings() {
   const settings = await Settings.getSingleton();
   return {
     store: settings.store,
+    homepage: settings.homepage,
     currency: settings.currency,
     shippingZones: settings.shippingZones,
     taxRules: settings.taxRules,
@@ -24,7 +25,7 @@ export async function getSettings() {
   return Settings.getSingleton();
 }
 
-const WRITABLE_FIELDS = ["store", "currency", "promotions", "taxRules", "shippingZones", "exchangePolicy"];
+const WRITABLE_FIELDS = ["store", "homepage", "currency", "promotions", "taxRules", "shippingZones", "exchangePolicy"];
 
 export async function updateSettings(patch) {
   const settings = await Settings.getSingleton();

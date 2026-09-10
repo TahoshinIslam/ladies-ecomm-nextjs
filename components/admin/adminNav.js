@@ -9,6 +9,7 @@ import {
   Star,
   Folder,
   SlidersHorizontal,
+  Store,
 } from "lucide-react";
 
 import { PERMISSIONS, hasPermission } from "../../lib/permissions.js";
@@ -32,6 +33,7 @@ export const ADMIN_NAV = [
   { to: "/admin/coupons", label: "Coupons", icon: Tag, perm: PERMISSIONS.COUPONS_MANAGE },
   { to: "/admin/reviews", label: "Reviews", icon: Star, perm: PERMISSIONS.REVIEWS_MANAGE },
   { to: "/admin/themes", label: "Themes", icon: Palette, highlight: true, perm: PERMISSIONS.THEMES_MANAGE },
+  { to: "/admin/shop-config", label: "Shop Config", icon: Store, perm: PERMISSIONS.SETTINGS_MANAGE },
   { to: "/admin/settings", label: "Settings", icon: Settings, perm: PERMISSIONS.SETTINGS_MANAGE },
 ];
 

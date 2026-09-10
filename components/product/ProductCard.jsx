@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { BellRing, Heart, ImageOff, Scale } from "lucide-react";
+import { BellRing, Heart, ImageOff, Scale, Star } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { toast } from "sonner";
 
@@ -307,10 +307,12 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             </h3>
             {product.rating > 0 && (
               // Accessible rating output: the numeric rating and review
-              // count are real text, not conveyed by star icons/color
+              // count are real text, not conveyed by star icon/color
               // alone — a screen reader gets the same information a
-              // sighted shopper does.
-              <p className="mt-1 text-[12.5px] text-stone">
+              // sighted shopper does. The star itself is decorative
+              // (aria-hidden), the text carries the actual meaning.
+              <p className="mt-1 flex items-center gap-1 text-[12.5px] text-stone">
+                <Star aria-hidden="true" className="h-3 w-3 fill-current text-verm" />
                 {t("product.ratingWithCount", {
                   rating: product.rating.toFixed(1),
                   count: product.numReviews ?? 0,

@@ -10,7 +10,7 @@ import NewsletterPoster from "./home/NewsletterPoster.jsx";
 import SectionHead from "./home/SectionHead.jsx";
 
 import connectDB from "../config/db.js";
-import { getCachedCategories, getCachedProductList } from "../lib/serverDataCache.js";
+import { getCachedCategories, getCachedProductList, getCachedPublicSettings } from "../lib/serverDataCache.js";
 import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import { listProducts } from "../services/productService.js";
 import { serializeForClient } from "../lib/serialize.js";
@@ -68,7 +68,13 @@ export default async function HomePage() {
   // whole render rather than relying on Promise.all ordering or a sibling
   // call having already connected.
   await connectDB();
-  const [t, locale, rawCategories] = await Promise.all([getT(), getServerLocale(), getCachedCategories()]);
+  const [t, locale, rawCategories, publicSettings] = await Promise.all([
+    getT(),
+    getServerLocale(),
+    getCachedCategories(),
+    getCachedPublicSettings(),
+  ]);
+  const homepageSettings = publicSettings?.homepage || {};
   const categories = localizeCategoryList(rawCategories, locale);
   const departments = categories.filter((c) => !c.parent);
 
@@ -116,10 +122,13 @@ export default async function HomePage() {
     ]);
   const shopTabProducts = { new: shopNew, featured: shopFeatured, bestseller: shopBestseller, discount: shopDiscount };
 
+  // An admin-set carousel image (Shop Config → Carousel) overrides the
+  // auto-derived top-rated product photo for that department; unset (the
+  // default) keeps the existing product-driven behavior exactly as before.
   const heroImageBySlug = {
-    burqa: heroBurqa[0]?.images?.[0] || null,
-    abaya: heroAbaya[0]?.images?.[0] || null,
-    hijab: heroHijab[0]?.images?.[0] || null,
+    burqa: homepageSettings.carouselImages?.burqa || heroBurqa[0]?.images?.[0] || null,
+    abaya: homepageSettings.carouselImages?.abaya || heroAbaya[0]?.images?.[0] || null,
+    hijab: homepageSettings.carouselImages?.hijab || heroHijab[0]?.images?.[0] || null,
     khimar: heroKhimar[0]?.images?.[0] || null,
   };
 
@@ -255,6 +264,36 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* Promotional banner — Shop Config → Banner. Admin-set image only;
+          renders nothing when disabled or no image is set. */}
+      {homepageSettings.banner?.enabled && homepageSettings.banner?.imageUrl && (
+        <section aria-label={t("home.bannerLabel")} className="container-x pt-32">
+          {homepageSettings.banner.href ? (
+            <Link href={homepageSettings.banner.href} className="block overflow-hidden rounded-2xl focus-ring">
+              <Image
+                src={resolveImage(homepageSettings.banner.imageUrl, 1400)}
+                alt=""
+                width={1400}
+                height={420}
+                sizes="100vw"
+                className="h-auto w-full object-cover"
+              />
+            </Link>
+          ) : (
+            <div className="overflow-hidden rounded-2xl">
+              <Image
+                src={resolveImage(homepageSettings.banner.imageUrl, 1400)}
+                alt=""
+                width={1400}
+                height={420}
+                sizes="100vw"
+                className="h-auto w-full object-cover"
+              />
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Shop showcase — New Arrival / Featured / Bestseller / Discount,
           unscoped across the whole (clothing-only) catalog. */}
       <ProductTabsSection
@@ -343,20 +382,39 @@ export default async function HomePage() {
               <span className="h-px w-[22px] bg-verm" />
               {t("home.ourApproach")}
             </div>
-            <h2
-              id="camp-h"
-              className="mt-6 text-[clamp(36px,3.6vw,58px)] font-semibold leading-[0.98] tracking-[-0.03em] text-balance"
-            >
-              {t("home.campaignTitle")}{" "}
-              <span className="font-serif font-normal italic">{t("home.campaignTitleAccent")}</span>
-            </h2>
+            {homepageSettings.campaign?.enabled && homepageSettings.campaign?.title ? (
+              <h2
+                id="camp-h"
+                className="mt-6 text-[clamp(36px,3.6vw,58px)] font-semibold leading-[0.98] tracking-[-0.03em] text-balance"
+              >
+                {homepageSettings.campaign.title}
+              </h2>
+            ) : (
+              <h2
+                id="camp-h"
+                className="mt-6 text-[clamp(36px,3.6vw,58px)] font-semibold leading-[0.98] tracking-[-0.03em] text-balance"
+              >
+                {t("home.campaignTitle")}{" "}
+                <span className="font-serif font-normal italic">{t("home.campaignTitleAccent")}</span>
+              </h2>
+            )}
             <p className="mt-5 text-lg leading-[1.5] text-[rgba(245,242,234,0.7)] text-pretty">
-              {t("home.campaignBody")}
+              {homepageSettings.campaign?.enabled && homepageSettings.campaign?.message
+                ? homepageSettings.campaign.message
+                : t("home.campaignBody")}
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3.5">
-              <Link href="/shop">
+              <Link
+                href={
+                  homepageSettings.campaign?.enabled && homepageSettings.campaign?.ctaHref
+                    ? homepageSettings.campaign.ctaHref
+                    : "/shop"
+                }
+              >
                 <span className="inline-flex h-[52px] items-center gap-2.5 rounded-[9px] bg-[#F5F2EA] px-6 text-[15.5px] font-semibold text-[#101012] transition-colors hover:bg-verm-contrast hover:text-white">
-                  {t("home.shopTheCollection")}
+                  {homepageSettings.campaign?.enabled && homepageSettings.campaign?.ctaLabel
+                    ? homepageSettings.campaign.ctaLabel
+                    : t("home.shopTheCollection")}
                   <ArrowRight className="h-4 w-4" />
                 </span>
               </Link>
