@@ -31,13 +31,23 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
 
-// The top-nav divisions the storefront shows — root categories only
-// (`!c.parent`, see `departments` below). "Clothes" is the root that groups
-// Burqa/Hijab/Niqab/Abaya/Khimar/Modest-Sets/T-shirt (each now a child of
-// Clothes, not a root itself — see services/productService.js's
-// STOREFRONT_DEPARTMENT_SLUGS for the full department-level scope list the
-// backend enforces); Cosmetics/Shoes/Sunglasses stay root departments.
-const STOREFRONT_DEPARTMENT_SLUGS = new Set(["clothes", "cosmetics", "shoes", "sunglasses"]);
+// The top-nav departments the storefront shows — root categories only
+// (`!c.parent`, see `departments` below), matching
+// services/productService.js's own STOREFRONT_DEPARTMENT_SLUGS exactly.
+// A real allowlist, not just "any root category": a stray root category
+// (e.g. leftover test/fixture data) must never silently appear in the
+// storefront nav.
+const STOREFRONT_DEPARTMENT_SLUGS = new Set([
+  "burqa",
+  "hijab",
+  "niqab",
+  "abaya",
+  "khimar",
+  "modest-sets",
+  "t-shirt",
+  "shirts",
+  "jeans",
+]);
 
 // `value` is the stable filter/query value (see section 7 of the
 // localization audit — never translated); `labelKey` is resolved via t()

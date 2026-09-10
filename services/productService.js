@@ -80,9 +80,9 @@ export function getNewArrivalCutoff(now = Date.now()) {
 
 // The storefront (non-admin reads) is scoped to these departments and their
 // subcategories. Admin reads are never scoped (an admin manages the whole
-// catalog, including any pre-existing product outside this scope). All 6
-// launch departments are live; narrow this list again to soft-launch a
-// subset.
+// catalog, including any pre-existing product outside this scope). This is
+// a clothing-only shop — every department here is a real, top-level
+// (parent: null) Category; narrow this list again to soft-launch a subset.
 export const STOREFRONT_DEPARTMENT_SLUGS = [
   "burqa",
   "hijab",
@@ -93,27 +93,20 @@ export const STOREFRONT_DEPARTMENT_SLUGS = [
   "t-shirt",
   "shirts",
   "jeans",
-  "cosmetics",
-  "shoes",
-  "sunglasses",
 ];
 
 // Every product's `topCategory` is already denormalized to its department
 // id (see productModel.js's pre-validate hook; resolveLeafCategory below
 // guarantees a product can only ever be assigned a *subcategory*, never a
-// bare department or division) — so these department ids alone are a
-// complete, correct scope filter with no need to also resolve their child
-// categories. Matched by slug alone (not `parent: null`) — Burqa/Hijab/
-// Niqab/Abaya/Khimar/Modest-Sets/T-shirt now sit under a "Clothes" division
-// (parent set), while Cosmetics/Shoes/Sunglasses stay root departments
-// (parent: null) — both are equally valid "departments" here.
+// bare department) — so these department ids alone are a complete, correct
+// scope filter with no need to also resolve their child categories.
+//
 // A plain, uncached query here re-runs on every single non-admin
-// listProducts() call. The home page's Clothes/Cosmetics tab showcases
-// now fire a dozen listProducts() calls in one Promise.all (up from ~9
-// before that redesign), each independently re-querying this same
-// static allowlist — a real, observable source of concurrent DB load on
-// a fresh instance's first render (reproduced directly: the home page's
-// HTTP integration test flaked on exactly this query burst). A
+// listProducts() call. The home page's showcase section fires several
+// listProducts() calls in one Promise.all, each independently re-querying
+// this same static allowlist — a real, observable source of concurrent DB
+// load on a fresh instance's first render (reproduced directly: the home
+// page's HTTP integration test flaked on exactly this query burst). A
 // short-lived, single-flight cache (one real query shared by every
 // concurrent caller, refreshed at most once per TTL window) removes the
 // redundant load without weakening correctness — a department renamed
@@ -808,13 +801,10 @@ export async function listFeatured(limit = 8) {
 
 // Sneaker-era "distinct model names scoped by brand" replaced with its
 // modest-fashion equivalent: product groupings by category. With no
-// `category` param, groups at the top level (one count per division/root
-// department, e.g. Clothes/Cosmetics/Shoes/Sunglasses); with one, groups by
-// that category's direct children — which, since Clothes introduced a real
-// 3rd level, can themselves be either departments (Burqa under Clothes,
-// still with further leaf children of their own) or genuine leaves/styles
-// (Lipstick under Cosmetics). Only categories/departments with at least
-// one active product are included.
+// `category` param, groups at the top level (one count per root
+// department); with one, groups by that category's direct children (real
+// leaf/style categories). Only categories/departments with at least one
+// active product are included.
 export async function listGroupings(categoryId) {
   if (categoryId) requireObjectIdFormat(categoryId, "category");
   const parentFilter = categoryId ? { parent: categoryId } : { parent: null };
@@ -823,22 +813,18 @@ export async function listGroupings(categoryId) {
   const groupings = await Promise.all(
     categories.map(async (c) => {
       if (!categoryId) {
-        // Top level: c is a division (Clothes) or a root department
-        // (Cosmetics/Shoes/Sunglasses). A real product's topCategory is at
-        // most one hop below c either way — c's own id (a root department
-        // like Cosmetics) or one of c's direct children (a division's
-        // departments, like Burqa under Clothes) — so counting across c
-        // plus its direct children covers both shapes in one query.
+        // Top level: c is a root department. A real product's topCategory
+        // is always c's own id — c's leaf-style children never appear
+        // there — but counting across c plus its direct children in one
+        // query is still correct (the children just never match) and
+        // avoids a second, department-specific code path.
         const scopeIds = [c._id, ...(await Category.find({ parent: c._id }).distinct("_id"))];
         const count = await Product.countDocuments({ isActive: true, topCategory: { $in: scopeIds } });
         return { _id: c._id, name: c.name, nameBn: c.nameBn, slug: c.slug, count, isLeaf: false };
       }
-      // Drilling into a specific category: c is either a real leaf/style
-      // (matched via `category`, e.g. Cosmetics' Lipstick or a clothing
-      // style) or itself a department with further leaf children of its
-      // own (matched via `topCategory`, e.g. Clothes' child Burqa) — no
-      // product's `category` field is ever a department, so the two must
-      // be told apart per-child rather than assumed from `categoryId` alone.
+      // Drilling into a specific department: c is always a real leaf/style
+      // (matched via `category`) — no product's `category` field is ever
+      // a department.
       const isLeaf = await isLeafCategory(c._id);
       const count = await Product.countDocuments({
         isActive: true,

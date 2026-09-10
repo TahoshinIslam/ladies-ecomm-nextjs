@@ -1,46 +1,31 @@
 // Shop redesign v3 — services/productService.js's new filter/facet
 // dimensions (collection, availability, ratingGte), the effective-price
-// fix, the explicit attribute-scoping pipeline (stale-filter removal), and
-// the Cosmetics Face/Eyes/Lips/Skin descendant isolation. Creates its own
-// department/category/product fixtures (never depends on
+// fix, and the explicit attribute-scoping pipeline (stale-filter removal).
+// Creates its own department/category/product fixtures (never depends on
 // scripts/seedCatalog.mjs having run) and runs only against
 // MONGO_URI_TEST.
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 
 import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "./helpers/testDb.mjs";
 import { HttpError } from "../lib/http.js";
 
-const execFileAsync = promisify(execFile);
 const canRun = dbReady;
 const reason = skipReason;
-const MIGRATION_SCRIPT = new URL("../scripts/migrateCosmeticsFaceEyesLipsSkin.mjs", import.meta.url).pathname;
 
-function runMigrationCli(extraArgs = []) {
-  return execFileAsync("node", [MIGRATION_SCRIPT, ...extraArgs], {
-    env: { ...process.env, NODE_ENV: "test" },
-  }).catch((err) => err);
-}
-
-describe("Shop redesign v3 — filters, facets, effective price, stale-filter removal, Cosmetics tiers", { skip: !canRun && reason }, () => {
+describe("Shop redesign v3 — filters, facets, effective price, stale-filter removal", { skip: !canRun && reason }, () => {
   let Category, Product, AttributeDefinition;
   let listProducts, parseProductListQuery, getStorefrontDepartmentIds, buildFacetCounts;
-  let buildMigrationPlan, applyPlan;
-  let mongoose;
 
   let division, dept, leafA, leafB;
   let productDiscounted, productPlain, productOutOfStock, productRated, productUnrated;
 
   before(async () => {
     await connectTestDb();
-    ({ default: mongoose } = await import("mongoose"));
     ({ default: Category } = await import("../models/categoryModel.js"));
     ({ default: Product } = await import("../models/productModel.js"));
     ({ default: AttributeDefinition } = await import("../models/attributeDefinitionModel.js"));
     ({ listProducts, parseProductListQuery, getStorefrontDepartmentIds, buildFacetCounts } = await import("../services/productService.js"));
-    ({ buildMigrationPlan, applyPlan } = await import("../scripts/migrateCosmeticsFaceEyesLipsSkin.mjs"));
 
     const suffix = Date.now();
     dept = await Category.create({ name: `Test Dept ${suffix}`, slug: `test-dept-${suffix}` });
@@ -260,217 +245,4 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
     });
   });
 
-  describe("Cosmetics Face/Eyes/Lips/Skin descendant isolation (via the real migration script's plan/apply against test-only fixtures)", () => {
-    let cosmeticsRoot, faceCategory, lipsCategory, skinCategory;
-    let lipstickLeaf, foundationLeaf, facewashLeaf;
-    let lipstickProduct, foundationProduct, facewashProduct;
-
-    before(async () => {
-      const suffix = `cos-${Date.now()}`;
-      cosmeticsRoot = await Category.create({ name: `Cosmetics ${suffix}`, slug: `cosmetics-${suffix}` });
-      lipstickLeaf = await Category.create({ name: "Lipstick", slug: `cosmetics-lipstick-${suffix}`, parent: cosmeticsRoot._id });
-      foundationLeaf = await Category.create({ name: "Foundation", slug: `cosmetics-foundation-${suffix}`, parent: cosmeticsRoot._id });
-      facewashLeaf = await Category.create({ name: "Facewash", slug: `cosmetics-facewash-${suffix}`, parent: cosmeticsRoot._id });
-
-      lipstickProduct = await Product.create({
-        name: `Test Lipstick ${suffix}`,
-        description: "fixture",
-        category: lipstickLeaf._id,
-        basePrice: 10,
-        images: ["https://placehold.co/1x1"],
-        variants: [{ variantName: "Default", sku: `LIP-${suffix}`, stock: 5 }],
-      });
-      foundationProduct = await Product.create({
-        name: `Test Foundation ${suffix}`,
-        description: "fixture",
-        category: foundationLeaf._id,
-        basePrice: 20,
-        images: ["https://placehold.co/1x1"],
-        variants: [{ variantName: "Default", sku: `FND-${suffix}`, stock: 5 }],
-      });
-      facewashProduct = await Product.create({
-        name: `Test Facewash ${suffix}`,
-        description: "fixture",
-        category: facewashLeaf._id,
-        basePrice: 6,
-        images: ["https://placehold.co/1x1"],
-        variants: [{ variantName: "Default", sku: `FCW-${suffix}`, stock: 5 }],
-      });
-
-      // Build a plan against these fixtures directly (bypassing the
-      // hardcoded "cosmetics"/"cosmetics-lipstick" slugs the real script
-      // targets) by constructing the tier categories the same way, then
-      // re-parenting via the same Category API the script itself uses —
-      // proves the DESCENDANT-ISOLATION QUERY BEHAVIOR (the actual thing
-      // this describe block is testing), independent of the real script's
-      // slug wiring (covered separately below, against the real seeded
-      // "cosmetics" data).
-      faceCategory = await Category.create({ name: "Face", slug: `cosmetics-face-${suffix}`, parent: cosmeticsRoot._id });
-      lipsCategory = await Category.create({ name: "Lips", slug: `cosmetics-lips-${suffix}`, parent: cosmeticsRoot._id });
-      skinCategory = await Category.create({ name: "Skin", slug: `cosmetics-skin-${suffix}`, parent: cosmeticsRoot._id });
-      // Re-parenting a LEAF (unlike a department) changes what its
-      // products' denormalized topCategory should be — the real migration
-      // script fixes this atomically (see its file-header comment); this
-      // fixture must do the same or every query below would wrongly see
-      // stale topCategory values from before the re-parent.
-      await Category.updateOne({ _id: lipstickLeaf._id }, { $set: { parent: lipsCategory._id } });
-      await Product.updateMany({ category: lipstickLeaf._id }, { $set: { topCategory: lipsCategory._id } });
-      await Category.updateOne({ _id: foundationLeaf._id }, { $set: { parent: faceCategory._id } });
-      await Product.updateMany({ category: foundationLeaf._id }, { $set: { topCategory: faceCategory._id } });
-      await Category.updateOne({ _id: facewashLeaf._id }, { $set: { parent: skinCategory._id } });
-      await Product.updateMany({ category: facewashLeaf._id }, { $set: { topCategory: skinCategory._id } });
-    });
-
-    after(async () => {
-      await Product.deleteMany({ _id: { $in: [lipstickProduct?._id, foundationProduct?._id, facewashProduct?._id].filter(Boolean) } });
-      await Category.deleteMany({
-        _id: {
-          $in: [cosmeticsRoot?._id, faceCategory?._id, lipsCategory?._id, skinCategory?._id, lipstickLeaf?._id, foundationLeaf?._id, facewashLeaf?._id].filter(Boolean),
-        },
-      });
-    });
-
-    test("Cosmetics (the root) returns all descendants (lipstick, foundation, facewash)", async () => {
-      const result = await listProducts({ category: cosmeticsRoot._id.toString(), limit: 50 }, { isAdmin: true });
-      const ids = result.products.map((p) => String(p._id));
-      assert.ok(ids.includes(String(lipstickProduct._id)));
-      assert.ok(ids.includes(String(foundationProduct._id)));
-      assert.ok(ids.includes(String(facewashProduct._id)));
-    });
-
-    test("Lips returns only the lipstick product, excluding Face/Skin products", async () => {
-      const result = await listProducts({ category: lipsCategory._id.toString(), limit: 50 }, { isAdmin: true });
-      const ids = result.products.map((p) => String(p._id));
-      assert.ok(ids.includes(String(lipstickProduct._id)));
-      assert.ok(!ids.includes(String(foundationProduct._id)));
-      assert.ok(!ids.includes(String(facewashProduct._id)));
-    });
-
-    test("Face excludes Lips products and vice versa", async () => {
-      const faceResult = await listProducts({ category: faceCategory._id.toString(), limit: 50 }, { isAdmin: true });
-      const faceIds = faceResult.products.map((p) => String(p._id));
-      assert.ok(faceIds.includes(String(foundationProduct._id)));
-      assert.ok(!faceIds.includes(String(lipstickProduct._id)));
-    });
-
-    test("clothing-only attributes (size/fabric) never appear as applicable attributes for a Cosmetics leaf — resolveAttributesForCategory only returns what's actually scoped there", async () => {
-      const { resolveAttributesForCategory } = await import("../services/attributeService.js");
-      const defs = await resolveAttributesForCategory(lipsCategory._id);
-      const keys = defs.map((d) => d.key);
-      assert.ok(!keys.includes("fabric"), "fabric must never be scoped to a Cosmetics category in this fixture");
-    });
-  });
-
-  describe("The real Cosmetics migration script — CLI dry-run/apply/idempotency, plan correctness, and forced-failure rollback", () => {
-    // The migration script has a real, documented dependency: a Cosmetics
-    // department (Category slug "cosmetics") must already exist. On a
-    // developer machine that's already run scripts/seedCatalog.mjs, it
-    // does — but CI provisions a fresh, empty test database per run, so
-    // this suite must never assume ambient seed data exists (confirmed by
-    // a real CI failure: the dry-run exited 1 there with "Cosmetics
-    // department not found," while passing locally against pre-seeded
-    // data). Create a minimal fixture only when nothing real is already
-    // there, and only clean up what this block itself created.
-    let ownsCosmeticsFixture = false;
-    let fixtureLeafIds = [];
-
-    before(async () => {
-      const existing = await Category.findOne({ slug: "cosmetics", parent: null }).lean();
-      if (existing) return;
-      ownsCosmeticsFixture = true;
-      // findOneAndUpdate (a query op), not Category.create — the schema's
-      // pre("validate") document-middleware hook treats every field on a
-      // brand-new document as "modified" and silently overwrites an
-      // explicit slug with an auto-generated one (the exact bug this
-      // migration script itself had — see its own comment). Same
-      // upsert-by-slug pattern used there and in scripts/seedCatalog.mjs.
-      const upsertCategory = (slug, data) =>
-        Category.findOneAndUpdate({ slug }, { $set: data }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true });
-      const cosmetics = await upsertCategory("cosmetics", { name: "Cosmetics", parent: null });
-      const lipstick = await upsertCategory("cosmetics-lipstick", { name: "Lipstick", parent: cosmetics._id });
-      const foundation = await upsertCategory("cosmetics-foundation", { name: "Foundation", parent: cosmetics._id });
-      const facewash = await upsertCategory("cosmetics-facewash", { name: "Facewash", parent: cosmetics._id });
-      fixtureLeafIds = [lipstick._id, foundation._id, facewash._id];
-    });
-
-    after(async () => {
-      if (!ownsCosmeticsFixture) return;
-      await Product.deleteMany({ category: { $in: fixtureLeafIds } });
-      await Category.deleteMany({ slug: { $regex: /^cosmetics(-|$)/ } });
-      await AttributeDefinition.deleteOne({ key: "finish" });
-    });
-
-    test("dry-run reports a real plan without writing anything", async () => {
-      const dry = await runMigrationCli();
-      const output = (dry.stdout || "") + (dry.stderr || "");
-      assert.equal(dry.code ?? 0, 0, `dry-run must exit 0:\n${output}`);
-      assert.match(output, /Dry run only/);
-    });
-
-    test("buildMigrationPlan()/applyPlan() round-trip: applying twice is idempotent (second apply is a genuine no-op)", async () => {
-      const plan1 = await buildMigrationPlan();
-      const session1 = await mongoose.startSession();
-      try {
-        await session1.withTransaction(async () => applyPlan(plan1, session1));
-      } finally {
-        await session1.endSession();
-      }
-
-      const plan2 = await buildMigrationPlan();
-      assert.equal(plan2.tiersToCreate.length, 0, "no tiers left to create on the second pass");
-      assert.equal(plan2.reparents.length, 0, "no re-parenting left to do on the second pass");
-      assert.equal(plan2.finishAttributeExists, true);
-    });
-
-    test("a forced mid-transaction failure leaves zero partial state (full rollback)", async () => {
-      // Reset to a pre-migration state for a clean forced-failure test —
-      // safe because this whole describe block only ever touches the
-      // "cosmetics" tree (real seeded data or this block's own fixture,
-      // per the before() hook above) via this script's own idempotent
-      // plan/apply functions, never ad hoc direct writes.
-      const cosmetics = await Category.findOne({ slug: "cosmetics", parent: null }).lean();
-      await Category.deleteMany({ slug: { $in: ["cosmetics-face", "cosmetics-eyes", "cosmetics-lips", "cosmetics-skin"] } });
-      await Category.updateMany(
-        { slug: { $in: ["cosmetics-lipstick", "cosmetics-foundation", "cosmetics-facewash"] } },
-        { $set: { parent: cosmetics._id } },
-      );
-      await AttributeDefinition.deleteOne({ key: "finish" });
-
-      const plan = await buildMigrationPlan();
-      const session = await mongoose.startSession();
-      const originalUpdateOne = Category.updateOne.bind(Category);
-      try {
-        await assert.rejects(
-          session.withTransaction(async () => {
-            Category.updateOne = () => {
-              throw new Error("forced failure for rollback test");
-            };
-            try {
-              await applyPlan(plan, session);
-            } finally {
-              Category.updateOne = originalUpdateOne;
-            }
-          }),
-        );
-      } finally {
-        Category.updateOne = originalUpdateOne;
-        await session.endSession();
-      }
-
-      const tiersAfter = await Category.find({ parent: cosmetics._id, slug: { $regex: /^cosmetics-(face|eyes|lips|skin)$/ } }).lean();
-      assert.equal(tiersAfter.length, 0, "forced failure must roll back every write in the transaction, including the tier categories already created");
-      const finishAfter = await AttributeDefinition.findOne({ key: "finish" }).lean();
-      assert.equal(finishAfter, null);
-
-      // Restore the real, correct migrated state for anything else that
-      // might depend on it (and to leave the test DB clean).
-      const restorePlan = await buildMigrationPlan();
-      const restoreSession = await mongoose.startSession();
-      try {
-        await restoreSession.withTransaction(async () => applyPlan(restorePlan, restoreSession));
-      } finally {
-        await restoreSession.endSession();
-      }
-    });
-  });
 });

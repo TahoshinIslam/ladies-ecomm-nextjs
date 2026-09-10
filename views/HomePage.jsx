@@ -72,17 +72,10 @@ export default async function HomePage() {
   const categories = localizeCategoryList(rawCategories, locale);
   const departments = categories.filter((c) => !c.parent);
 
-  // Burqa/Hijab/Abaya/Khimar are real departments (one hop below the
-  // "Clothes" root division — see services/categoryService.js's
-  // department-vs-division distinction), not roots themselves, so they
-  // must be looked up in the full `categories` list, not `departments`
-  // (which only ever holds Clothes/Cosmetics/Shoes/Sunglasses).
-  const burqa = categories.find((d) => d.slug === "burqa");
-  const abaya = categories.find((d) => d.slug === "abaya");
-  const hijab = categories.find((d) => d.slug === "hijab");
-  const khimar = categories.find((d) => d.slug === "khimar");
-  const cosmetics = departments.find((d) => d.slug === "cosmetics");
-  const clothes = departments.find((d) => d.slug === "clothes");
+  const burqa = departments.find((d) => d.slug === "burqa");
+  const abaya = departments.find((d) => d.slug === "abaya");
+  const hijab = departments.find((d) => d.slug === "hijab");
+  const khimar = departments.find((d) => d.slug === "khimar");
 
   // Phase 8 — every one of this page's product queries below is a fixed,
   // low-cardinality shape (limit + sort, or limit + category + collection)
@@ -100,31 +93,28 @@ export default async function HomePage() {
     return localizeProductList(result.products, locale);
   };
 
-  // Each department showcase (Clothes, Cosmetics) has 4 tabs — New Arrival/
-  // Featured/Discount use the shop's own canonical `collection=` values;
-  // "Bestseller" has no such canonical value (it isn't one of the shop's
-  // New/Featured/Discount tabs), so it's defined by sort=-rating instead —
-  // the same real, honest "best" signal already used above to pick each
-  // department's hero image, not a fabricated sales-count field this
-  // schema doesn't have.
-  const fetchDeptTabs = (dept) =>
-    dept
-      ? Promise.all([
-          fetchProducts({ limit: 8, category: dept._id, collection: "new" }),
-          fetchProducts({ limit: 8, category: dept._id, collection: "featured" }),
-          fetchProducts({ limit: 8, category: dept._id, sort: "-rating" }),
-          fetchProducts({ limit: 8, category: dept._id, collection: "discount" }),
-        ]).then(([newArr, featured, bestseller, discount]) => ({ new: newArr, featured, bestseller, discount }))
-      : Promise.resolve({ new: [], featured: [], bestseller: [], discount: [] });
-
-  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, clothesTabProducts, cosmeticsTabProducts] = await Promise.all([
-    burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
-    abaya ? fetchProducts({ limit: 1, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
-    hijab ? fetchProducts({ limit: 1, category: hijab._id, sort: "-rating" }) : Promise.resolve([]),
-    khimar ? fetchProducts({ limit: 1, category: khimar._id, sort: "-rating" }) : Promise.resolve([]),
-    fetchDeptTabs(clothes),
-    fetchDeptTabs(cosmetics),
-  ]);
+  // Single shop-wide showcase (New Arrival/Featured/Bestseller/Discount) —
+  // this is a clothing-only shop with no single "all clothes" department
+  // id to scope by (every department is its own root now), so these are
+  // unscoped across the whole catalog. New/Featured/Discount use the
+  // shop's own canonical `collection=` values; "Bestseller" has no such
+  // canonical value (it isn't one of the shop's New/Featured/Discount
+  // tabs), so it's defined by sort=-rating instead — the same real,
+  // honest "best" signal already used below to pick each department's
+  // hero image, not a fabricated sales-count field this schema doesn't
+  // have.
+  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, shopNew, shopFeatured, shopBestseller, shopDiscount] =
+    await Promise.all([
+      burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
+      abaya ? fetchProducts({ limit: 1, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
+      hijab ? fetchProducts({ limit: 1, category: hijab._id, sort: "-rating" }) : Promise.resolve([]),
+      khimar ? fetchProducts({ limit: 1, category: khimar._id, sort: "-rating" }) : Promise.resolve([]),
+      fetchProducts({ limit: 8, collection: "new" }),
+      fetchProducts({ limit: 8, collection: "featured" }),
+      fetchProducts({ limit: 8, sort: "-rating" }),
+      fetchProducts({ limit: 8, collection: "discount" }),
+    ]);
+  const shopTabProducts = { new: shopNew, featured: shopFeatured, bestseller: shopBestseller, discount: shopDiscount };
 
   const heroImageBySlug = {
     burqa: heroBurqa[0]?.images?.[0] || null,
@@ -265,31 +255,16 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Clothes showcase — New Arrival / Featured / Bestseller / Discount */}
-      {clothes && (
-        <ProductTabsSection
-          sectionId="clothes-showcase"
-          headingId="clothes-showcase-h"
-          eyebrow={t("home.newArrivalsEyebrow")}
-          title={t("home.justLanded")}
-          sub={t("home.justLandedSub")}
-          deptId={clothes._id}
-          products={clothesTabProducts}
-        />
-      )}
-
-      {/* Cosmetics showcase — same tab set, scoped to Cosmetics */}
-      {cosmetics && (
-        <ProductTabsSection
-          sectionId="cosmetics-showcase"
-          headingId="cosmetics-showcase-h"
-          eyebrow={t("home.cosmeticsShowcaseEyebrow")}
-          title={t("home.cosmeticsShowcaseTitle")}
-          sub={t("home.cosmeticsShowcaseSub")}
-          deptId={cosmetics._id}
-          products={cosmeticsTabProducts}
-        />
-      )}
+      {/* Shop showcase — New Arrival / Featured / Bestseller / Discount,
+          unscoped across the whole (clothing-only) catalog. */}
+      <ProductTabsSection
+        sectionId="shop-showcase"
+        headingId="shop-showcase-h"
+        eyebrow={t("home.newArrivalsEyebrow")}
+        title={t("home.justLanded")}
+        sub={t("home.justLandedSub")}
+        products={shopTabProducts}
+      />
 
       {/* Fabric story */}
       <section aria-labelledby="fabric-h" className="container-x pt-32">

@@ -82,15 +82,9 @@ const nextConfig = {
     //
     // `placehold.co` is the seed/demo catalog's original text-placeholder
     // image host (see IMG() in scripts/seedCatalog.mjs).
-    //
-    // `images.unsplash.com` was re-added here for the Cosmetics seed
-    // products (Lipstick/Foundation) — real, free-license stock photos
-    // instead of text placeholders. Re-remove this if those seed products
-    // ever go back to placehold.co and nothing else references it.
     remotePatterns: [
       { protocol: "https", hostname: "res.cloudinary.com" },
       { protocol: "https", hostname: "placehold.co" },
-      { protocol: "https", hostname: "images.unsplash.com" },
     ],
   },
   async headers() {

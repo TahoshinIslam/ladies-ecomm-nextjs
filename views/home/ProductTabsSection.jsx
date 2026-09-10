@@ -1,9 +1,10 @@
 "use client";
 
-// One reusable tabbed showcase, used twice on the home page (Clothes,
-// Cosmetics) — each instance pre-fetched, in parallel, by the Server
-// Component (views/HomePage.jsx) as plain props. Switching tabs is
-// instant (nothing to (re)load); no client round trip for the data.
+// A reusable tabbed showcase on the home page — pre-fetched by the Server
+// Component (views/HomePage.jsx) as plain props. Switching tabs is instant
+// (nothing to (re)load); no client round trip for the data. `deptId` is
+// optional — omitted, the tabs' "view all" links point at the whole shop
+// instead of one department.
 import { useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
@@ -17,22 +18,23 @@ import SectionHead from "./SectionHead.jsx";
 
 const TAB_ICONS = { new: Sparkles, featured: Star, bestseller: TrendingUp, discount: Percent };
 
-// deptId/collectionParam build each tab's real query — "bestseller" has no
-// canonical `collection=` value (it isn't one of the shop's New/Featured/
-// Discount tabs), so it's the one tab defined by sort=-rating instead, the
-// same real, honest "best" signal views/HomePage.jsx already uses to pick
-// department hero images. Every products array arrives already-fetched;
-// this component only ever reads them.
+// "bestseller" has no canonical `collection=` value (it isn't one of the
+// shop's New/Featured/Discount tabs), so it's the one tab defined by
+// sort=-rating instead, the same real, honest "best" signal
+// views/HomePage.jsx already uses to pick department hero images. Every
+// products array arrives already-fetched; this component only ever reads
+// them.
 export default function ProductTabsSection({ sectionId, headingId, eyebrow, title, sub, deptId, products }) {
   const { t } = useLocale();
   const shouldReduceMotion = useReducedMotion();
   const [active, setActive] = useState("new");
 
+  const deptParam = deptId ? `category=${deptId}&` : "";
   const tabs = [
-    { key: "new", labelKey: "home.tabNewArrival", href: `/shop?category=${deptId}&collection=new` },
-    { key: "featured", labelKey: "home.tabFeatured", href: `/shop?category=${deptId}&collection=featured` },
-    { key: "bestseller", labelKey: "home.tabBestseller", href: `/shop?category=${deptId}&sort=-rating` },
-    { key: "discount", labelKey: "home.tabDiscount", href: `/shop?category=${deptId}&collection=discount` },
+    { key: "new", labelKey: "home.tabNewArrival", href: `/shop?${deptParam}collection=new` },
+    { key: "featured", labelKey: "home.tabFeatured", href: `/shop?${deptParam}collection=featured` },
+    { key: "bestseller", labelKey: "home.tabBestseller", href: `/shop?${deptParam}sort=-rating` },
+    { key: "discount", labelKey: "home.tabDiscount", href: `/shop?${deptParam}collection=discount` },
   ];
 
   const activeTab = tabs.find((tab) => tab.key === active);
