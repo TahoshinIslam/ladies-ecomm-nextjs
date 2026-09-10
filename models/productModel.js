@@ -183,6 +183,30 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Optional per-product SEO overrides — every field here falls back to
+    // an auto-derived value (name/description/first image) when empty, see
+    // app/(routes)/product/[idOrSlug]/page.jsx's generateMetadata(). Never
+    // required; most products never need these set explicitly.
+    metaTitle: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    metaDescription: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    metaKeywords: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    ogImage: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   { timestamps: true },
 );

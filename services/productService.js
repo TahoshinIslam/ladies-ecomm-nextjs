@@ -941,6 +941,10 @@ const WRITABLE_FIELDS = [
   "tags",
   "isFeatured",
   "isActive",
+  "metaTitle",
+  "metaDescription",
+  "metaKeywords",
+  "ogImage",
 ];
 
 const pickWritable = (body) => {

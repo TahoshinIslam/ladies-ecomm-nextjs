@@ -70,6 +70,10 @@ const productBaseFields = {
   tags: z.array(z.string().trim().max(50)).max(50).optional().default([]),
   isFeatured: z.boolean().optional(),
   isActive: z.boolean().optional(),
+  metaTitle: z.string().trim().max(200).optional().default(""),
+  metaDescription: z.string().trim().max(500).optional().default(""),
+  metaKeywords: z.string().trim().max(300).optional().default(""),
+  ogImage: z.union([z.literal(""), urlSchema]).optional().default(""),
 };
 
 export const createProductSchema = z.object(productBaseFields).strict();

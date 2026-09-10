@@ -12,8 +12,7 @@ import {
   Package,
   Search,
   Copy,
-  ChevronLeft,
-  ChevronRight,
+  Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -46,8 +45,6 @@ import { useTableQueryState } from "../../hooks/useTableQueryState.js";
 import { usePermission } from "../../hooks/usePermission.js";
 import { PERMISSIONS } from "../../lib/permissions.js";
 import { AGE_GROUP_VALUES_LIST, AVAILABILITY_VALUES } from "../../schemas/catalogSchemas.js";
-
-const STEPS = ["Basic info", "Attributes", "Variants"];
 
 const variantSchema = z.object({
   variantName: z.string().min(1, "Required"),
@@ -86,14 +83,11 @@ const productSchema = z.object({
   sleeveLength: z.string().optional(),
   includedItems: z.string().optional(),
   variants: z.array(variantSchema).min(1, "At least one variant"),
+  metaTitle: z.string().optional(),
+  metaDescription: z.string().optional(),
+  metaKeywords: z.string().optional(),
+  ogImage: z.string().optional(),
 });
-
-// Fields validated before advancing past each step.
-const STEP_FIELDS = [
-  ["name", "description", "department", "category", "ageGroup", "basePrice"],
-  [],
-  ["variants", "images"],
-];
 
 export default function AdminProductsPage() {
   const settings = useSettings();
@@ -381,11 +375,10 @@ export default function AdminProductsPage() {
   );
 }
 
-// =================== PRODUCT FORM (3-step wizard) ===================
+// =================== PRODUCT FORM (single page) ===================
 
 function ProductFormModal({ product, onClose }) {
   const isEdit = !!product;
-  const [step, setStep] = useState(0);
 
   const { data: brandsData } = useGetBrandsQuery();
   const { data: catsData } = useGetCategoriesQuery();
@@ -433,6 +426,10 @@ function ProductFormModal({ product, onClose }) {
           stock: v.stock,
           images: v.images || [],
         })),
+        metaTitle: product.metaTitle || "",
+        metaDescription: product.metaDescription || "",
+        metaKeywords: product.metaKeywords || "",
+        ogImage: product.ogImage || "",
       }
     : {
         name: "",
@@ -455,6 +452,10 @@ function ProductFormModal({ product, onClose }) {
         sleeveLength: "",
         includedItems: "",
         variants: [{ variantName: "", sku: "", attributes: {}, price: "", discountPrice: "", stock: 0, images: [] }],
+        metaTitle: "",
+        metaDescription: "",
+        metaKeywords: "",
+        ogImage: "",
       };
 
   const {
@@ -463,7 +464,6 @@ function ProductFormModal({ product, onClose }) {
     control,
     watch,
     setValue,
-    trigger,
     formState: { errors },
   } = useForm({ resolver: zodResolver(productSchema), defaultValues: defaults });
 
@@ -513,15 +513,80 @@ function ProductFormModal({ product, onClose }) {
   });
   const setColorImages = (value, imgs) => setColorImagesState((m) => ({ ...m, [value]: imgs }));
 
-  const goNext = async () => {
-    const ok = await trigger(STEP_FIELDS[step]);
-    if (ok) setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  };
-  const goBack = () => setStep((s) => Math.max(s - 1, 0));
-
   const duplicateVariant = (index) => {
     const src = variants[index];
     insertVariant(index + 1, { ...src, variantName: `${src.variantName} (copy)`, sku: "" });
+  };
+
+  // Bulk price/stock edit for the variant table, tracked by useFieldArray's
+  // own stable `field.id` (never a raw index — removing/inserting rows
+  // shifts indices, but never the id a row was selected under).
+  const [selectedVariantIds, setSelectedVariantIds] = useState(() => new Set());
+  const toggleVariantSelected = (fieldId) =>
+    setSelectedVariantIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fieldId)) next.delete(fieldId);
+      else next.add(fieldId);
+      return next;
+    });
+  const applyToSelectedVariants = (fn) => {
+    variantFields.forEach((field, i) => {
+      if (!selectedVariantIds.has(field.id)) return;
+      const patch = fn(variants[i]);
+      for (const [key, value] of Object.entries(patch)) {
+        setValue(`variants.${i}.${key}`, value, { shouldDirty: true });
+      }
+    });
+  };
+
+  // Cartesian product of the checked option values across every
+  // variant-identity axis (color/size/fabric, ...) that has at least one
+  // value checked — axes with nothing checked are simply not part of the
+  // combination, so picking only Color still generates one row per color.
+  // Combos matching an attribute signature already present among the
+  // existing variant rows are skipped (never a silent duplicate).
+  const generateVariants = (axisSelections) => {
+    const axes = variantAttrDefs
+      .map((def) => ({ def, values: def.options.filter((o) => axisSelections[def.key]?.has(o.value)) }))
+      .filter((a) => a.values.length > 0);
+    if (axes.length === 0) return 0;
+
+    let combos = [{}];
+    for (const axis of axes) {
+      const next = [];
+      for (const combo of combos) {
+        for (const opt of axis.values) next.push({ ...combo, [axis.def.key]: opt });
+      }
+      combos = next;
+    }
+
+    const signature = (attrs) =>
+      JSON.stringify(Object.keys(attrs).sort().map((k) => [k, attrs[k]]));
+    const existingSignatures = new Set((variants || []).map((v) => signature(v.attributes || {})));
+
+    let added = 0;
+    for (const combo of combos) {
+      const attributes = {};
+      const nameParts = [];
+      for (const key of Object.keys(combo)) {
+        attributes[key] = combo[key].value;
+        nameParts.push(combo[key].label);
+      }
+      const sig = signature(attributes);
+      if (existingSignatures.has(sig)) continue;
+      existingSignatures.add(sig);
+      appendVariant({
+        variantName: nameParts.join(" / "),
+        sku: "",
+        attributes,
+        price: "",
+        discountPrice: "",
+        stock: 0,
+        images: [],
+      });
+      added++;
+    }
+    return added;
   };
 
   const onSubmit = async (data) => {
@@ -553,6 +618,10 @@ function ProductFormModal({ product, onClose }) {
       attributes,
       isFeatured: data.isFeatured,
       isActive: data.isActive,
+      metaTitle: data.metaTitle || "",
+      metaDescription: data.metaDescription || "",
+      metaKeywords: data.metaKeywords || "",
+      ogImage: data.ogImage || "",
       variants: data.variants.map((v) => {
         const swatchValue = swatchKey ? v.attributes?.[swatchKey] : null;
         return {
@@ -581,32 +650,14 @@ function ProductFormModal({ product, onClose }) {
     }
   };
 
+  const previewTitle = watch("metaTitle") || watch("name") || "Product title";
+  const previewDesc = watch("metaDescription") || watch("description") || "Product description will appear here…";
+
   return (
     <Modal open onClose={onClose} title={isEdit ? "Edit product" : "New product"} size="xl">
-      <div className="flex items-center gap-2 border-b border-border px-5 py-3">
-        {STEPS.map((label, i) => (
-          <div key={label} className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setStep(i)}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors",
-                i === step ? "bg-accent text-accent-foreground" : i < step ? "bg-accent/20 text-accent" : "bg-muted text-muted-foreground",
-              )}
-            >
-              {i + 1}
-            </button>
-            <span className={cn("text-sm", i === step ? "font-semibold text-foreground" : "text-muted-foreground")}>
-              {label}
-            </span>
-            {i < STEPS.length - 1 && <div className="mx-2 h-px w-8 bg-border" />}
-          </div>
-        ))}
-      </div>
-
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 p-5">
-        {step === 0 && (
-          <>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 p-5">
+        <FormSection title="Basic info" defaultOpen>
+          <div className="space-y-4">
             <Input label="Name" error={errors.name?.message} {...register("name")} />
             <Input
               label="Name (Bangla)"
@@ -683,13 +734,13 @@ function ProductFormModal({ product, onClose }) {
                 <input type="checkbox" className="h-4 w-4 accent-accent" {...register("isActive")} /> Active
               </label>
             </div>
-          </>
-        )}
+          </div>
+        </FormSection>
 
-        {step === 1 && (
+        <FormSection title="Attributes" defaultOpen>
           <div className="space-y-4">
             {!department ? (
-              <p className="text-sm text-muted-foreground">Pick a department on Step 1 to see its attributes.</p>
+              <p className="text-sm text-muted-foreground">Pick a department above to see its attributes.</p>
             ) : attributeDefs.length === 0 ? (
               <p className="text-sm text-muted-foreground">No extra attributes for this department.</p>
             ) : (
@@ -698,9 +749,9 @@ function ProductFormModal({ product, onClose }) {
               ))
             )}
           </div>
-        )}
+        </FormSection>
 
-        {step === 2 && (
+        <FormSection title="Images" defaultOpen>
           <div className="space-y-5">
             <div>
               <label className="mb-1.5 block text-sm font-medium">Product images</label>
@@ -732,82 +783,245 @@ function ProductFormModal({ product, onClose }) {
                 </div>
               </div>
             )}
+          </div>
+        </FormSection>
 
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <label className="text-sm font-medium">Variants</label>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => appendVariant({ variantName: "", sku: "", attributes: {}, price: "", discountPrice: "", stock: 0, images: [] })}
-                >
-                  <Plus className="h-3 w-3" /> Add variant
-                </Button>
+        <FormSection title="Variants & pricing" defaultOpen>
+          <div className="space-y-4">
+            {variantAttrDefs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Pick a department above to see its variant fields.</p>
+            ) : (
+              <VariantGenerator variantAttrDefs={variantAttrDefs} onGenerate={generateVariants} />
+            )}
+
+            {selectedVariantIds.size > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted p-3">
+                <strong className="text-xs">{selectedVariantIds.size} selected:</strong>
+                <BulkField placeholder="Price" onApply={(v) => applyToSelectedVariants(() => ({ price: v }))} />
+                <BulkField
+                  placeholder="Stock"
+                  onApply={(v) => applyToSelectedVariants(() => ({ stock: v }))}
+                />
+                <BulkField
+                  placeholder="%"
+                  width="w-16"
+                  buttonLabel="+%"
+                  onApply={(v) =>
+                    applyToSelectedVariants((row) => {
+                      const pct = Number(v);
+                      const base = Number(row.price) || basePrice || 0;
+                      return pct ? { price: String(Math.round(base * (1 + pct / 100))) } : {};
+                    })
+                  }
+                />
               </div>
-              {errors.variants?.message && <p className="mb-2 text-xs text-danger">{errors.variants.message}</p>}
-              <div className="space-y-3">
-                {variantFields.map((field, i) => (
-                  <div key={field.id} className="rounded-lg border border-border p-3">
-                    <div className={cn("grid gap-2", variantAttrDefs.length ? "sm:grid-cols-3" : "")}>
-                      {variantAttrDefs.length === 0 && (
-                        <p className="text-xs text-muted-foreground">Pick a department on Step 1 to see its variant fields.</p>
-                      )}
-                      {variantAttrDefs.map((def) => (
-                        <ComboField
-                          key={def.key}
-                          label={def.label}
-                          def={def}
-                          error={errors.variants?.[i]?.attributes?.[def.key]?.message}
-                          {...register(`variants.${i}.attributes.${def.key}`)}
-                        />
-                      ))}
-                    </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      <Input label="Variant name" error={errors.variants?.[i]?.variantName?.message} {...register(`variants.${i}.variantName`)} />
-                      <Input label="SKU" error={errors.variants?.[i]?.sku?.message} {...register(`variants.${i}.sku`)} />
-                    </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                      <Input label="Price override" type="number" step="0.01" placeholder={String(basePrice || "")} {...register(`variants.${i}.price`)} />
-                      <Input label="Discount override" type="number" step="0.01" {...register(`variants.${i}.discountPrice`)} />
-                      <Input label="Stock" type="number" error={errors.variants?.[i]?.stock?.message} {...register(`variants.${i}.stock`)} />
-                    </div>
-                    <div className="mt-2 flex justify-end gap-1">
-                      <Button type="button" size="sm" variant="ghost" onClick={() => duplicateVariant(i)}>
-                        <Copy className="h-3.5 w-3.5" /> Duplicate
-                      </Button>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => removeVariant(i)} disabled={variantFields.length <= 1}>
-                        <Trash2 className="h-3.5 w-3.5 text-danger" /> Remove
-                      </Button>
+            )}
+
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Variant rows</label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => appendVariant({ variantName: "", sku: "", attributes: {}, price: "", discountPrice: "", stock: 0, images: [] })}
+              >
+                <Plus className="h-3 w-3" /> Add variant manually
+              </Button>
+            </div>
+            {errors.variants?.message && <p className="text-xs text-danger">{errors.variants.message}</p>}
+            <div className="space-y-3">
+              {variantFields.map((field, i) => (
+                <div key={field.id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      className="mt-3 h-4 w-4 accent-accent"
+                      checked={selectedVariantIds.has(field.id)}
+                      onChange={() => toggleVariantSelected(field.id)}
+                      aria-label="Select variant for bulk edit"
+                    />
+                    <div className="flex-1 space-y-2">
+                      <div className={cn("grid gap-2", variantAttrDefs.length ? "sm:grid-cols-3" : "")}>
+                        {variantAttrDefs.map((def) => (
+                          <ComboField
+                            key={def.key}
+                            label={def.label}
+                            def={def}
+                            error={errors.variants?.[i]?.attributes?.[def.key]?.message}
+                            {...register(`variants.${i}.attributes.${def.key}`)}
+                          />
+                        ))}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <Input label="Variant name" error={errors.variants?.[i]?.variantName?.message} {...register(`variants.${i}.variantName`)} />
+                        <Input label="SKU" error={errors.variants?.[i]?.sku?.message} {...register(`variants.${i}.sku`)} />
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <Input label="Price override" type="number" step="0.01" placeholder={String(basePrice || "")} {...register(`variants.${i}.price`)} />
+                        <Input label="Discount override" type="number" step="0.01" {...register(`variants.${i}.discountPrice`)} />
+                        <Input label="Stock" type="number" error={errors.variants?.[i]?.stock?.message} {...register(`variants.${i}.stock`)} />
+                      </div>
+                      <div className="flex justify-end gap-1">
+                        <Button type="button" size="sm" variant="ghost" onClick={() => duplicateVariant(i)}>
+                          <Copy className="h-3.5 w-3.5" /> Duplicate
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => removeVariant(i)} disabled={variantFields.length <= 1}>
+                          <Trash2 className="h-3.5 w-3.5 text-danger" /> Remove
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
           </div>
-        )}
+        </FormSection>
 
-        <div className="flex items-center justify-between gap-2 border-t border-border pt-4">
-          <div>
-            {step > 0 && (
-              <Button type="button" variant="outline" onClick={goBack}>
-                <ChevronLeft className="h-4 w-4" /> Back
-              </Button>
-            )}
+        <FormSection title="SEO">
+          <div className="space-y-4">
+            <Input
+              label="Meta title"
+              placeholder="Custom SEO title (leave empty to use product name)"
+              {...register("metaTitle")}
+            />
+            <Textarea
+              label="Meta description"
+              rows={3}
+              placeholder="Custom SEO description (leave empty to use product description)"
+              {...register("metaDescription")}
+            />
+            <Input
+              label="SEO keywords"
+              placeholder="Comma-separated, e.g. abaya, modest fashion, nida"
+              {...register("metaKeywords")}
+            />
+            <Input
+              label="OG image URL (optional)"
+              placeholder="Leave empty to use the product's first image"
+              {...register("ogImage")}
+            />
+            <div className="rounded-lg border border-border bg-muted/40 p-3">
+              <div className="mb-1 text-xs font-medium text-muted-foreground">SEO preview</div>
+              <div className="truncate text-sm font-medium text-accent">{previewTitle}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {typeof window !== "undefined" ? window.location.host : "tahos.store"}/product/{product?.slug || "…"}
+              </div>
+              <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{previewDesc}</div>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            {step < STEPS.length - 1 ? (
-              <Button type="button" onClick={goNext}>
-                Next <ChevronRight className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button type="submit" loading={creating || updating}>{isEdit ? "Update" : "Create"}</Button>
-            )}
-          </div>
+        </FormSection>
+
+        <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit" loading={creating || updating}>{isEdit ? "Update" : "Create"}</Button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+// A collapsible section of the single-page product form — replaces the old
+// 3-step wizard (Basic info / Attributes / Variants), which required
+// clicking "Next" twice before an admin could even see the variant table.
+// Every section is visible and independently collapsible instead.
+function FormSection({ title, defaultOpen = false, children }) {
+  return (
+    <details className="rounded-lg border border-border" open={defaultOpen}>
+      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-foreground">
+        {title}
+      </summary>
+      <div className="border-t border-border p-4">{children}</div>
+    </details>
+  );
+}
+
+// Pick which values of each variant-identity attribute (color/size/fabric,
+// ...) to combine, then generate one variant row per combination — instead
+// of manually adding and filling in each color/size pair one at a time.
+// Axes with nothing checked simply don't participate (checking only Color
+// generates one row per color, with every other axis left unset).
+function VariantGenerator({ variantAttrDefs, onGenerate }) {
+  const [selections, setSelections] = useState({});
+
+  const toggleValue = (key, value) =>
+    setSelections((prev) => {
+      const set = new Set(prev[key] || []);
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+      return { ...prev, [key]: set };
+    });
+
+  const handleGenerate = () => {
+    const added = onGenerate(selections);
+    if (added > 0) toast.success(`${added} variant${added === 1 ? "" : "s"} generated`);
+    else toast.error("Pick at least one value, and check they aren't already added");
+  };
+
+  return (
+    <div className="rounded-lg border border-dashed border-border p-3">
+      <p className="mb-1 text-sm font-medium">Generate variants</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Check which {variantAttrDefs.map((d) => d.label.toLowerCase()).join(" / ")} to combine — every combination becomes a
+        ready-to-price variant row below.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {variantAttrDefs.map((def) => (
+          <div key={def.key}>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{def.label}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {def.options.map((opt) => {
+                const checked = !!selections[def.key]?.has(opt.value);
+                return (
+                  <label
+                    key={opt.value}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      checked ? "border-accent bg-accent/10 text-accent" : "border-border text-muted-foreground hover:border-ink/30",
+                    )}
+                  >
+                    <input type="checkbox" className="sr-only" checked={checked} onChange={() => toggleValue(def.key, opt.value)} />
+                    {opt.swatchHex && (
+                      <span className="h-2.5 w-2.5 rounded-full border border-border" style={{ background: opt.swatchHex }} />
+                    )}
+                    {opt.label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button type="button" size="sm" className="mt-3" onClick={handleGenerate}>
+        <Wand2 className="h-3.5 w-3.5" /> Generate variants
+      </Button>
+    </div>
+  );
+}
+
+// One inline "type a value, apply to every selected variant row" control
+// for the bulk-edit toolbar (Set price / Set stock / +% price).
+function BulkField({ placeholder, width = "w-24", buttonLabel, onApply }) {
+  const [value, setValue] = useState("");
+  return (
+    <div className="flex items-center gap-1.5">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={placeholder}
+        className={cn("h-8 rounded-md border border-border bg-background px-2 text-xs", width)}
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          if (value === "") return;
+          onApply(value);
+        }}
+      >
+        {buttonLabel || `Set ${placeholder?.toLowerCase()}`}
+      </Button>
+    </div>
   );
 }
 

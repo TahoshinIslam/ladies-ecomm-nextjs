@@ -26,12 +26,22 @@ export async function generateMetadata({ params }) {
 
   const canonicalPath = `/product/${product.slug || idOrSlug}`;
   const canonicalUrl = absoluteUrl(canonicalPath);
-  const description = truncateDescription(product.description);
-  const image = product.images?.[0] ? resolveImage(product.images[0], 1200) : null;
+  // Every field below falls back to the existing auto-derived value when
+  // the admin hasn't set an override (views/admin/ProductsPage.jsx's SEO
+  // section) — a product with none of these set behaves exactly as before
+  // this fell back existed.
+  const title = product.metaTitle || product.name;
+  const description = product.metaDescription || truncateDescription(product.description);
+  const image = product.ogImage
+    ? resolveImage(product.ogImage, 1200)
+    : product.images?.[0]
+      ? resolveImage(product.images[0], 1200)
+      : null;
 
   return {
-    title: product.name,
+    title,
     description,
+    keywords: product.metaKeywords || undefined,
     // Inactive products still render today (see views/ProductDetailPage
     // .jsx — no isActive check gates the page body), but they're
     // intentionally excluded from listings/sitemap; noindex keeps search
@@ -43,14 +53,14 @@ export async function generateMetadata({ params }) {
     alternates: { canonical: canonicalPath },
     openGraph: {
       type: "website",
-      title: product.name,
+      title,
       description,
       url: canonicalUrl,
       ...(image ? { images: [{ url: image, alt: product.name }] } : {}),
     },
     twitter: {
       card: image ? "summary_large_image" : "summary",
-      title: product.name,
+      title,
       description,
       ...(image ? { images: [image] } : {}),
     },
