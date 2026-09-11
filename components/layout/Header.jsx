@@ -88,7 +88,7 @@ const OCCASIONS = [
   { nameKey: "catalog.occasionBridal", value: "bridal" },
 ];
 
-export default function Header() {
+export default function Header({ initialDepartments = [] }) {
   const { theme, isDark, toggleTheme } = useTheme();
   const { t, locale } = useLocale();
   const settings = useSettings();
@@ -130,8 +130,16 @@ export default function Header() {
   // Real departments for the top nav + Shop mega-menu — same query
   // ShopPage.jsx's department chips already use, so this stays consistent
   // with the live taxonomy instead of a hardcoded, driftable list.
+  //
+  // `initialDepartments` (from app/(routes)/layout.jsx, a Server Component)
+  // seeds the very first paint — this client query's `data` is undefined
+  // during SSR and for a moment after hydration, and falling back to `[]`
+  // in that window is what made the nav render without Burqa/Hijab/Niqab
+  // and then pop them in once the fetch resolved. The live query still
+  // takes over once it resolves, keeping this fresh across client
+  // navigations; the prop only covers the initial gap.
   const { data: catsData } = useGetCategoriesQuery();
-  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
+  const departments = (catsData?.categories ?? initialDepartments).filter((c) => !c.parent);
 
   // The board compacts the bar from 88px to 66px past 32px of scroll.
   useEffect(() => {

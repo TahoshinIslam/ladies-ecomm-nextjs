@@ -71,12 +71,15 @@ const STATIC_COLUMN_KEYS = [
   },
 ];
 
-export default function Footer() {
+export default function Footer({ initialDepartments = [] }) {
   const settings = useSettings();
   const { t, locale } = useLocale();
   const year = new Date().getFullYear();
+  // See components/layout/Header.jsx's matching comment — initialDepartments
+  // (from app/(routes)/layout.jsx) seeds the first paint so this column
+  // isn't missing Burqa/Hijab/Niqab until the client fetch resolves.
   const { data: catsData } = useGetCategoriesQuery();
-  const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
+  const departments = (catsData?.categories ?? initialDepartments).filter((c) => !c.parent);
 
   const columns = [
     {

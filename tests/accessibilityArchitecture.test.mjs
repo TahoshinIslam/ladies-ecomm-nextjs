@@ -37,7 +37,11 @@ describe("Phase 10 — skip link and its target exist", () => {
   });
 
   test("the storefront layout and admin layout each render a real id=\"main\" landmark", () => {
-    assert.match(read("app/(routes)/layout.jsx"), /id="main"/);
+    // The storefront chrome lives in components/layout/StorefrontShell.jsx
+    // (a "use client" component) — app/(routes)/layout.jsx is now the real
+    // Server Component wrapper that fetches the department nav data and
+    // renders StorefrontShell, so it no longer contains the landmark itself.
+    assert.match(read("components/layout/StorefrontShell.jsx"), /id="main"/);
     assert.match(read("components/admin/AdminLayout.jsx"), /id="main"/);
   });
 });
