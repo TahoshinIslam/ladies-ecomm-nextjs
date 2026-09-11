@@ -329,7 +329,7 @@ function ProductColumnHeader({ product, onRemove, removeLabel }) {
           href={`/product/${product.slug || product._id}`}
           className="block focus-ring rounded-md"
         >
-          <div className="relative aspect-square w-full overflow-hidden rounded-md bg-muted">
+          <div className="relative aspect-4/5 w-full overflow-hidden rounded-md bg-muted">
             {product.images?.[0] && !imageFailed ? (
               <Image
                 src={resolveImage(product.images[0], 400)}

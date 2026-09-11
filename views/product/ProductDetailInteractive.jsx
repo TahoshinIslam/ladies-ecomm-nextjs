@@ -208,9 +208,12 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
       <div className="grid gap-8 lg:grid-cols-2">
         {/* Gallery — capped and centered at 768-1023px only: the grid stays
             single-column until lg (1024), so without this the image (and
-            its aspect-square) renders at the full column width and can run
-            ~700px tall on a tablet, pushing price/size/CTA off the first
-            screen. Reverts to filling its lg:grid-cols-2 column at 1024+. */}
+            its aspect-4/5) renders at the full column width and can run
+            very tall on a tablet, pushing price/size/CTA off the first
+            screen. Reverts to filling its lg:grid-cols-2 column at 1024+.
+            aspect-4/5 (not aspect-square) so this matches ProductCard's own
+            grid-card plate exactly — one consistent image box across the
+            whole site, so a photo that fits one fits the other. */}
         <div className="w-full space-y-4 md:mx-auto md:max-w-[440px] lg:mx-0 lg:max-w-none">
           <motion.div
             key={`${selectedVariant?._id}-${selectedImage}`}
@@ -219,7 +222,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
             transition={{ duration: 0.3 }}
             onTouchStart={onGalleryTouchStart}
             onTouchEnd={onGalleryTouchEnd}
-            className="relative aspect-square overflow-hidden rounded-2xl bg-media"
+            className="relative aspect-4/5 overflow-hidden rounded-2xl bg-media"
           >
             {/* Hatched plate stands in until artwork exists, matching the way
                 ProductCard renders a product with no images. */}

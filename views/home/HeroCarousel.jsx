@@ -346,8 +346,14 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.45, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-        className="relative mt-3 aspect-[2/1]"
-        style={{ marginInline: `calc(-1 * ${gutter})` }}
+        // aspect-4/5, not the old full-bleed aspect-[2/1]: this box now
+        // matches ProductCard/PDP's own image plate exactly (one
+        // consistent aspect ratio site-wide), and it keeps the same side
+        // gutter as the eyebrow/heading/buttons above and below it instead
+        // of bleeding edge-to-edge — the old negative-margin bleed, on a
+        // short 2:1 box, also squeezed every real (portrait) product photo
+        // into a narrow letterboxed strip in the middle.
+        className="relative mt-3 aspect-4/5 max-h-[420px]"
       >
         <div className="absolute inset-0 overflow-hidden rounded-2xl bg-media">
           {slide.image ? (

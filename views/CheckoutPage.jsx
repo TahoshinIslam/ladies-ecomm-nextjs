@@ -520,7 +520,7 @@ export default function CheckoutPage() {
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{a.fullName}</span>
                         {a.isDefault && <Badge variant="default">{t("checkout.default")}</Badge>}
-                        <Badge variant="outline" className="capitalize">{a.label}</Badge>
+                        <Badge variant="outline" className="capitalize">{t(`checkout.addressLabel${a.label === "home" ? "Home" : a.label === "work" ? "Work" : "Other"}`)}</Badge>
                       </div>
                       <p className="mt-1 text-muted-foreground">{a.street}, {a.city}, {a.postalCode}, {a.country}</p>
                       <p className="text-muted-foreground">{a.phone}</p>
