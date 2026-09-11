@@ -80,9 +80,20 @@ export async function deleteCategory(id) {
   if (childCount > 0) {
     throw new HttpError(400, `Cannot delete: ${childCount} subcategor${childCount > 1 ? "ies" : "y"} under this category. Reassign or delete them first.`);
   }
-  const productCount = await Product.countDocuments({ category: id });
+  // Only ACTIVE products block deletion. "Delete" on a product
+  // (services/productService.js's deleteProduct) is a soft delete —
+  // isActive: false, the document and its category reference stay put —
+  // there is no way to ever truly remove a product from a category. Without
+  // this isActive filter, a category that ever had a product deactivated in
+  // it could never be deleted at all, even after the admin believed they'd
+  // "removed" that product. A deactivated product is already invisible
+  // everywhere on the storefront, so leaving its category reference intact
+  // after the category is gone (it just won't resolve to a real category
+  // any more) is harmless — the same trade-off orders already make by
+  // keeping historical snapshots after a product is deactivated.
+  const productCount = await Product.countDocuments({ category: id, isActive: true });
   if (productCount > 0) {
-    throw new HttpError(400, `Cannot delete: ${productCount} product${productCount > 1 ? "s" : ""} use this category. Reassign them first.`);
+    throw new HttpError(400, `Cannot delete: ${productCount} product${productCount > 1 ? "s" : ""} use this category. Reassign or deactivate them first.`);
   }
   await category.deleteOne();
 }

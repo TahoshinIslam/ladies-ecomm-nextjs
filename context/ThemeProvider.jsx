@@ -163,12 +163,10 @@ export default function AppProviders({ initialTheme = "light", initialLocale, ch
           <ThemeController initialTheme={initialTheme}>
             <SettingsProvider>{children}</SettingsProvider>
             <Toaster
-              position="bottom-right"
+              position="top-right"
+              richColors
               toastOptions={{
                 style: {
-                  background: "var(--elev)",
-                  color: "var(--ink)",
-                  border: "1px solid var(--line)",
                   borderRadius: "12px",
                   boxShadow: "var(--shadow-soft)",
                 },
