@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { motion, useReducedMotion } from "framer-motion";
-import { Loader2 } from "lucide-react";
 
 import { selectAuthHydrated, selectCanAccessAdmin, selectCurrentUser } from "../../store/authSlice.js";
 import { hasPermission } from "../../lib/permissions.js";
@@ -88,13 +87,14 @@ export default function AdminLayout({ children }) {
     });
   };
 
-  // GET /api/users/me hasn't resolved yet — render nothing conclusive either way.
+  // GET /api/users/me hasn't resolved yet — render nothing conclusive either
+  // way. A blank, background-matched placeholder rather than a spinner: this
+  // stage is normally brief, and every page's own content (DataTable's
+  // skeleton rows, etc.) already carries its own loading treatment right
+  // after — a spinner here just stacked a second, more jarring loading
+  // state in front of that one.
   if (!hydrated) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/20">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <div className="min-h-screen bg-muted/20" />;
   }
 
   // No session — the effect above is already redirecting; render nothing

@@ -437,14 +437,19 @@ export default function Header({ initialDepartments = [] }) {
                             {user.email}
                           </div>
                         </div>
-                        <MenuLink href="/dashboard" icon={LayoutDashboard}>{t("navigation.dashboard")}</MenuLink>
-                        <MenuLink href="/profile" icon={UserIcon}>{t("navigation.profile")}</MenuLink>
-                        <MenuLink href="/orders" icon={Package}>{t("navigation.orders")}</MenuLink>
-                        {isAdmin && (
+                        {/* An admin's real dashboard is /admin — showing the
+                            customer /dashboard (shopping stats) here too was
+                            confusing (0 orders, since admins don't shop) and
+                            redundant alongside the Admin link. */}
+                        {isAdmin ? (
                           <MenuLink href="/admin" icon={LayoutDashboard}>
                             {t("navigation.admin")}
                           </MenuLink>
+                        ) : (
+                          <MenuLink href="/dashboard" icon={LayoutDashboard}>{t("navigation.dashboard")}</MenuLink>
                         )}
+                        <MenuLink href="/profile" icon={UserIcon}>{t("navigation.profile")}</MenuLink>
+                        <MenuLink href="/orders" icon={Package}>{t("navigation.orders")}</MenuLink>
                         <button
                           role="menuitem"
                           onClick={handleLogout}
@@ -636,10 +641,19 @@ export default function Header({ initialDepartments = [] }) {
                   {t("navigation.wishlist")}
                   {wlCount ? ` (${wlCount})` : ""}
                 </Link>
+                {/* Same admin-vs-customer split as the desktop dropdown
+                    above: an admin's real dashboard is /admin, not the
+                    customer shopping dashboard. */}
                 {user && (
-                  <Link href="/dashboard" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
-                    {t("navigation.dashboard")}
-                  </Link>
+                  isAdmin ? (
+                    <Link href="/admin" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
+                      {t("navigation.admin")}
+                    </Link>
+                  ) : (
+                    <Link href="/dashboard" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
+                      {t("navigation.dashboard")}
+                    </Link>
+                  )
                 )}
                 <Link href="/orders" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
                   {t("navigation.orders")}

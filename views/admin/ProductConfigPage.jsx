@@ -10,7 +10,7 @@
 // existing options array rather than creating a whole new attribute.
 import { useState } from "react";
 import Link from "next/link";
-import { Palette, Ruler, Shirt, PackagePlus, Plus, ArrowRight, Layers } from "lucide-react";
+import { Palette, Ruler, Shirt, PackagePlus, Plus, ArrowRight, Layers, X, Edit2, Check, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import Button from "../../components/ui/Button.jsx";
@@ -18,12 +18,15 @@ import Input from "../../components/ui/Input.jsx";
 import Select from "../../components/ui/Select.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import Skeleton from "../../components/ui/Skeleton.jsx";
+import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
 import {
   useGetAttributesQuery,
   useCreateAttributeMutation,
   useUpdateAttributeMutation,
   useGetCategoriesQuery,
   useCreateCategoryMutation,
+  useUpdateCategoryMutation,
+  useDeleteCategoryMutation,
 } from "../../store/shopApi.js";
 import { isDepartmentCategory } from "../../lib/utils.js";
 
@@ -75,6 +78,27 @@ export default function ProductConfigPage() {
 
   const openItem = CONFIG_ITEMS.find((i) => i.key === openKey);
   const openAttribute = openItem ? attributes.find((a) => a.key === openItem.key) : null;
+
+  // Lives at this top level, not inside AddModelModal itself, so its own
+  // Modal never renders as a DESCENDANT of another Modal's animated panel
+  // — components/ui/Modal.jsx's motion.div carries an inline `transform`
+  // once framer-motion has animated it, which becomes a CSS containing
+  // block for any `position: fixed` element nested inside it (the confirm
+  // dialog would render clipped to the parent modal's box instead of
+  // covering the viewport). Same reason views/admin/CategoriesPage.jsx's
+  // own category-delete ConfirmDialog lives at its page's top level.
+  const [confirmDeleteModel, setConfirmDeleteModel] = useState(null);
+  const [deleteCategory, { isLoading: deletingModel }] = useDeleteCategoryMutation();
+
+  const handleDeleteModel = async () => {
+    try {
+      await deleteCategory(confirmDeleteModel._id).unwrap();
+      toast.success("Model deleted");
+      setConfirmDeleteModel(null);
+    } catch (e) {
+      toast.error(e?.data?.message || "Could not delete");
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -151,7 +175,18 @@ export default function ProductConfigPage() {
           onClose={() => setOpenKey(null)}
         />
       )}
-      {openKey === "model" && <AddModelModal onClose={() => setOpenKey(null)} />}
+      {openKey === "model" && (
+        <AddModelModal onClose={() => setOpenKey(null)} onRequestDelete={setConfirmDeleteModel} />
+      )}
+
+      <ConfirmDialog
+        open={!!confirmDeleteModel}
+        onClose={() => setConfirmDeleteModel(null)}
+        onConfirm={handleDeleteModel}
+        title={`Delete "${confirmDeleteModel?.name}"?`}
+        description="This cannot be undone. Models with subcategories or products attached can't be deleted until those are reassigned."
+        loading={deletingModel}
+      />
     </div>
   );
 }
@@ -160,12 +195,55 @@ function QuickAddOptionModal({ item, attribute, onClose }) {
   const [label, setLabel] = useState("");
   const [labelBn, setLabelBn] = useState("");
   const [swatchHex, setSwatchHex] = useState("#000000");
+  // Editable copy of the attribute's existing options — seeded once on
+  // mount (this modal remounts fresh each time it opens, since the parent
+  // only renders it while openKey is set), mirroring
+  // views/admin/CategoriesPage.jsx's AttributeFormModal's own
+  // removeOption()/updateOption() pattern for the exact same
+  // AttributeDefinition data. A rename saves on blur; a delete saves
+  // immediately (there's nothing to "undo" a stray keystroke on, so no
+  // separate "Save changes" step for either). `value` (the stable slug
+  // product variants reference) is deliberately not editable here —
+  // renaming it would silently orphan any variant already using it; the
+  // full Attributes manager is where that's exposed, this page stays
+  // label-only by design.
+  const [editedOptions, setEditedOptions] = useState(attribute?.options ?? []);
 
   const [createAttribute, { isLoading: creating }] = useCreateAttributeMutation();
   const [updateAttribute, { isLoading: updating }] = useUpdateAttributeMutation();
   const loading = creating || updating;
 
-  const existingOptions = attribute?.options ?? [];
+  const existingOptions = editedOptions;
+
+  const persistOptions = async (nextOptions, onSuccessToast) => {
+    if (!attribute) return;
+    try {
+      await updateAttribute({ id: attribute._id, options: nextOptions }).unwrap();
+      onSuccessToast();
+    } catch (e) {
+      toast.error(e?.data?.message || "Could not update");
+    }
+  };
+
+  const updateExistingOption = (i, field, value) => {
+    const next = editedOptions.map((o, idx) => (idx === i ? { ...o, [field]: value } : o));
+    setEditedOptions(next);
+    return next;
+  };
+
+  const saveExistingOption = (i) => {
+    // Blur fires even when nothing changed (just tabbing/clicking through) —
+    // skip the request and the toast in that case.
+    if (attribute?.options?.[i]?.label === editedOptions[i]?.label) return;
+    persistOptions(editedOptions, () => toast.warning(`${editedOptions[i].label} updated`));
+  };
+
+  const removeExistingOption = (i) => {
+    const removed = editedOptions[i];
+    const next = editedOptions.filter((_, idx) => idx !== i);
+    setEditedOptions(next);
+    persistOptions(next, () => toast.success(`${removed.label} removed`));
+  };
 
   const save = async () => {
     const trimmedLabel = label.trim();
@@ -219,18 +297,48 @@ function QuickAddOptionModal({ item, attribute, onClose }) {
       <div className="space-y-4 p-5">
         {existingOptions.length > 0 && (
           <div>
-            <div className="mb-1.5 text-xs font-medium text-muted-foreground">Existing options</div>
-            <div className="flex flex-wrap gap-1.5">
-              {existingOptions.map((o) => (
-                <span
+            <div className="mb-1.5 text-xs font-medium text-muted-foreground">
+              Existing options — edit a label and click away to save, or remove one
+            </div>
+            <div className="space-y-1.5">
+              {existingOptions.map((o, i) => (
+                <div
                   key={o.value}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs"
+                  className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5"
                 >
-                  {o.swatchHex && (
-                    <span className="h-3 w-3 rounded-full border border-border" style={{ background: o.swatchHex }} />
+                  {item.withSwatch && (
+                    <input
+                      type="color"
+                      value={o.swatchHex || "#000000"}
+                      onChange={(e) => {
+                        // Persist the freshly-computed array directly rather
+                        // than going through saveExistingOption() — setState
+                        // is async, so a same-handler read of `editedOptions`
+                        // right after calling updateExistingOption() would
+                        // still see the pre-change value.
+                        const next = updateExistingOption(i, "swatchHex", e.target.value);
+                        persistOptions(next, () => toast.warning(`${next[i].label} updated`));
+                      }}
+                      className="h-6 w-8 flex-none cursor-pointer rounded border border-border bg-background p-0.5"
+                      aria-label={`${o.label} swatch`}
+                    />
                   )}
-                  {o.label}
-                </span>
+                  <input
+                    value={o.label}
+                    onChange={(e) => updateExistingOption(i, "label", e.target.value)}
+                    onBlur={() => saveExistingOption(i)}
+                    className="min-w-0 flex-1 rounded border-0 bg-transparent px-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                    aria-label="Option label"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeExistingOption(i)}
+                    aria-label={`Remove ${o.label}`}
+                    className="flex-none rounded p-1 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -284,7 +392,7 @@ function QuickAddOptionModal({ item, attribute, onClose }) {
 // views/admin/CategoriesPage.jsx's CategoryTree already exposes, just a
 // focused "pick a department, name the model" form instead of the full
 // category tree editor.
-function AddModelModal({ onClose }) {
+function AddModelModal({ onClose, onRequestDelete }) {
   const { data: catsData, isLoading } = useGetCategoriesQuery();
   const allCategories = catsData?.categories ?? [];
   const departments = allCategories.filter((c) => isDepartmentCategory(c, allCategories));
@@ -292,9 +400,42 @@ function AddModelModal({ onClose }) {
   const [departmentId, setDepartmentId] = useState("");
   const [name, setName] = useState("");
   const [createCategory, { isLoading: saving }] = useCreateCategoryMutation();
+  const [updateCategory, { isLoading: renaming }] = useUpdateCategoryMutation();
+
+  const [editingId, setEditingId] = useState(null);
+  const [editingName, setEditingName] = useState("");
 
   const department = departments.find((d) => d._id === departmentId);
   const existingModels = department ? allCategories.filter((c) => c.parent === department._id) : [];
+
+  const startEditModel = (m) => {
+    setEditingId(m._id);
+    setEditingName(m.name);
+  };
+
+  const cancelEditModel = () => {
+    setEditingId(null);
+    setEditingName("");
+  };
+
+  const saveEditModel = async (m) => {
+    const trimmed = editingName.trim();
+    if (!trimmed) {
+      toast.error("A model name is required");
+      return;
+    }
+    if (trimmed === m.name) {
+      cancelEditModel();
+      return;
+    }
+    try {
+      await updateCategory({ id: m._id, name: trimmed }).unwrap();
+      toast.warning("Model updated");
+      cancelEditModel();
+    } catch (e) {
+      toast.error(e?.data?.message || "Could not update");
+    }
+  };
 
   const save = async () => {
     if (!departmentId) {
@@ -330,11 +471,62 @@ function AddModelModal({ onClose }) {
         {department && existingModels.length > 0 && (
           <div>
             <div className="mb-1.5 text-xs font-medium text-muted-foreground">Existing models under {department.name}</div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-1.5">
               {existingModels.map((m) => (
-                <span key={m._id} className="rounded-full border border-border px-2 py-0.5 text-xs">
-                  {m.name}
-                </span>
+                <div key={m._id} className="flex items-center gap-2 rounded-lg border border-border px-2 py-1.5">
+                  {editingId === m._id ? (
+                    <>
+                      <input
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEditModel(m);
+                          if (e.key === "Escape") cancelEditModel();
+                        }}
+                        autoFocus
+                        className="min-w-0 flex-1 rounded border-0 bg-transparent px-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        aria-label="Model name"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => saveEditModel(m)}
+                        disabled={renaming}
+                        aria-label={`Save ${m.name}`}
+                        className="flex-none rounded p-1 text-muted-foreground hover:bg-success/10 hover:text-success"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelEditModel}
+                        aria-label="Cancel"
+                        className="flex-none rounded p-1 text-muted-foreground hover:bg-muted"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-sm">{m.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => startEditModel(m)}
+                        aria-label={`Rename ${m.name}`}
+                        className="flex-none rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRequestDelete(m)}
+                        aria-label={`Delete ${m.name}`}
+                        className="flex-none rounded p-1 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
               ))}
             </div>
           </div>
