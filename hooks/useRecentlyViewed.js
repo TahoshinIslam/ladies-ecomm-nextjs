@@ -49,7 +49,12 @@ export function getHistorySnapshot() {
 }
 
 // The server has no localStorage and no visitor identity — always empty.
-const getServerSnapshot = () => [];
+// useSyncExternalStore compares snapshots by reference (Object.is); a bare
+// `() => []` would allocate a NEW empty array on every single call, so
+// React would see a "changed" snapshot every render and warn/loop. One
+// stable, module-level reference fixes it.
+const EMPTY_HISTORY = [];
+const getServerSnapshot = () => EMPTY_HISTORY;
 
 /**
  * Records a view. Call this with a *loaded* product's real _id — never the
