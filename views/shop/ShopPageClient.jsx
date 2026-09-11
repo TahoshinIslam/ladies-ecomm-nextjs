@@ -744,7 +744,7 @@ function FilterPanel({
         {hasMeaningfulAgeGroupVariety(facets?.ageGroup) && (
           <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
         )}
-        <CollectionTabs sp={sp} setCollection={setCollection} counts={facets?.collection} />
+        <CollectionFilterGroup sp={sp} setCollection={setCollection} counts={facets?.collection} />
         <AvailabilityFilterGroup sp={sp} setParam={setParam} counts={facets?.availability} />
         <PriceRange sp={sp} setSp={setSp} histogramProducts={histogramProducts} />
         <Button variant="outline" size="sm" onClick={clearAll} className="w-full">
@@ -768,7 +768,7 @@ function FilterPanel({
       {hasMeaningfulAgeGroupVariety(facets?.ageGroup) && (
         <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
       )}
-      <CollectionTabs sp={sp} setCollection={setCollection} counts={facets?.collection} />
+      <CollectionFilterGroup sp={sp} setCollection={setCollection} counts={facets?.collection} />
       <AvailabilityFilterGroup sp={sp} setParam={setParam} counts={facets?.availability} />
 
       {(groupingsLoading || groupings.length > 0) && (
@@ -937,71 +937,34 @@ function AgeGroupFilterGroup({ sp, toggleFacetValue, counts }) {
   );
 }
 
-// Permanently visible, third group — All / New Arrivals / Featured /
-// Discounts as a real single-select tab control (role="tablist"/"tab",
-// aria-selected, Left/Right/Home/End keyboard nav — exactly one active tab
-// at a time), not a checkbox group: selecting one always replaces the
-// previous selection via the canonical `?collection=` param, never ORs
-// multiple together the way the legacy boolean params could.
-function CollectionTabs({ sp, setCollection, counts }) {
+// Permanently visible, third group — New Arrivals / Featured / Discounts
+// as a checkbox group, matching every other filter section's look
+// (Category, Age Group, Availability) rather than standing out as a tab
+// bar. The underlying selection is still single-value: the canonical
+// `?collection=` param only ever holds one of new/featured/discount (or is
+// absent for "all"), so checking one option always replaces whatever was
+// checked before, and unchecking the active one clears back to "all" —
+// exactly AvailabilityFilterGroup's own established checked-radio-via-
+// checkbox pattern, just applied here too instead of a bespoke tab widget.
+function CollectionFilterGroup({ sp, setCollection, counts }) {
   const { t } = useLocale();
-  const active = sp.get("collection") || "";
-  const tabRefs = useRef([]);
-
-  const focusAndSelect = (idx) => {
-    const tab = COLLECTION_TABS[idx];
-    tabRefs.current[idx]?.focus();
-    setCollection(tab.value);
-  };
-
-  const onKeyDown = (e, idx) => {
-    if (e.key === "ArrowRight") {
-      e.preventDefault();
-      focusAndSelect((idx + 1) % COLLECTION_TABS.length);
-    } else if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      focusAndSelect((idx - 1 + COLLECTION_TABS.length) % COLLECTION_TABS.length);
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      focusAndSelect(0);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      focusAndSelect(COLLECTION_TABS.length - 1);
-    }
-  };
-
+  const selected = sp.get("collection") || "";
   return (
-    <div className="mb-5 border-b border-border pb-5">
-      <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
-        {t("filters.productCollection")}
-      </h3>
-      <div role="tablist" aria-label={t("filters.productCollection")} className="flex flex-wrap gap-2">
-        {COLLECTION_TABS.map((tab, idx) => {
-          const isActive = active === tab.value;
-          const count = tab.value ? (counts?.[tab.value] ?? 0) : null;
-          return (
-            <button
-              key={tab.value || "all"}
-              ref={(el) => (tabRefs.current[idx] = el)}
-              type="button"
-              role="tab"
-              id={`collection-tab-${tab.value || "all"}`}
-              aria-selected={isActive}
-              tabIndex={isActive ? 0 : -1}
-              onClick={() => setCollection(tab.value)}
-              onKeyDown={(e) => onKeyDown(e, idx)}
-              className={cn(
-                "h-9 rounded-full border px-3.5 text-xs font-medium transition-colors focus-ring",
-                isActive ? "border-ink bg-ink text-canvas" : "border-line text-ink hover:border-ink",
-              )}
-            >
-              {t(tab.labelKey)}
-              {count !== null ? ` (${count})` : ""}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <FilterGroup title={t("filters.productCollection")}>
+      {COLLECTION_TABS.filter((tab) => tab.value).map((tab) => {
+        const checked = selected === tab.value;
+        const count = counts?.[tab.value] ?? 0;
+        return (
+          <CheckBox
+            key={tab.value}
+            label={`${t(tab.labelKey)} (${count})`}
+            checked={checked}
+            disabled={count === 0 && !checked}
+            onChange={(v) => setCollection(v ? tab.value : "")}
+          />
+        );
+      })}
+    </FilterGroup>
   );
 }
 

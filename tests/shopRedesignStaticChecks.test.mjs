@@ -46,27 +46,25 @@ describe("ShopPageClient.jsx — responsive visible-count is server-rendered CSS
   });
 });
 
-describe("ShopPageClient.jsx — collection tabs are a real accessible tab control", () => {
-  test('the collection control uses role="tablist" on the container and role="tab" per item', () => {
-    assert.match(src, /role="tablist"/);
-    assert.match(src, /role="tab"/);
+describe("ShopPageClient.jsx — collection filter is a checkbox group, matching Category/Age Group/Availability", () => {
+  test("CollectionFilterGroup renders through the shared FilterGroup/CheckBox components, not a bespoke tab widget", () => {
+    const fnMatch = src.match(/function CollectionFilterGroup\(([\s\S]*?)\n}\n/);
+    assert.ok(fnMatch, "CollectionFilterGroup must exist");
+    const fn = fnMatch[0];
+    assert.match(fn, /<FilterGroup/);
+    assert.match(fn, /<CheckBox/);
+    assert.ok(!/role="tab/.test(fn), "must not still render tab/tablist markup");
   });
 
-  test("each tab has aria-selected reflecting single-active-tab state", () => {
-    assert.match(src, /aria-selected={isActive}/);
+  test("the group excludes the implicit All entry — unchecking the active option is how you get back to all, same as Availability", () => {
+    const fnMatch = src.match(/function CollectionFilterGroup\(([\s\S]*?)\n}\n/)[0];
+    assert.match(fnMatch, /COLLECTION_TABS\.filter\(\(tab\) => tab\.value\)/);
   });
 
-  test("keyboard navigation handles ArrowRight/ArrowLeft/Home/End", () => {
-    assert.match(src, /ArrowRight/);
-    assert.match(src, /ArrowLeft/);
-    assert.match(src, /"Home"/);
-    assert.match(src, /"End"/);
-  });
-
-  test("selecting a tab always goes through setCollection (never a raw setParam that could leave a legacy boolean behind)", () => {
-    const tabsFn = src.match(/function CollectionTabs\(([\s\S]*?)\n}\n/)[0];
-    assert.match(tabsFn, /setCollection\(tab\.value\)/);
-    assert.ok(!/setParam\(/.test(tabsFn), "CollectionTabs must never call setParam directly — only setCollection, which also clears the legacy booleans");
+  test("checking an option always goes through setCollection (never a raw setParam that could leave a legacy boolean behind)", () => {
+    const fnMatch = src.match(/function CollectionFilterGroup\(([\s\S]*?)\n}\n/)[0];
+    assert.match(fnMatch, /setCollection\(/);
+    assert.ok(!/setParam\(/.test(fnMatch), "CollectionFilterGroup must never call setParam directly — only setCollection, which also clears the legacy booleans");
   });
 
   test("setCollection clears the legacy new/featured/discount params whenever it's called (never emits a mixed canonical+legacy request)", () => {
