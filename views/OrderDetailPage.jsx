@@ -126,7 +126,7 @@ export default async function OrderDetailPage({ params }) {
                           fill
                           sizes="80px"
                           loading="lazy"
-                          className="object-cover"
+                          className="object-contain"
                         />
                       )}
                     </div>

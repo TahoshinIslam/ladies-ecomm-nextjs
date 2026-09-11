@@ -663,7 +663,7 @@ export default function CheckoutPage() {
                             fill
                             sizes="56px"
                             loading="lazy"
-                            className="object-cover"
+                            className="object-contain"
                           />
                         )}
                       </div>

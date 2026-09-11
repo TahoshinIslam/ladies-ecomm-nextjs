@@ -192,7 +192,7 @@ export default function ImageDropzone({
                   fill
                   sizes="80px"
                   loading="lazy"
-                  className="pointer-events-none select-none object-cover"
+                  className="pointer-events-none select-none object-contain"
                 />
                 {i === 0 && (
                   <span className="pointer-events-none absolute bottom-0 left-0 right-0 bg-accent/90 px-1 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider text-accent-foreground">

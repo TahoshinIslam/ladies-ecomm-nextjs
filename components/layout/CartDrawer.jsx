@@ -142,7 +142,7 @@ export default function CartDrawer() {
                         fill
                         sizes="88px"
                         loading="lazy"
-                        className="object-cover"
+                        className="object-contain"
                       />
                     )}
                   </Link>

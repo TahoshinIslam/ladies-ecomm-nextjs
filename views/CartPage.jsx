@@ -119,7 +119,7 @@ export default function CartPage() {
                       fill
                       sizes="(max-width: 640px) 88px, 112px"
                       loading="lazy"
-                      className="object-cover"
+                      className="object-contain"
                     />
                   )}
                 </Link>

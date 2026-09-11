@@ -123,7 +123,7 @@ export default function OrderSuccessPage() {
                     fill
                     sizes="48px"
                     loading="lazy"
-                    className="object-cover"
+                    className="object-contain"
                   />
                 )}
               </div>

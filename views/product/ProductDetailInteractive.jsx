@@ -237,14 +237,21 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                 sizes="(max-width: 1024px) 100vw, 50vw"
                 loading="eager"
                 fetchPriority="high"
-                className="object-cover"
+                // `object-contain`, not `object-cover` — see
+                // components/product/ProductCard.jsx's identical fix: this
+                // box is a fixed 1:1 square, but not every uploaded photo
+                // is shot square, so `cover` was slicing off the top/sides
+                // of taller/narrower photos (a model's head, in practice).
+                // `contain` always shows the whole photo, letterboxed on
+                // the existing bg-media plate when the ratio doesn't match.
+                className="object-contain"
                 onError={() => setImageFailed(true)}
               />
             ) : imageFailed ? (
               <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center text-stone">
                 <ImageOff className="h-5 w-5" strokeWidth={1.6} />
                 <span className="font-mono text-[11px] uppercase leading-[1.8] tracking-[0.08em]">
-                  Image didn&rsquo;t load
+                  {t("product.imageDidntLoad")}
                 </span>
               </span>
             ) : (
@@ -265,11 +272,11 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                   aria-label={t("product.viewImageNumber", { number: i + 1 })}
                   aria-current={i === selectedImage}
                   className={cn(
-                    "h-20 w-20 flex-shrink-0 overflow-hidden rounded-md border-2 transition-colors",
+                    "h-20 w-20 flex-shrink-0 overflow-hidden rounded-md border-2 bg-media transition-colors",
                     i === selectedImage ? "border-accent" : "border-transparent"
                   )}
                 >
-                  <Image src={resolveImage(src, 160)} alt="" width={80} height={80} loading="lazy" className="h-full w-full object-cover" />
+                  <Image src={resolveImage(src, 160)} alt="" width={80} height={80} loading="lazy" className="h-full w-full object-contain" />
                 </button>
               ))}
             </div>

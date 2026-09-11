@@ -216,7 +216,7 @@ export default function ProductFinder() {
                                 fill
                                 sizes="60px"
                                 loading="lazy"
-                                className="object-cover"
+                                className="object-contain"
                               />
                             ) : (
                               <span aria-hidden="true" className="absolute inset-0 hatch" />

@@ -168,7 +168,7 @@ export default function OverviewCharts({ overview, series, topProducts, statusBr
                         fill
                         sizes="40px"
                         loading="lazy"
-                        className="object-cover"
+                        className="object-contain"
                       />
                     )}
                   </div>

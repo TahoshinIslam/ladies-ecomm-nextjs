@@ -61,7 +61,7 @@ export default function CompareTray() {
                         alt={p.name}
                         fill
                         sizes="56px"
-                        className="object-cover"
+                        className="object-contain"
                       />
                     ) : (
                       <div className="h-full w-full animate-pulse bg-muted" />

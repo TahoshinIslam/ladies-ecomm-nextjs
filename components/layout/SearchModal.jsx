@@ -256,7 +256,7 @@ export default function SearchModal() {
                               fill
                               sizes="62px"
                               loading="lazy"
-                              className="object-cover"
+                              className="object-contain"
                             />
                           ) : (
                             <span aria-hidden="true" className="absolute inset-0 hatch" />

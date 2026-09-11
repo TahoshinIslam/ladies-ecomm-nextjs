@@ -131,14 +131,14 @@ export default function AdminReviewsPage() {
 
                   <div className="mt-2 flex items-center gap-2">
                     {r.product?.images?.[0] && (
-                      <span className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded">
+                      <span className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded bg-muted">
                         <Image
                           src={resolveImage(r.product.images[0], 64)}
                           alt={r.product.name}
                           fill
                           sizes="32px"
                           loading="lazy"
-                          className="object-cover"
+                          className="object-contain"
                         />
                       </span>
                     )}

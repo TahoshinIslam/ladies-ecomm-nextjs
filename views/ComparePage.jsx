@@ -337,7 +337,7 @@ function ProductColumnHeader({ product, onRemove, removeLabel }) {
                 fill
                 sizes="(max-width: 640px) 140px, 180px"
                 loading="lazy"
-                className="object-cover"
+                className="object-contain"
                 onError={() => setImageFailed(true)}
               />
             ) : null}

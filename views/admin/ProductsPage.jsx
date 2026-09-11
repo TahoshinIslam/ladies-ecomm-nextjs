@@ -183,7 +183,7 @@ export default function AdminProductsPage() {
                 fill
                 sizes="40px"
                 loading="lazy"
-                className="object-cover"
+                className="object-contain"
               />
             )}
           </div>

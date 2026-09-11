@@ -155,7 +155,7 @@ export default function QuickAddSheet() {
                   alt={product.name}
                   fill
                   sizes="380px"
-                  className="object-cover"
+                  className="object-contain"
                 />
               ) : (
                 <span className="absolute bottom-[18px] left-5 font-mono text-[10.5px] uppercase tracking-[0.1em] text-stone">
