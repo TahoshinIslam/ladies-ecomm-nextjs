@@ -646,7 +646,7 @@ export default function CheckoutPage() {
                 if (!p) return null;
                 const usdPrice = p.discountPrice ?? p.basePrice;
                 const lineTotal = toCheckoutPrice(usdPrice) * it.quantity;
-                const variantLine = formatVariantAttributes(it.variant?.attributes);
+                const variantLine = formatVariantAttributes(it.variant?.attributes, locale);
                 return (
                   <li key={`${p._id}-${it.variantId}`} className="py-3">
                     <div className="flex gap-3">

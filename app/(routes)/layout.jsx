@@ -12,6 +12,7 @@ import CompareTray from "@/components/product/CompareTray.jsx";
 import QuickAddSheet from "@/components/product/QuickAddSheet.jsx";
 import ProductFinder from "@/components/product/ProductFinder.jsx";
 import ScrollToTop from "@/components/layout/ScrollToTop.jsx";
+import { useLocale } from "@/context/LocaleProvider.jsx";
 
 /**
  * Storefront chrome. Everything customer-facing renders inside this; /admin
@@ -65,6 +66,7 @@ const subscribeToConnectivity = (callback) => {
  * elsewhere in this app.
  */
 function OfflineBanner() {
+  const { t } = useLocale();
   const offline = useSyncExternalStore(
     subscribeToConnectivity,
     () => !navigator.onLine,
@@ -80,13 +82,13 @@ function OfflineBanner() {
     >
       <span className="flex items-center gap-2.5">
         <WifiOff className="h-4 w-4 flex-none" strokeWidth={1.8} />
-        You&rsquo;re offline. Your saved items and bag are still here.
+        {t("common.offlineMessage")}
       </span>
       <button
         onClick={() => window.location.reload()}
         className="rounded-md border border-canvas/30 px-2.5 py-1 text-[12px] font-semibold transition-colors hover:bg-canvas/10 focus-ring"
       >
-        Retry
+        {t("common.retry")}
       </button>
     </div>
   );

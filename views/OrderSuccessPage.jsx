@@ -130,7 +130,7 @@ export default function OrderSuccessPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{it.snapshot?.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {formatVariantAttributes(it.snapshot?.attributes)}
+                  {formatVariantAttributes(it.snapshot?.attributes, locale)}
                   {" · "}{t("checkout.qty")}{" "}
                   {it.quantity}
                 </p>

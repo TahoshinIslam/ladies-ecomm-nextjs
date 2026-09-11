@@ -9,8 +9,10 @@ import { X, ArrowRight, Scale } from "lucide-react";
 import { useGetCompareProductsQuery } from "../../store/productApi.js";
 import { removeFromCompare, clearCompare } from "../../store/uiSlice.js";
 import { cn, resolveImage } from "../../lib/utils.js";
+import { useLocale } from "../../context/LocaleProvider.jsx";
 
 export default function CompareTray() {
+  const { t } = useLocale();
   const compareList = useSelector((s) => s.ui.compareList);
   const dispatch = useDispatch();
   const router = useRouter();
@@ -37,12 +39,12 @@ export default function CompareTray() {
           transition={{ type: "spring", damping: 25, stiffness: 280 }}
           className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur shadow-hover"
           role="region"
-          aria-label="Product comparison tray"
+          aria-label={t("compare.trayRegionLabel")}
         >
           <div className="container-x flex items-center gap-3 py-3">
             <div className="hidden items-center gap-2 text-sm font-semibold text-foreground sm:flex">
               <Scale className="h-4 w-4 text-accent" />
-              Compare ({compareList.length}/4)
+              {t("compare.trayLabel", { count: compareList.length })}
             </div>
 
             <div className="flex flex-1 gap-2 overflow-x-auto">
@@ -66,7 +68,7 @@ export default function CompareTray() {
                     )}
                     <button
                       onClick={() => dispatch(removeFromCompare(id))}
-                      aria-label={`Remove ${p?.name || "product"} from compare`}
+                      aria-label={t("compare.removeFromTray", { name: p?.name || "" })}
                       className="absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-bl-md bg-danger text-white"
                     >
                       <X className="h-3 w-3" />
@@ -80,7 +82,7 @@ export default function CompareTray() {
               onClick={() => dispatch(clearCompare())}
               className="hidden text-xs font-medium text-muted-foreground hover:text-foreground sm:inline"
             >
-              Clear
+              {t("compare.clear")}
             </button>
 
             <button
@@ -93,7 +95,7 @@ export default function CompareTray() {
                   : "hover:opacity-90",
               )}
             >
-              Compare
+              {t("compare.compareCta")}
               <ArrowRight className="h-4 w-4" />
             </button>
           </div>

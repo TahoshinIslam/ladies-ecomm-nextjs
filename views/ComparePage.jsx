@@ -21,6 +21,8 @@ import { useCart } from "../hooks/useCart.js";
 import { removeFromCompare, clearCompare } from "../store/uiSlice.js";
 import { cn, resolveImage } from "../lib/utils.js";
 import { useSettings } from "../context/SettingsContext.jsx";
+import { useLocale } from "../context/LocaleProvider.jsx";
+import { attrValue, departmentName } from "../lib/i18n/catalog.js";
 
 // `variants` is the real modest-fashion schema — `product.sizes` (the
 // legacy mock-catalog shape) is dead against real data and dropped here.
@@ -28,6 +30,7 @@ const getVariants = (product) => product.variants ?? [];
 
 export default function ComparePage() {
   const settings = useSettings();
+  const { t, locale } = useLocale();
   const compareList = useSelector((s) => s.ui.compareList);
   const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
@@ -51,7 +54,7 @@ export default function ComparePage() {
   const handleAddToCart = async (product) => {
     const inStockVariants = getVariants(product).filter((v) => (v.stock ?? 0) > 0);
     if (inStockVariants.length === 0) {
-      toast.error("Out of stock");
+      toast.error(t("compare.outOfStock"));
       return;
     }
     const pickedId = variantBy[product._id];
@@ -59,9 +62,9 @@ export default function ComparePage() {
     try {
       setPendingId(product._id);
       await cart.addItem({ product, variant, quantity: 1 });
-      toast.success(`Added ${product.name}`);
+      toast.success(t("compare.addedToCart", { name: product.name }));
     } catch (e) {
-      toast.error(e?.data?.message || "Could not add to cart");
+      toast.error(e?.data?.message || t("compare.addToCartFailed"));
     } finally {
       setPendingId(null);
     }
@@ -73,17 +76,17 @@ export default function ComparePage() {
       <div className="container-x py-12">
         <Breadcrumb
           items={[
-            { label: "Home", href: "/", icon: Home },
-            { label: "Compare", icon: Scale },
+            { label: t("navigation.home"), href: "/", icon: Home },
+            { label: t("navigation.compare"), icon: Scale },
           ]}
         />
         <EmptyState
           icon={Scale}
-          title="No products to compare"
-          message="Browse the shop and tap the eye icon on any product to add it to your comparison."
+          title={t("compare.emptyTitle")}
+          message={t("compare.emptyMessage")}
           action={
             <Link href="/shop">
-              <Button>Browse products</Button>
+              <Button>{t("compare.browseProducts")}</Button>
             </Link>
           }
         />
@@ -106,11 +109,15 @@ export default function ComparePage() {
   }
 
   const ROWS = [
-    { key: "brand", label: "Brand", get: (p) => p.brand?.name || "—" },
-    { key: "category", label: "Category", get: (p) => p.category?.name || "—" },
+    { key: "brand", label: t("compare.brand"), get: (p) => p.brand?.name || "—" },
+    {
+      key: "category",
+      label: t("compare.category"),
+      get: (p) => (p.category ? departmentName(locale, p.category.slug, p.category.name) : "—"),
+    },
     {
       key: "price",
-      label: "Price",
+      label: t("compare.price"),
       get: (p) => {
         const hasDiscount =
           p.discountPrice && p.discountPrice < p.basePrice;
@@ -132,49 +139,65 @@ export default function ComparePage() {
     },
     {
       key: "rating",
-      label: "Rating",
+      label: t("compare.rating"),
       get: (p) =>
         p.numReviews > 0 ? (
           <span className="inline-flex flex-col items-start gap-1">
             <Rating value={p.rating} showValue />
             <span className="text-xs text-muted-foreground">
-              {p.numReviews} review{p.numReviews === 1 ? "" : "s"}
+              {t("product.reviewsCount", { count: p.numReviews })}
             </span>
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">No reviews yet</span>
+          <span className="text-xs text-muted-foreground">{t("product.noReviewsYet")}</span>
         ),
     },
-    { key: "ageGroup", label: "Age group", get: (p) => <span className="capitalize">{p.ageGroup || "—"}</span> },
+    {
+      key: "ageGroup",
+      label: t("compare.ageGroup"),
+      get: (p) => (
+        <span className="capitalize">
+          {p.ageGroup ? t(`filters.${p.ageGroup === "adult" ? "adults" : p.ageGroup}`) : "—"}
+        </span>
+      ),
+    },
     {
       key: "color",
-      label: "Color",
-      get: (p) => p.attributes?.find((a) => a.key === "color")?.values?.join(", ") || "—",
+      label: t("compare.color"),
+      get: (p) =>
+        p.attributes
+          ?.find((a) => a.key === "color")
+          ?.values?.map((v) => attrValue(locale, "color", v))
+          .join(", ") || "—",
     },
     {
       key: "fabric",
-      label: "Fabric",
-      get: (p) => p.attributes?.find((a) => a.key === "fabric")?.values?.join(", ") || "—",
+      label: t("compare.fabric"),
+      get: (p) =>
+        p.attributes
+          ?.find((a) => a.key === "fabric")
+          ?.values?.map((v) => attrValue(locale, "fabric", v))
+          .join(", ") || "—",
     },
     {
       key: "stock",
-      label: "Total stock",
+      label: t("compare.totalStock"),
       get: (p) => {
         const total = getVariants(p).reduce((s, v) => s + (v.stock || 0), 0);
-        if (total === 0) return <Badge variant="danger">Out of stock</Badge>;
-        if (total <= 10) return <Badge variant="warning">Low: {total}</Badge>;
+        if (total === 0) return <Badge variant="danger">{t("compare.outOfStock")}</Badge>;
+        if (total <= 10) return <Badge variant="warning">{t("compare.lowStock", { count: total })}</Badge>;
         return <span className="text-sm font-semibold">{total}</span>;
       },
     },
     {
       key: "tags",
-      label: "Tags",
+      label: t("compare.tags"),
       get: (p) =>
         p.tags?.length ? (
           <div className="flex flex-wrap gap-1">
-            {p.tags.slice(0, 4).map((t) => (
-              <Badge key={t} variant="outline" className="text-[10px]">
-                {t}
+            {p.tags.slice(0, 4).map((tag) => (
+              <Badge key={tag} variant="outline" className="text-[10px]">
+                {tag}
               </Badge>
             ))}
           </div>
@@ -188,19 +211,18 @@ export default function ComparePage() {
     <div className="container-x py-8">
       <Breadcrumb
         items={[
-          { label: "Home", href: "/", icon: Home },
-          { label: "Shop", href: "/shop", icon: ShoppingBag },
-          { label: "Compare", icon: Scale },
+          { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("navigation.shop"), href: "/shop", icon: ShoppingBag },
+          { label: t("navigation.compare"), icon: Scale },
         ]}
       />
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl font-black sm:text-4xl">
-            Compare products
+            {t("compare.title")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Side-by-side comparison of {products.length} product
-            {products.length === 1 ? "" : "s"}.
+            {t("compare.subtitle", { count: products.length })}
           </p>
         </div>
         <Button
@@ -208,10 +230,10 @@ export default function ComparePage() {
           size="sm"
           onClick={() => {
             dispatch(clearCompare());
-            toast.success("Cleared comparison");
+            toast.success(t("compare.clearedToast"));
           }}
         >
-          Clear all
+          {t("compare.clearAll")}
         </Button>
       </div>
 
@@ -222,13 +244,14 @@ export default function ComparePage() {
           <thead className="bg-muted/30">
             <tr>
               <th className="sticky left-0 z-10 w-20 border-r border-border bg-muted/30 p-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground sm:w-32 sm:p-3 sm:text-xs">
-                Spec
+                {t("compare.specColumn")}
               </th>
               {products.map((p) => (
                 <ProductColumnHeader
                   key={p._id}
                   product={p}
                   onRemove={() => dispatch(removeFromCompare(p._id))}
+                  removeLabel={t("compare.removeAria", { name: p.name })}
                 />
               ))}
             </tr>
@@ -257,7 +280,7 @@ export default function ComparePage() {
                 scope="row"
                 className="sticky left-0 z-10 w-20 border-r border-t border-border bg-background p-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:w-32 sm:p-3 sm:text-xs"
               >
-                Add to cart
+                {t("compare.addToCartRow")}
               </th>
               {products.map((p) => (
                 <td
@@ -270,6 +293,8 @@ export default function ComparePage() {
                     onPickVariant={(id) => pickVariant(p._id, id)}
                     onAdd={() => handleAddToCart(p)}
                     loading={pendingId === p._id}
+                    locale={locale}
+                    t={t}
                   />
                 </td>
               ))}
@@ -279,13 +304,13 @@ export default function ComparePage() {
       </div>
 
       <p className="mt-2 text-center text-xs text-muted-foreground sm:hidden">
-        Swipe sideways to see all products →
+        {t("compare.swipeHint")}
       </p>
     </div>
   );
 }
 
-function ProductColumnHeader({ product, onRemove }) {
+function ProductColumnHeader({ product, onRemove, removeLabel }) {
   const [imageFailed, setImageFailed] = useState(false);
   return (
     <th
@@ -295,7 +320,7 @@ function ProductColumnHeader({ product, onRemove }) {
       <div className="relative">
         <button
           onClick={onRemove}
-          aria-label={`Remove ${product.name} from compare`}
+          aria-label={removeLabel}
           className="absolute right-0 top-0 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background text-muted-foreground shadow-card hover:text-danger"
         >
           <X className="h-4 w-4" />
@@ -333,19 +358,25 @@ function ProductColumnHeader({ product, onRemove }) {
   );
 }
 
-function SizeAndAddToCart({ product, selectedVariantId, onPickVariant, onAdd, loading }) {
+function SizeAndAddToCart({ product, selectedVariantId, onPickVariant, onAdd, loading, locale, t }) {
   const inStockVariants = getVariants(product).filter((v) => (v.stock ?? 0) > 0);
   const allOut = inStockVariants.length === 0;
 
   return (
     <div className="space-y-2">
       {allOut ? (
-        <Badge variant="danger">Out of stock</Badge>
+        <Badge variant="danger">{t("compare.outOfStock")}</Badge>
       ) : (
         <div className="flex flex-wrap gap-1">
           {inStockVariants.slice(0, 8).map((v) => {
             const active = selectedVariantId === v._id;
-            const label = [v.attributes?.color, v.attributes?.size].filter(Boolean).join(" / ") || v.variantName;
+            const label =
+              [
+                v.attributes?.color && attrValue(locale, "color", v.attributes.color),
+                v.attributes?.size && attrValue(locale, "size", v.attributes.size),
+              ]
+                .filter(Boolean)
+                .join(" / ") || v.variantName;
             return (
               <button
                 key={v._id}
@@ -372,7 +403,7 @@ function SizeAndAddToCart({ product, selectedVariantId, onPickVariant, onAdd, lo
         className="w-full"
       >
         <ShoppingBag className="h-4 w-4" />
-        Add to cart
+        {t("compare.addToCart")}
       </Button>
     </div>
   );

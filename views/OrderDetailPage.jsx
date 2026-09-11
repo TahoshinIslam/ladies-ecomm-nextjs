@@ -133,7 +133,7 @@ export default async function OrderDetailPage({ params }) {
                     <div className="flex-1">
                       <p className="font-semibold">{it.snapshot?.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {formatVariantAttributes(it.snapshot?.attributes)}
+                        {formatVariantAttributes(it.snapshot?.attributes, locale)}
                         {" · "}{t("checkout.qty")}{" "}
                         {it.quantity}
                       </p>

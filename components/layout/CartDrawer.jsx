@@ -23,7 +23,7 @@ export default function CartDrawer() {
   const dispatch = useDispatch();
   const router = useRouter();
   const settings = useSettings();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const cart = useCart();
   const { items, isLoading } = cart;
   const [pending, setPending] = useState(() => new Set());
@@ -121,7 +121,7 @@ export default function CartDrawer() {
               const variantId = item.variantId;
               const busy = isBusy(p._id, variantId);
               const { displayPrice } = resolveVariantPricing(p, item.variant);
-              const variantLine = formatVariantAttributes(item.variant?.attributes);
+              const variantLine = formatVariantAttributes(item.variant?.attributes, locale);
 
               return (
                 <li

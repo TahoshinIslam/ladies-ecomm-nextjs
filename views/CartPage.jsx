@@ -17,7 +17,7 @@ import { resolveImage, resolveVariantPricing, formatVariantAttributes } from "@/
 
 export default function CartPage() {
   const settings = useSettings();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const cart = useCart();
   const { items, isLoading } = cart;
   const [pending, setPending] = useState(() => new Set());
@@ -99,7 +99,7 @@ export default function CartPage() {
             const variantId = item.variantId;
             const busy = pending.has(keyOf(id, variantId));
             const { displayPrice } = resolveVariantPricing(p, item.variant);
-            const variantLine = formatVariantAttributes(item.variant?.attributes);
+            const variantLine = formatVariantAttributes(item.variant?.attributes, locale);
 
             return (
               <li

@@ -88,9 +88,19 @@ const applyBranding = (store) => {
 };
 
 export const SettingsProvider = ({ children }) => {
-  const cached = getCachedSettings();
-  const [settings, setSettings] = useState(cached || DEFAULTS);
-  const [loaded, setLoaded] = useState(!!cached);
+  // Deliberately NOT read synchronously during render (a prior version did
+  // `const cached = getCachedSettings()` right here): sessionStorage only
+  // exists in the browser, so the server's render always saw `cached` as
+  // null/DEFAULTS, but the client's very first render — including its
+  // hydration pass, which MUST match the server's HTML exactly — could see
+  // a real cached value from an earlier navigation in the same tab. That
+  // mismatch (e.g. Header.jsx's free-shipping announcement item vs. the
+  // exchange-policy one) is a genuine React hydration error, not cosmetic.
+  // Starting both server and client from the same DEFAULTS, then applying
+  // the cache from inside an effect (client-only, after hydration commits),
+  // guarantees the first render is identical everywhere.
+  const [settings, setSettings] = useState(DEFAULTS);
+  const [loaded, setLoaded] = useState(false);
   const { locale } = useLocale();
 
   // Fetch the public settings payload. Used both on initial mount and when
@@ -100,7 +110,15 @@ export const SettingsProvider = ({ children }) => {
     fetch(`${baseUrl}/settings/public`, { credentials: "include" })
       .then((r) => r.json())
       .then((d) => {
-        if (d.success) {
+        // GET /api/settings/public (app/api/settings/public/route.js)
+        // returns `{ settings }` directly — it has never wrapped that in a
+        // `success` flag (confirmed by the HTTP integration tests reading
+        // `res.json().settings` directly). Gating on `d.success` here meant
+        // this branch never ran in production: every page silently fell
+        // back to DEFAULTS (empty store name/support contact, no
+        // shippingZones, no homepage carousel/banner/campaign) forever,
+        // masked only by call sites' own `|| fallback` values.
+        if (d.settings) {
           setSettings(d.settings);
           setCachedSettings(d.settings);
           return d.settings;
@@ -111,19 +129,21 @@ export const SettingsProvider = ({ children }) => {
       });
 
   useEffect(() => {
-    // Cached settings already set `loaded` to true via useState's initial
-    // value above — nothing to do here in that case. Only the no-cache path
-    // needs the effect, and it flips `loaded` from inside the async
-    // .finally(), not synchronously in the effect body.
-    if (cached) return;
+    // Runs once, after the first (hydration-safe, DEFAULTS-based) render
+    // commits. A cached value applies immediately and skips the network
+    // round-trip; otherwise fetch for real. The synchronous setState here
+    // is the deliberate point of this effect — syncing React state with
+    // sessionStorage, a browser-only external system unavailable during
+    // the render that has to match SSR — not an accidental one the lint
+    // rule's "do you need this effect?" guidance is meant to catch.
+    const cached = getCachedSettings();
+    if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSettings(cached);
+      setLoaded(true);
+      return;
+    }
     fetchSettings().finally(() => setLoaded(true));
-    // `cached` is deliberately omitted: it's read from sessionStorage fresh
-    // on every render (see getCachedSettings() above), so adding it here
-    // would make this effect re-run on every render instead of once on
-    // mount — the intent is "check once, at mount, whether we already have
-    // a cached value," not "re-check whenever this render happened to
-    // recompute `cached`."
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Apply branding to <head> whenever settings change. Runs after both the
