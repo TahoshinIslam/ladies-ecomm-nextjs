@@ -100,7 +100,9 @@ export async function mergeGuestCartAfterLogin(dispatch, addToCartMutation) {
   }
 
   if (failed > 0) {
-    toast.warning(
+    // A real failure (some items didn't merge) — red, same bucket as any
+    // other toast.error, not the yellow "update" bucket.
+    toast.error(
       succeeded > 0
         ? `${succeeded} item${succeeded === 1 ? "" : "s"} added to your account. ${failed} item${failed === 1 ? "" : "s"} couldn't be added and ${failed === 1 ? "is" : "are"} still in your bag.`
         : `Couldn't add your saved items right now — they're still in your bag.`,

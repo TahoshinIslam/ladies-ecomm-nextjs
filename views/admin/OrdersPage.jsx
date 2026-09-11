@@ -235,7 +235,7 @@ function StatusUpdateModal({ order, onClose }) {
       } else {
         await updateStatus({ id: order._id, status, trackingNumber }).unwrap();
       }
-      toast.success("Order updated");
+      toast.warning("Order updated");
       onClose();
     } catch (e) {
       toast.error(e?.data?.message || "Could not update");

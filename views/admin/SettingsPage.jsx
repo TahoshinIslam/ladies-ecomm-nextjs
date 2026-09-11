@@ -331,7 +331,7 @@ export default function SettingsPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (r.ok && d.success) {
-        toast.success("Settings saved");
+        toast.warning("Settings saved");
         setSettings(d.settings);
         // Re-fetch /settings/public so this admin's open tabs (header,
         // footer, favicon) update immediately. Other browsers will pick

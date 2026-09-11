@@ -69,7 +69,10 @@ export default function LoginPage() {
       // cookie automatically.
       dispatch(setCredentials(res.user));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
-      toast.success(t("auth.welcomeBackName", { name: res.user.name.split(" ")[0] }));
+      // A successful sign-in gets its own color (blue, via toast.info) —
+      // distinct from toast.success's green, which this app reserves for
+      // "something was created" (see context/ThemeProvider.jsx's Toaster).
+      toast.info(t("auth.welcomeBackName", { name: res.user.name.split(" ")[0] }));
       // Redirect happens in the effect above, once `user` updates — a
       // second, independent router.push here used to race it (see that
       // effect's comment).

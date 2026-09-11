@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { motion } from "framer-motion";
 import { Home, User as UserIcon, MapPin, Lock, Trash2, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,7 +26,7 @@ import {
   useUpdateAddressMutation,
   useDeleteAddressMutation,
 } from "../store/shopApi.js";
-import { cn } from "../lib/utils.js";
+import { useLocale } from "../context/LocaleProvider.jsx";
 // Shared boundary values/enums (not the full server schemas — these forms
 // keep their own plain-English messages) so this client form can never
 // drift out of sync with what services/userService.js's updateMe() and
@@ -37,94 +36,68 @@ import { cn } from "../lib/utils.js";
 import { PASSWORD_MIN_LENGTH } from "../schemas/authSchemas.js";
 import { ADDRESS_LABELS } from "../schemas/addressSchemas.js";
 
-const TABS = [
-  { id: "info", label: "Profile info", icon: UserIcon },
-  { id: "addresses", label: "Addresses", icon: MapPin },
-  { id: "password", label: "Password", icon: Lock },
-];
-
-export default function ProfilePage() {
-  const [tab, setTab] = useState("info");
+/**
+ * Shared by all 3 account sub-pages below: the actual left-hand navigation
+ * between them now lives in components/account/AccountSidebar.jsx (mounted
+ * once by app/(routes)/(account)/layout.jsx), so each page here only needs
+ * its own breadcrumb + heading + a sign-in gate for the (rare) case someone
+ * lands on one of these URLs directly without a session.
+ */
+function AccountSection({ crumbLabel, crumbIcon, title, subtitle, children }) {
   const user = useSelector(selectCurrentUser);
   const router = useRouter();
+  const pathname = usePathname();
+  const { t } = useLocale();
 
   return (
-    <div className="container-x py-10">
+    <div>
       <Breadcrumb
         items={[
-          { label: "Home", href: "/", icon: Home },
-          { label: "Account", icon: UserIcon },
+          { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("navigation.account"), href: "/dashboard" },
+          { label: crumbLabel, icon: crumbIcon },
         ]}
       />
-      <h1 className="font-heading text-3xl font-black">Account</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Manage your profile, addresses and security.
-      </p>
+      <h1 className="font-heading text-3xl font-black">{title}</h1>
+      {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
 
       {!user ? (
-        // Every tab here needs a session (profile fields, saved addresses,
-        // password) — gate the whole page rather than each tab separately.
         <div className="mt-8 max-w-xl rounded-lg border border-dashed border-border p-6 text-sm">
-          <p className="text-muted-foreground">
-            Sign in to manage your profile, addresses, and password.
-          </p>
+          <p className="text-muted-foreground">{t("account.signInPrompt")}</p>
           <Button
             className="mt-3"
-            onClick={() => router.push("/login?redirect=/profile")}
+            onClick={() => router.push(`/login?redirect=${encodeURIComponent(pathname)}`)}
           >
-            Sign in to continue
+            {t("account.signInCta")}
           </Button>
         </div>
       ) : (
-        <div className="mt-8 grid gap-6 lg:grid-cols-[220px_1fr]">
-          {/* Tabs */}
-          <nav className="flex gap-1 overflow-x-auto lg:flex-col">
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              const active = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-4 py-2.5 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-accent/10 text-accent"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {t.label}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Content — capped so form fields don't stretch edge-to-edge in
-              the 1fr column at wide desktop viewports. */}
-          <motion.div
-            key={tab}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="max-w-xl"
-          >
-            {tab === "info" && <InfoTab />}
-            {tab === "addresses" && <AddressesTab />}
-            {tab === "password" && <PasswordTab />}
-          </motion.div>
-        </div>
+        <div className="mt-8 max-w-xl">{children}</div>
       )}
     </div>
   );
 }
 
-// =========== INFO TAB ===========
+// =========== PROFILE INFO (/profile) ===========
 const infoSchema = z.object({
   name: z.string().min(2, "Required"),
   email: z.string().email("Invalid email"),
   phone: z.string().optional(),
 });
+
+export default function ProfilePage() {
+  const { t } = useLocale();
+  return (
+    <AccountSection
+      crumbLabel={t("account.navProfile")}
+      crumbIcon={UserIcon}
+      title={t("account.navProfile")}
+      subtitle={t("account.subtitle")}
+    >
+      <InfoTab />
+    </AccountSection>
+  );
+}
 
 function InfoTab() {
   const user = useSelector(selectCurrentUser);
@@ -148,7 +121,7 @@ function InfoTab() {
     try {
       const res = await updateMe(data).unwrap();
       dispatch(setCredentials(res.user));
-      toast.success("Profile updated");
+      toast.warning("Profile updated");
     } catch (e) {
       toast.error(e?.data?.message || "Could not update");
     }
@@ -159,7 +132,6 @@ function InfoTab() {
       onSubmit={handleSubmit(onSubmit)}
       className="space-y-4 rounded-lg border border-border bg-background p-6"
     >
-      <h2 className="font-heading text-lg font-bold">Profile info</h2>
       <Input label="Name" error={errors.name?.message} {...register("name")} />
       <Input
         label="Email"
@@ -175,7 +147,7 @@ function InfoTab() {
   );
 }
 
-// =========== PASSWORD TAB ===========
+// =========== PASSWORD (/profile/password) ===========
 const pwdSchema = z
   .object({
     currentPassword: z.string().min(1, "Required"),
@@ -191,6 +163,20 @@ const pwdSchema = z
     path: ["confirmPassword"],
   });
 
+export function ProfilePasswordPage() {
+  const { t } = useLocale();
+  return (
+    <AccountSection
+      crumbLabel={t("account.navPassword")}
+      crumbIcon={Lock}
+      title={t("account.navPassword")}
+      subtitle={t("account.subtitle")}
+    >
+      <PasswordTab />
+    </AccountSection>
+  );
+}
+
 function PasswordTab() {
   const [updateMe, { isLoading }] = useUpdateMeMutation();
   const {
@@ -203,7 +189,7 @@ function PasswordTab() {
   const onSubmit = async ({ confirmPassword, ...data }) => {
     try {
       await updateMe(data).unwrap();
-      toast.success("Password updated");
+      toast.warning("Password updated");
       reset();
     } catch (e) {
       toast.error(e?.data?.message || "Could not update password");
@@ -215,7 +201,6 @@ function PasswordTab() {
       onSubmit={handleSubmit(onSubmit)}
       className="space-y-4 rounded-lg border border-border bg-background p-6"
     >
-      <h2 className="font-heading text-lg font-bold">Change password</h2>
       <Input
         label="Current password"
         type="password"
@@ -241,7 +226,7 @@ function PasswordTab() {
   );
 }
 
-// =========== ADDRESSES TAB ===========
+// =========== ADDRESSES (/profile/addresses) ===========
 const addrSchema = z.object({
   fullName: z.string().min(2),
   phone: z.string().min(6),
@@ -253,6 +238,20 @@ const addrSchema = z.object({
   label: z.enum(ADDRESS_LABELS).default("home"),
   isDefault: z.boolean().optional(),
 });
+
+export function ProfileAddressesPage() {
+  const { t } = useLocale();
+  return (
+    <AccountSection
+      crumbLabel={t("account.navAddresses")}
+      crumbIcon={MapPin}
+      title={t("account.navAddresses")}
+      subtitle={t("account.subtitle")}
+    >
+      <AddressesTab />
+    </AccountSection>
+  );
+}
 
 function AddressesTab() {
   const { data, isLoading } = useGetMyAddressesQuery();
@@ -287,7 +286,7 @@ function AddressesTab() {
     try {
       if (editing) {
         await updateAddress({ id: editing._id, ...formData }).unwrap();
-        toast.success("Address updated");
+        toast.warning("Address updated");
       } else {
         await createAddress(formData).unwrap();
         toast.success("Address added");

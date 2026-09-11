@@ -89,7 +89,7 @@ export default async function DashboardPage() {
   const recentOrders = orders.slice(0, 5);
 
   return (
-    <div className="container-x py-10">
+    <div>
       <Breadcrumb
         items={[
           { label: t("navigation.home"), href: "/", icon: Home },

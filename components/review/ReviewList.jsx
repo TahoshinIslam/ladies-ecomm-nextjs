@@ -101,7 +101,7 @@ function ReviewItem({ review, isOwn }) {
         title: title.trim() || undefined,
         comment: comment.trim(),
       }).unwrap();
-      toast.success(t("reviews.updated"));
+      toast.warning(t("reviews.updated"));
       setEditing(false);
     } catch (e) {
       toast.error(e?.data?.message || t("reviews.updateFailed"));

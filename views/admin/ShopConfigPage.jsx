@@ -228,7 +228,7 @@ function ShopNameModal({ store, onClose, onSaved }) {
     setSaving(true);
     try {
       const saved = await saveSettings({ store: { ...store, name: name.trim() } });
-      toast.success("Shop name updated");
+      toast.warning("Shop name updated");
       onSaved({ store: saved.store });
     } catch (e) {
       toast.error(e.message);
@@ -263,7 +263,7 @@ function CarouselModal({ homepage, onClose, onSaved }) {
     setSaving(true);
     try {
       const saved = await saveSettings({ homepage: { ...homepage, carouselImages: images } });
-      toast.success("Carousel updated");
+      toast.warning("Carousel updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
       toast.error(e.message);
@@ -309,7 +309,7 @@ function BannerModal({ homepage, onClose, onSaved }) {
     setSaving(true);
     try {
       const saved = await saveSettings({ homepage: { ...homepage, banner: { enabled, imageUrl: imageUrl.trim(), href: href.trim() } } });
-      toast.success("Banner updated");
+      toast.warning("Banner updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
       toast.error(e.message);
@@ -370,7 +370,7 @@ function CampaignModal({ homepage, onClose, onSaved }) {
           campaign: { enabled, title: title.trim(), message: message.trim(), ctaLabel: ctaLabel.trim(), ctaHref: ctaHref.trim() },
         },
       });
-      toast.success("Campaign updated");
+      toast.warning("Campaign updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
       toast.error(e.message);

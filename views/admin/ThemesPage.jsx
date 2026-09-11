@@ -402,9 +402,9 @@ function ThemeEditor({ theme, onClose }) {
       await updateTheme({ id: theme._id, ...formData }).unwrap();
       if (thenActivate && !theme.isActive) {
         await activateTheme(theme._id).unwrap();
-        toast.success("Saved & activated — site re-skinned");
+        toast.warning("Saved & activated — site re-skinned");
       } else {
-        toast.success(theme.isActive ? "Saved — site re-skinned live" : "Theme saved");
+        toast.warning(theme.isActive ? "Saved — site re-skinned live" : "Theme saved");
       }
     } catch (e) {
       toast.error(e?.data?.message || "Could not save");

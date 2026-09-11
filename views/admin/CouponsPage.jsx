@@ -278,7 +278,7 @@ function CouponFormModal({ coupon, onClose }) {
     try {
       if (isEdit) {
         await updateCoupon({ id: coupon._id, ...data }).unwrap();
-        toast.success("Coupon updated");
+        toast.warning("Coupon updated");
       } else {
         await createCoupon(data).unwrap();
         toast.success("Coupon created");

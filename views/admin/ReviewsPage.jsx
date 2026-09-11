@@ -298,7 +298,7 @@ function EditModal({ review, onClose }) {
         title: title.trim() || undefined,
         comment: comment.trim(),
       }).unwrap();
-      toast.success("Review updated");
+      toast.warning("Review updated");
       onClose();
     } catch (e) {
       toast.error(e?.data?.message || "Could not update");

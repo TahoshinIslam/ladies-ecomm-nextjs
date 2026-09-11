@@ -359,7 +359,7 @@ function CategoryFormModal({ category, categories, defaultParent, onClose }) {
     try {
       if (isEdit) {
         await updateCategory({ id: category._id, ...body }).unwrap();
-        toast.success("Category updated");
+        toast.warning("Category updated");
       } else {
         await createCategory(body).unwrap();
         toast.success(parent ? "Subcategory created" : "Department created");
@@ -647,7 +647,7 @@ function AttributeFormModal({ attribute, departments, onClose }) {
     try {
       if (isEdit) {
         await updateAttribute({ id: attribute._id, ...body }).unwrap();
-        toast.success("Attribute updated");
+        toast.warning("Attribute updated");
       } else {
         await createAttribute(body).unwrap();
         toast.success("Attribute created");

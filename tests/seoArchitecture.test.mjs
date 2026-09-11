@@ -132,7 +132,7 @@ describe("Phase 10 — private/admin/auth routes are noindex", () => {
     "app/(routes)/order-success/[orderId]/page.jsx",
     "app/(routes)/orders/page.jsx",
     "app/(routes)/orders/[id]/page.jsx",
-    "app/(routes)/profile/page.jsx",
+    "app/(routes)/(account)/profile/page.jsx",
     "app/(routes)/wishlist/page.jsx",
   ];
 

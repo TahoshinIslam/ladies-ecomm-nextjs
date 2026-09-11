@@ -639,7 +639,7 @@ function ProductFormModal({ product, onClose }) {
     try {
       if (isEdit) {
         await updateProduct({ id: product._id, ...body }).unwrap();
-        toast.success("Product updated");
+        toast.warning("Product updated");
       } else {
         await createProduct(body).unwrap();
         toast.success("Product created");

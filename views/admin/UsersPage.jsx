@@ -368,7 +368,7 @@ function EditUserModal({ user, isSelf, onClose }) {
         body.permissions = role === "employee" ? permissions : [];
       }
       await updateUser(body).unwrap();
-      toast.success("User updated");
+      toast.warning("User updated");
       onClose();
     } catch (e) {
       toast.error(e?.data?.message || "Could not update");
