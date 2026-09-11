@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { LayoutDashboard, LogOut, Menu, Moon, Sun, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 
@@ -10,7 +10,7 @@ import DropdownMenu, { DropdownMenuItem } from "../ui/DropdownMenu.jsx";
 import NotificationsDropdown from "./NotificationsDropdown.jsx";
 import LanguageSwitcher from "../layout/LanguageSwitcher.jsx";
 import { useTheme } from "../../context/ThemeProvider.jsx";
-import { selectCurrentUser, clearCredentials } from "../../store/authSlice.js";
+import { clearCredentials } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
 import { matchNavItem } from "./adminNav.js";
 
@@ -21,10 +21,9 @@ import { matchNavItem } from "./adminNav.js";
  * align) regardless of what's visible at a given breakpoint — buttons hide,
  * the bar itself never grows.
  */
-export default function AdminTopbar({ onOpenMobileNav, mobileNavTriggerRef }) {
+export default function AdminTopbar({ onOpenMobileNav, mobileNavTriggerRef, user }) {
   const pathname = usePathname();
   const router = useRouter();
-  const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const { isDark, toggleTheme } = useTheme();
   const [logout] = useLogoutMutation();

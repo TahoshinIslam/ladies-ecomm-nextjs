@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { motion, useReducedMotion } from "framer-motion";
 
-import { selectAuthHydrated, selectCanAccessAdmin, selectCurrentUser } from "../../store/authSlice.js";
+import { selectAuthHydrated, selectCurrentUser } from "../../store/authSlice.js";
 import { hasPermission } from "../../lib/permissions.js";
 import { storage } from "../../lib/utils.js";
 import { useAdminEventStream } from "../../hooks/useAdminEventStream.js";
@@ -17,6 +17,18 @@ import AdminFooter from "./AdminFooter.jsx";
 import AdminErrorState from "./AdminErrorState.jsx";
 
 const COLLAPSE_KEY = "tahos:adminSidebarCollapsed";
+
+// Nothing external ever changes this key besides this same component's own
+// toggleCollapsed() below, so there's no real event to subscribe to — but
+// useSyncExternalStore still needs a subscribe function, and using it (with
+// a false getServerSnapshot) is what lets the persisted value apply on the
+// client's first paint without a hydration mismatch: React specifically
+// reconciles a getServerSnapshot/getSnapshot difference here, instead of
+// this needing a setState-in-effect (which a repeat, non-SSR-safe render
+// pass would otherwise require).
+const noopSubscribe = () => () => {};
+const getPersistedCollapsed = () => storage.get(COLLAPSE_KEY) === "1";
+const getServerCollapsed = () => false;
 
 /**
  * The admin application shell: auth/permission gates, then a flex row of
@@ -39,33 +51,60 @@ const COLLAPSE_KEY = "tahos:adminSidebarCollapsed";
  * either, for that matter; the real boundary is every Route Handler's own
  * requireUser()/requireAdmin()/requirePermission() call, enforced
  * server-side regardless of what this component renders.
+ *
+ * `initialUser` (from app/admin/layout.jsx, a Server Component that already
+ * ran the real requireServerUser() check one render pass earlier) is what
+ * this component uses BEFORE Redux's own independent client-side boot
+ * (hooks/useAuthBoot.js's GET /api/users/me) resolves. Previously this
+ * whole shell — sidebar, topbar, and every admin page's real content
+ * underneath it, including Overview's already-server-rendered charts —
+ * waited on that second, redundant round trip before rendering anything
+ * but a loading placeholder, even though the server had already answered
+ * the exact same question. Once Redux hydrates it takes over as the live
+ * source of truth (so a session that actually expires mid-visit still gets
+ * caught); until then, `initialUser` lets the real shell render on the
+ * very first paint — server-side included, which is what actually lets
+ * Next.js stream real content instead of a client-only shell.
  */
-export default function AdminLayout({ children }) {
+export default function AdminLayout({ children, initialUser = null }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  // Only ever read/written after the auth gates below have already decided
-  // to render the real shell (never during the loading/redirect branches),
-  // so this can't disagree with server-rendered markup — there isn't any
-  // for this branch. See adjacent components for the same reasoning.
-  const [collapsed, setCollapsed] = useState(() => storage.get(COLLAPSE_KEY) === "1");
+  // Deliberately not a plain `useState(() => storage.get(...))` (that was
+  // only SSR-safe before because AdminSidebar never actually rendered
+  // server-side — see this component's own doc comment, that's no longer
+  // true): a value read from storage in that initializer would make the
+  // server-rendered `collapsed` (storage.get() is SSR-guarded to return
+  // null there) disagree with a repeat visitor's real, persisted value on
+  // the client — a genuine hydration mismatch. useSyncExternalStore is the
+  // React-supported way to apply a client-only persisted value without one.
+  const persistedCollapsed = useSyncExternalStore(noopSubscribe, getPersistedCollapsed, getServerCollapsed);
+  const [collapsedOverride, setCollapsedOverride] = useState(null);
+  const collapsed = collapsedOverride ?? persistedCollapsed;
   const mobileNavTriggerRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
-  const user = useSelector(selectCurrentUser);
+  const reduxUser = useSelector(selectCurrentUser);
   const hydrated = useSelector(selectAuthHydrated);
-  const canAccessAdmin = useSelector(selectCanAccessAdmin);
+  // Redux's own state starts identical on the server and on the client's
+  // first (pre-hydration-effect) paint — {user: null, status: "loading"} —
+  // so `hydrated` is false in both places until useAuthBoot's effect
+  // actually resolves. That means this expression yields the exact same
+  // value server- and client-side on first paint (initialUser), which is
+  // what makes rendering the real shell from it SSR-safe.
+  const user = hydrated ? reduxUser : initialUser;
+  const canAccessAdmin = !!user && ["admin", "employee"].includes(user.role);
   const navItems = filterAdminNav(user);
   const shouldReduceMotion = useReducedMotion();
   useAdminEventStream();
 
-  // Redirect only after GET /api/users/me has actually resolved — `hydrated`
-  // (state.auth.status !== "loading") is what tells "genuinely logged out"
-  // apart from "haven't checked yet," so a real admin never gets bounced on
-  // a hard refresh while that request is still in flight.
+  // Redirect only once Redux's OWN boot has resolved unauthenticated —
+  // `initialUser` already answers this while that's still in flight, so
+  // there's nothing to redirect on until hydrated genuinely disagrees
+  // (e.g. a session that expired since the server render).
   useEffect(() => {
-    if (hydrated && !user) {
+    if (hydrated && !reduxUser) {
       router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
     }
-  }, [hydrated, user, router, pathname]);
+  }, [hydrated, reduxUser, router, pathname]);
 
   // Close the mobile drawer on route change (e.g. browser back/forward,
   // not just an in-drawer link click, which already closes it itself) —
@@ -80,25 +119,16 @@ export default function AdminLayout({ children }) {
   }
 
   const toggleCollapsed = () => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      storage.set(COLLAPSE_KEY, next ? "1" : "0");
-      return next;
-    });
+    const next = !collapsed;
+    storage.set(COLLAPSE_KEY, next ? "1" : "0");
+    setCollapsedOverride(next);
   };
 
-  // GET /api/users/me hasn't resolved yet — render nothing conclusive either
-  // way. A blank, background-matched placeholder rather than a spinner: this
-  // stage is normally brief, and every page's own content (DataTable's
-  // skeleton rows, etc.) already carries its own loading treatment right
-  // after — a spinner here just stacked a second, more jarring loading
-  // state in front of that one.
-  if (!hydrated) {
-    return <div className="min-h-screen bg-muted/20" />;
-  }
-
-  // No session — the effect above is already redirecting; render nothing
-  // in the meantime rather than a half-built shell.
+  // No session from EITHER source — shouldn't normally happen (the parent
+  // Server Component layout already redirected unauthenticated visitors
+  // before this ever mounted), but the redirect effect above still handles
+  // a session that expires mid-visit; render nothing in the meantime
+  // rather than a half-built shell.
   if (!user) return null;
 
   // A real, logged-in session that just isn't admin/employee. Distinct from
@@ -140,12 +170,13 @@ export default function AdminLayout({ children }) {
 
   return (
     <div className="flex min-h-screen bg-muted/20">
-      <AdminSidebar items={navItems} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+      <AdminSidebar items={navItems} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} user={user} />
       <MobileSidebar
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
         items={navItems}
         triggerRef={mobileNavTriggerRef}
+        user={user}
       />
 
       {/* Content column — min-w-0 is load-bearing: without it, a wide table
@@ -153,7 +184,7 @@ export default function AdminLayout({ children }) {
           the whole shell) wider than the viewport instead of scrolling
           inside its own container. */}
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <AdminTopbar onOpenMobileNav={() => setMobileOpen(true)} mobileNavTriggerRef={mobileNavTriggerRef} />
+        <AdminTopbar onOpenMobileNav={() => setMobileOpen(true)} mobileNavTriggerRef={mobileNavTriggerRef} user={user} />
 
         <motion.main
           id="main"

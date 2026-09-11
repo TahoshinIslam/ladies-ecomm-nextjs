@@ -6,11 +6,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import { ChevronsLeft, ChevronsRight, Home, LogOut } from "lucide-react";
-import { useSelector, useDispatch } from "react-redux";
+import { useDispatch } from "react-redux";
 import { toast } from "sonner";
 
 import { cn } from "../../lib/utils.js";
-import { selectCurrentUser, clearCredentials } from "../../store/authSlice.js";
+import { clearCredentials } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
 import { isNavItemActive } from "./adminNav.js";
 
@@ -23,13 +23,18 @@ const BAR_ID = "admin-sidebar-active-bar";
  * of just swapping classes. Collapse state persists across sessions the
  * same way every other per-visitor preference in this app does (currency,
  * theme): a plain localStorage flag via lib/utils.js's SSR-safe `storage`
- * helper — this component never renders during SSR (AdminLayout gates the
- * whole panel behind a client-only auth check first), so reading it
- * synchronously in the initial useState can't cause a hydration mismatch.
+ * helper, read by AdminLayout.jsx only after mount (see its own comment —
+ * this component DOES render during SSR now, via AdminLayout's
+ * server-provided `initialUser`, so `collapsed` itself must start `false`
+ * on both sides to stay hydration-safe).
+ *
+ * `user` is a prop, not read from Redux directly here — AdminLayout.jsx
+ * already resolves the single effective user (server-provided until Redux
+ * itself hydrates) and passes it down, so this and every sibling shell
+ * component agree with each other and with the server-rendered HTML.
  */
-export default function AdminSidebar({ items, collapsed, onToggleCollapsed }) {
+export default function AdminSidebar({ items, collapsed, onToggleCollapsed, user }) {
   const pathname = usePathname();
-  const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const router = useRouter();
   const [logout] = useLogoutMutation();

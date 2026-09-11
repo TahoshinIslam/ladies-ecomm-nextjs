@@ -5,11 +5,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Home, LogOut, X } from "lucide-react";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { toast } from "sonner";
 
 import { cn } from "../../lib/utils.js";
-import { selectCurrentUser, clearCredentials } from "../../store/authSlice.js";
+import { clearCredentials } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
 import { isNavItemActive } from "./adminNav.js";
 
@@ -24,11 +24,10 @@ const FOCUSABLE =
  * conditional render, so it never fights the desktop sidebar for the same
  * space or tab order.
  */
-export default function MobileSidebar({ open, onClose, items, triggerRef }) {
+export default function MobileSidebar({ open, onClose, items, triggerRef, user }) {
   const panelRef = useRef(null);
   const pathname = usePathname();
   const router = useRouter();
-  const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const [logout] = useLogoutMutation();
 

@@ -1,5 +1,6 @@
 import AdminLayout from "@/components/admin/AdminLayout.jsx";
 import { requireServerUser } from "@/lib/serverPageAuth.js";
+import { serializeForClient } from "@/lib/serialize.js";
 import { redirect } from "next/navigation";
 
 export const metadata = {
@@ -23,8 +24,18 @@ export const metadata = {
 // Each individual admin page still enforces its OWN specific permission
 // (e.g. views/admin/OverviewPage.jsx's dashboard.view check) — this layer
 // only rules out "not logged in" / "not staff at all".
+//
+// This same, already-validated `user` is also handed to AdminLayout as
+// `initialUser` — see that component's own comment for why: without it,
+// AdminLayout used to block its ENTIRE shell (sidebar, topbar, and every
+// admin page's real content, including Overview's server-rendered charts)
+// behind a second, client-only GET /api/users/me round trip, even though
+// the exact same question had already been answered right here, one
+// render pass earlier. That's what actually produced the blank white
+// page on every admin load — not Overview's own data fetching, which was
+// already a real cached Server Component the whole time.
 export default async function AdminRootLayout({ children }) {
   const user = await requireServerUser("/admin");
   if (!["admin", "employee"].includes(user.role)) redirect("/");
-  return <AdminLayout>{children}</AdminLayout>;
+  return <AdminLayout initialUser={serializeForClient(user)}>{children}</AdminLayout>;
 }
