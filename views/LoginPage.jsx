@@ -30,9 +30,19 @@ export default function LoginPage() {
   const user = useSelector(selectCurrentUser);
 
   // A session already exists — send them on rather than showing a sign-in
-  // form for an account they're already in.
+  // form for an account they're already in. This also fires for a FRESH
+  // login: onSubmit's dispatch(setCredentials(...)) sets `user` in Redux
+  // synchronously, re-rendering this component before onSubmit's own
+  // `await mergeGuestCartAfterLogin(...)` resolves, so this effect was
+  // racing (and, per a real report, winning) against onSubmit's redirect —
+  // except this one never checked the role, so it sent every admin to "/"
+  // instead of "/admin". Made this the single source of truth for the
+  // redirect target (role-aware, matching onSubmit's own now-removed
+  // computation) instead of leaving two divergent copies of the same logic.
   useEffect(() => {
-    if (user) router.replace(redirectParam || "/");
+    if (!user) return;
+    const isAdmin = user.role === "admin";
+    router.replace(redirectParam || (isAdmin ? "/admin" : "/"));
   }, [user, redirectParam, router]);
 
   const schema = useMemo(
@@ -60,9 +70,9 @@ export default function LoginPage() {
       dispatch(setCredentials(res.user));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
       toast.success(t("auth.welcomeBackName", { name: res.user.name.split(" ")[0] }));
-      const isAdmin = res.user?.role === "admin";
-      const target = redirectParam || (isAdmin ? "/admin" : "/");
-      router.push(target);
+      // Redirect happens in the effect above, once `user` updates — a
+      // second, independent router.push here used to race it (see that
+      // effect's comment).
     } catch (err) {
       toast.error(err?.data?.message || t("auth.loginFailed"));
     }

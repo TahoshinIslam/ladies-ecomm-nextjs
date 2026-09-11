@@ -429,6 +429,7 @@ export default function Header() {
                             {user.email}
                           </div>
                         </div>
+                        <MenuLink href="/dashboard" icon={LayoutDashboard}>{t("navigation.dashboard")}</MenuLink>
                         <MenuLink href="/profile" icon={UserIcon}>{t("navigation.profile")}</MenuLink>
                         <MenuLink href="/orders" icon={Package}>{t("navigation.orders")}</MenuLink>
                         {isAdmin && (
@@ -627,6 +628,11 @@ export default function Header() {
                   {t("navigation.wishlist")}
                   {wlCount ? ` (${wlCount})` : ""}
                 </Link>
+                {user && (
+                  <Link href="/dashboard" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
+                    {t("navigation.dashboard")}
+                  </Link>
+                )}
                 <Link href="/orders" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
                   {t("navigation.orders")}
                 </Link>

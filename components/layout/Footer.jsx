@@ -63,6 +63,7 @@ const STATIC_COLUMN_KEYS = [
     links: [
       { labelKey: "footer.signIn", href: "/login" },
       { labelKey: "footer.createAccount", href: "/register" },
+      { labelKey: "footer.dashboard", href: "/dashboard" },
       { labelKey: "footer.orders", href: "/orders" },
       { labelKey: "footer.wishlist", href: "/wishlist" },
       { labelKey: "footer.preferences", href: "/profile" },

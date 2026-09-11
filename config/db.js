@@ -76,11 +76,23 @@ const connectDB = async () => {
     //     modest concurrent DB-bound work on one instance.) Raise
     //     further only with real Atlas connection-count evidence
     //     (Atlas's own connection metrics), never speculatively.
-    //   - minPoolSize: 0 (the driver default) — a Fluid Compute instance
-    //     that goes cold should not hold idle connections open against
-    //     Atlas's connection limit; there's no justification here for
-    //     paying that cost to save a small reconnect latency on the next
-    //     cold start.
+    //   - minPoolSize: 1 (was 0) — real production measurement (admin
+    //     routes, which get lower/burstier traffic than the storefront and
+    //     so hit a genuinely idle pool far more often) showed a live,
+    //     uncached query against an 11-document collection consistently
+    //     taking 1.2-1.3s end to end, on both a "cold" and an immediately-
+    //     repeated "warm" request — i.e. NOT explained by a data-cache miss
+    //     (this endpoint has none, by design: an admin's own product table
+    //     must always read live) but by the driver re-establishing a
+    //     MongoDB connection from scratch on every request whenever the
+    //     pool had already dropped to zero. minPoolSize:0's own reasoning
+    //     ("don't pay to hold a connection just to save a small reconnect
+    //     latency") undersold that latency — keeping exactly one warm
+    //     connection per instance is a negligible fraction of the same
+    //     maxPoolSize:20 headroom already budgeted above, in exchange for
+    //     removing a real, repeatedly-measured multi-hundred-ms-to-second
+    //     tax from every request that lands on an instance whose pool had
+    //     gone idle.
     //   - serverSelectionTimeoutMS/connectTimeoutMS: bounded so a
     //     genuinely unreachable/misconfigured database fails a request
     //     within a few seconds instead of hanging until the platform's
@@ -88,7 +100,7 @@ const connectDB = async () => {
     cache.promise = mongoose
       .connect(uri, {
         maxPoolSize: 20,
-        minPoolSize: 0,
+        minPoolSize: 1,
         serverSelectionTimeoutMS: 5000,
         connectTimeoutMS: 5000,
       })
