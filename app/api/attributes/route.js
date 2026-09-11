@@ -2,11 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getSessionUser, requirePermission } from "../../../lib/auth.js";
 import { PERMISSIONS } from "../../../lib/permissions.js";
-import {
-  listAttributes,
-  resolveAttributesForCategory,
-  createAttribute,
-} from "../../../services/attributeService.js";
+import { createAttribute } from "../../../services/attributeService.js";
 import { withRoute } from "../../../lib/http.js";
 import { getServerLocale } from "../../../lib/i18n/server.js";
 import { localizeAttributeDefinitionList } from "../../../lib/i18n/localize.js";
@@ -14,6 +10,7 @@ import { parseJsonBody, requireObjectIdFormat } from "../../../lib/validation.js
 import { createAttributeSchema } from "../../../schemas/catalogSchemas.js";
 import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
 import { CACHE_TAGS } from "../../../lib/cacheTags.js";
+import { getCachedAllAttributes, getCachedAttributesForCategory } from "../../../lib/serverDataCache.js";
 
 // GET /api/attributes           -> full raw list (Attributes admin page —
 //                                   never localized, the admin form needs
@@ -34,14 +31,14 @@ import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 export const GET = withRoute(async (request) => {
   const category = new URL(request.url).searchParams.get("category");
   if (!category) {
-    const attributes = await listAttributes();
+    const attributes = await getCachedAllAttributes();
     return NextResponse.json({ attributes });
   }
   requireObjectIdFormat(category, "category");
   const user = await getSessionUser(request).catch(() => null);
   const isAdmin = user?.role === "admin";
   const [attributes, locale] = await Promise.all([
-    resolveAttributesForCategory(category),
+    getCachedAttributesForCategory(category),
     getServerLocale(),
   ]);
   return NextResponse.json({
