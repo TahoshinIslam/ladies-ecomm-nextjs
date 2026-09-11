@@ -191,7 +191,13 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
                 // plain lazy/auto regardless of its own local index.
                 loading={priority && index < 6 ? "eager" : "lazy"}
                 fetchPriority={priority && index === 0 ? "high" : "auto"}
-                className="object-cover"
+                // `object-contain`, not `object-cover`: the card box is a
+                // fixed 4:5 plate, but not every uploaded product photo is
+                // shot at 4:5 — a taller/narrower photo under `cover` gets
+                // its top and bottom sliced off (a model's head or feet)
+                // to fill the box. `contain` always shows the whole photo,
+                // letterboxed on `bg-media` when the ratio doesn't match.
+                className="object-contain"
                 onError={() => setImageFailed(true)}
               />
             ) : imageFailed ? (
