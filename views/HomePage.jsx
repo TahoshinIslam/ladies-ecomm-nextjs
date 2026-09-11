@@ -4,7 +4,7 @@ import { ArrowRight, Banknote, RefreshCw, Sparkles, Gem } from "lucide-react";
 
 import Button from "../components/ui/Button.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
-import ProductTabsSection from "./home/ProductTabsSection.jsx";
+import ProductShowcaseSection from "./home/ProductShowcaseSection.jsx";
 import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
 import NewsletterPoster from "./home/NewsletterPoster.jsx";
 import SectionHead from "./home/SectionHead.jsx";
@@ -99,28 +99,20 @@ export default async function HomePage() {
     return localizeProductList(result.products, locale);
   };
 
-  // Single shop-wide showcase (New Arrival/Featured/Bestseller/Discount) —
-  // this is a clothing-only shop with no single "all clothes" department
-  // id to scope by (every department is its own root now), so these are
-  // unscoped across the whole catalog. New/Featured/Discount use the
-  // shop's own canonical `collection=` values; "Bestseller" has no such
-  // canonical value (it isn't one of the shop's New/Featured/Discount
-  // tabs), so it's defined by sort=-rating instead — the same real,
-  // honest "best" signal already used below to pick each department's
-  // hero image, not a fabricated sales-count field this schema doesn't
-  // have.
-  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, shopNew, shopFeatured, shopBestseller, shopDiscount] =
-    await Promise.all([
-      burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
-      abaya ? fetchProducts({ limit: 1, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
-      hijab ? fetchProducts({ limit: 1, category: hijab._id, sort: "-rating" }) : Promise.resolve([]),
-      khimar ? fetchProducts({ limit: 1, category: khimar._id, sort: "-rating" }) : Promise.resolve([]),
-      fetchProducts({ limit: 8, collection: "new" }),
-      fetchProducts({ limit: 8, collection: "featured" }),
-      fetchProducts({ limit: 8, sort: "-rating" }),
-      fetchProducts({ limit: 8, collection: "discount" }),
-    ]);
-  const shopTabProducts = { new: shopNew, featured: shopFeatured, bestseller: shopBestseller, discount: shopDiscount };
+  // Two standalone shop-wide showcases — New Arrivals and Featured, each
+  // its own section (see ProductShowcaseSection.jsx) rather than tabs
+  // sharing one section. This is a clothing-only shop with no single "all
+  // clothes" department id to scope by (every department is its own root
+  // now), so both are unscoped across the whole catalog, using the shop's
+  // own canonical `collection=` values.
+  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, shopNew, shopFeatured] = await Promise.all([
+    burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
+    abaya ? fetchProducts({ limit: 1, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
+    hijab ? fetchProducts({ limit: 1, category: hijab._id, sort: "-rating" }) : Promise.resolve([]),
+    khimar ? fetchProducts({ limit: 1, category: khimar._id, sort: "-rating" }) : Promise.resolve([]),
+    fetchProducts({ limit: 8, collection: "new" }),
+    fetchProducts({ limit: 8, collection: "featured" }),
+  ]);
 
   // An admin-set carousel image (Shop Config → Carousel) overrides the
   // auto-derived top-rated product photo for that department; unset (the
@@ -294,15 +286,33 @@ export default async function HomePage() {
         </section>
       )}
 
-      {/* Shop showcase — New Arrival / Featured / Bestseller / Discount,
-          unscoped across the whole (clothing-only) catalog. */}
-      <ProductTabsSection
-        sectionId="shop-showcase"
-        headingId="shop-showcase-h"
+      {/* New Arrivals — its own section now, not a tab sharing space with
+          Featured/Bestseller/Discount. Unscoped across the whole
+          (clothing-only) catalog. */}
+      <ProductShowcaseSection
+        sectionId="new-arrivals"
+        headingId="new-arrivals-h"
         eyebrow={t("home.newArrivalsEyebrow")}
         title={t("home.justLanded")}
         sub={t("home.justLandedSub")}
-        products={shopTabProducts}
+        icon="new"
+        products={shopNew}
+        viewAllHref="/shop?sort=-createdAt"
+        viewAllLabel={t("home.viewAllLower", { label: t("home.tabNewArrival") })}
+      />
+
+      {/* Featured — a real, standalone section (previously one of four
+          tabs behind New Arrivals; now its own place on the page). */}
+      <ProductShowcaseSection
+        sectionId="featured"
+        headingId="featured-h"
+        eyebrow={t("home.featuredEyebrow")}
+        title={t("home.featuredTitle")}
+        sub={t("home.featuredSub")}
+        icon="featured"
+        products={shopFeatured}
+        viewAllHref="/shop?collection=featured"
+        viewAllLabel={t("home.viewAllLower", { label: t("home.tabFeatured") })}
       />
 
       {/* Fabric story */}

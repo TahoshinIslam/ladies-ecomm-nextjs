@@ -31,7 +31,7 @@ const SERVER_PAGE_SHELLS = [
 // form, the guided-finder button).
 const CLIENT_ISLANDS = [
   "views/home/HeroCarousel.jsx",
-  "views/home/ProductTabsSection.jsx",
+  "views/home/ProductShowcaseSection.jsx",
   "views/home/NewsletterPoster.jsx",
   "views/home/GuidedFinderSection.jsx",
   "views/shop/ShopPageClient.jsx",

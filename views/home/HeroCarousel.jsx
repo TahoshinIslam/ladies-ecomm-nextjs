@@ -220,7 +220,7 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                       fill
                       sizes="50vw"
                       fetchPriority="high"
-                      className="object-cover"
+                      className="object-contain"
                     />
                   ) : (
                     <div className="grid h-full w-full place-items-center">
@@ -276,7 +276,7 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                         fill
                         sizes="66px"
                         loading="lazy"
-                        className="object-cover"
+                        className="object-contain"
                       />
                     ) : (
                       <span aria-hidden="true" className="absolute inset-0 hatch" />
@@ -362,7 +362,7 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
               fill
               sizes="100vw"
               fetchPriority="high"
-              className="object-cover"
+              className="object-contain"
             />
           ) : (
             <>
@@ -487,7 +487,7 @@ function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
               fill
               sizes="100vw"
               fetchPriority="high"
-              className="object-cover"
+              className="object-contain"
             />
           ) : (
             <>

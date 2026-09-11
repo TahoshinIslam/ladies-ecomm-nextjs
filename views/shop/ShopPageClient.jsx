@@ -14,7 +14,7 @@
 // definitions/groupings/histogram sample — legitimately client-owned,
 // interactive-filter-construction data, not the product list itself) and
 // "Show more" pagination beyond the server-rendered first page.
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Home, ShoppingBag, SlidersHorizontal, X } from "lucide-react";
@@ -121,14 +121,25 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   const settings = useSettings();
   const { t, locale } = useLocale();
 
+  // Every filter/sort/category change re-renders the Server Component
+  // (views/ShopPage.jsx) for a brand new URL — a real network round trip,
+  // not instant client state. Wrapped in a transition so `isPending` can
+  // drive a visible loading state on the filter sidebar and product grid
+  // while that's in flight; previously there was no feedback at all
+  // between clicking a filter and the new results appearing, which read as
+  // the click not having registered rather than as something loading.
+  const [isPending, startTransition] = useTransition();
+
   // Filters live in the URL so they survive refresh and can be shared.
   // Scroll is pinned: re-filtering should not throw the grid back to the top.
   const setSp = useCallback(
     (next, { replace = false } = {}) => {
       const qs = next.toString();
       const url = qs ? `${pathname}?${qs}` : pathname;
-      if (replace) router.replace(url, { scroll: false });
-      else router.push(url, { scroll: false });
+      startTransition(() => {
+        if (replace) router.replace(url, { scroll: false });
+        else router.push(url, { scroll: false });
+      });
     },
     [router, pathname],
   );
@@ -450,31 +461,42 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
         onClose={() => setFiltersOpen(false)}
         activeFilterCount={activeFilterCount}
       >
-        <FilterPanel
-          sp={sp}
-          setSp={setSp}
-          setParam={setParam}
-          setCollection={setCollection}
-          toggleFacetValue={toggleFacetValue}
-          clearAll={clearAll}
-          brandsData={brandsData}
-          departments={departments}
-          deptLoading={catsLoading}
-          selectedDept={selectedDept}
-          selectDepartment={selectDepartment}
-          groupingsData={groupingsData}
-          groupingsLoading={groupingsLoading}
-          attributeDefs={attributeDefs}
-          attrLoading={attrLoading}
-          histogramProducts={histogramData?.products ?? []}
-          facets={facets}
-        />
+        <div
+          className={cn("transition-opacity", isPending && "pointer-events-none opacity-50")}
+          aria-busy={isPending}
+        >
+          <FilterPanel
+            sp={sp}
+            setSp={setSp}
+            setParam={setParam}
+            setCollection={setCollection}
+            toggleFacetValue={toggleFacetValue}
+            clearAll={clearAll}
+            brandsData={brandsData}
+            departments={departments}
+            deptLoading={catsLoading}
+            selectedDept={selectedDept}
+            selectDepartment={selectDepartment}
+            groupingsData={groupingsData}
+            groupingsLoading={groupingsLoading}
+            attributeDefs={attributeDefs}
+            attrLoading={attrLoading}
+            histogramProducts={histogramData?.products ?? []}
+            facets={facets}
+          />
+        </div>
       </FilterSheetMobile>
 
       <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
         {/* Desktop sticky sidebar */}
         <aside className="hidden lg:block">
-          <div className="sticky top-20 overflow-y-auto rounded-lg border border-border bg-background p-5">
+          <div
+            className={cn(
+              "sticky top-20 overflow-y-auto rounded-lg border border-border bg-background p-5 transition-opacity",
+              isPending && "pointer-events-none opacity-50",
+            )}
+            aria-busy={isPending}
+          >
             <FilterPanel
               sp={sp}
               setSp={setSp}
@@ -511,8 +533,9 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
               <div
                 className={cn(
                   "grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4 transition-opacity",
-                  loadingMore && "opacity-60"
+                  (loadingMore || isPending) && "pointer-events-none opacity-60",
                 )}
+                aria-busy={loadingMore || isPending}
               >
                 {products.map((p, i) => (
                   // `priority` is deliberately only passed here: /shop has

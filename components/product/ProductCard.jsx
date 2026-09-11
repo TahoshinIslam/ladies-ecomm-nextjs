@@ -311,20 +311,27 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             <h3 className="mt-1.5 text-[17.5px] font-semibold leading-[1.25] tracking-[-0.015em] text-ink">
               {product.name}
             </h3>
-            {product.rating > 0 && (
-              // Accessible rating output: the numeric rating and review
-              // count are real text, not conveyed by star icon/color
-              // alone — a screen reader gets the same information a
-              // sighted shopper does. The star itself is decorative
-              // (aria-hidden), the text carries the actual meaning.
+            {
+              // Always a rating row, never conditional on rating > 0 — a
+              // card that simply omitted it when unrated looked broken
+              // sitting next to cards that had one (most of this catalog's
+              // real seed data has zero reviews yet). Accessible either
+              // way: the numeric rating and review count (or "no reviews
+              // yet") are real text, not conveyed by star icon/color alone;
+              // the star itself is decorative (aria-hidden).
               <p className="mt-1 flex items-center gap-1 text-[12.5px] text-stone">
-                <Star aria-hidden="true" className="h-3 w-3 fill-current text-verm" />
-                {t("product.ratingWithCount", {
-                  rating: product.rating.toFixed(1),
-                  count: product.numReviews ?? 0,
-                })}
+                <Star
+                  aria-hidden="true"
+                  className={cn("h-3 w-3", product.rating > 0 ? "fill-current text-verm" : "text-stone/50")}
+                />
+                {product.rating > 0
+                  ? t("product.ratingWithCount", {
+                      rating: product.rating.toFixed(1),
+                      count: product.numReviews ?? 0,
+                    })
+                  : t("product.noReviewsYet")}
               </p>
-            )}
+            }
             <div className="mt-1.5 text-[13.5px] text-stone">
               {[fabric, colorCount > 1 && t("product.colorsCount", { count: colorCount }), product.brand?.name]
                 .filter(Boolean)

@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import ShopPage from "@/views/ShopPage.jsx";
+import ShopPageSkeleton from "@/views/shop/ShopPageSkeleton.jsx";
 import { truncateDescription } from "@/lib/seo.js";
 import { getT } from "@/lib/i18n/server.js";
 
@@ -31,7 +32,7 @@ export async function generateMetadata({ searchParams }) {
 
 export default function Page({ searchParams }) {
   return (
-    <Suspense fallback={<div className="mx-auto max-w-[1480px] px-5 py-20 sm:px-8"><div className="h-8 w-52 animate-pulse rounded-lg bg-media" /></div>}>
+    <Suspense fallback={<ShopPageSkeleton />}>
       <ShopPage searchParams={searchParams} />
     </Suspense>
   );

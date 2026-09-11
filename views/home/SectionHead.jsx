@@ -2,8 +2,8 @@ import { cn } from "../../lib/utils.js";
 
 // A plain presentational component (no hooks, no "use client") shared by
 // both the home page's Server Component sections and its Client Component
-// islands (e.g. ProductTabsSection) — safe to render from either side of
-// the boundary since it owns no state of its own.
+// islands (e.g. ProductShowcaseSection) — safe to render from either side
+// of the boundary since it owns no state of its own.
 export default function SectionHead({ eyebrow, title, sub, aside, id, action, bordered }) {
   return (
     <div
