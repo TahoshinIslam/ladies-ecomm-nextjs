@@ -141,10 +141,38 @@ export default function Header({ initialDepartments = [] }) {
   const { data: catsData } = useGetCategoriesQuery();
   const departments = (catsData?.categories ?? initialDepartments).filter((c) => !c.parent);
 
-  // The board compacts the bar from 88px to 66px past 32px of scroll.
+  // The board compacts the bar from 88px to 66px once scrolled — that
+  // height change shifts everything below the header up by as much as
+  // ~22px (88 - 66), which a single scroll(Y > 32) threshold turns into a
+  // feedback loop: crossing 32 shrinks the header, the resulting layout
+  // shift (plus the browser's own scroll-anchoring, which nudges scrollY
+  // to keep the same content under the viewport after a shift above it)
+  // pulls scrollY back under 32, which grows the header again, which
+  // shifts things back down past 32 — repeating every scroll frame and
+  // reading as the header rapidly blinking between its two sizes. Two
+  // thresholds with a gap wider than that shift (enter compact past 48,
+  // only leave it below 16) means neither direction's own layout shift can
+  // cross back over the OTHER threshold, breaking the loop. rAF-throttling
+  // the handler also keeps this to at most one evaluation per frame.
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 32);
-    onScroll();
+    const SCROLLED_ON = 48;
+    const SCROLLED_OFF = 16;
+    let ticking = false;
+    const evaluate = () => {
+      setScrolled((prev) => {
+        const y = window.scrollY;
+        if (!prev && y > SCROLLED_ON) return true;
+        if (prev && y < SCROLLED_OFF) return false;
+        return prev;
+      });
+      ticking = false;
+    };
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(evaluate);
+    };
+    evaluate();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
