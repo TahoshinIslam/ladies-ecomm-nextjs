@@ -500,7 +500,7 @@ function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
           </div>
         </div>
 
-        <div className="relative mt-10 aspect-[2/1] w-full overflow-hidden rounded-3xl bg-media">
+        <div className="relative mt-10 aspect-5/4 w-full overflow-hidden rounded-3xl bg-media">
           {slide.image ? (
             // Same reasoning as the desktop/mobile hero variants above:
             // plain `loading="lazy"` (default) + `fetchPriority="high"`,
@@ -516,7 +516,17 @@ function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
               // See the desktop hero's own comment above: object-cover +
               // object-center fills the box (no more left/right gaps),
               // cropped to the rounded wrapper's existing overflow-hidden;
-              // scale-[1.02] only to erase a subpixel edge sliver.
+              // scale-[1.02] only to erase a subpixel edge sliver. The box
+              // itself was aspect-[2/1] (much wider/shorter than the
+              // mobile/desktop stage) — same root problem as the mobile
+              // fix above, but the opposite crop direction: a box this
+              // much wider than the group photo forces cover to crop
+              // top/bottom instead of left/right, at risk of the models'
+              // heads or shoes. aspect-5/4 matches the mobile hero (and is
+              // close to the desktop stage's own effective ~1.36 ratio),
+              // so all three breakpoints crop this photo consistently and
+              // mildly instead of tablet cropping it far more aggressively
+              // than the other two.
               className="scale-[1.02] object-cover object-center"
             />
           ) : (
