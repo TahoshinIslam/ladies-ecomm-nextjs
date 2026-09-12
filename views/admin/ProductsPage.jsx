@@ -565,11 +565,25 @@ function ProductFormModal({ product, onClose }) {
   // combination, so picking only Color still generates one row per color.
   // Combos matching an attribute signature already present among the
   // existing variant rows are skipped (never a silent duplicate).
+  //
+  // Above this many combinations we refuse rather than attempt it — see
+  // the comment below appendVariant() for why a large combination count is
+  // the actual failure mode being guarded against, not just a slow render.
+  const MAX_GENERATED_VARIANTS = 200;
+
   const generateVariants = (axisSelections) => {
     const axes = variantAttrDefs
       .map((def) => ({ def, values: def.options.filter((o) => axisSelections[def.key]?.has(o.value)) }))
       .filter((a) => a.values.length > 0);
     if (axes.length === 0) return 0;
+
+    const totalCombos = axes.reduce((n, a) => n * a.values.length, 1);
+    if (totalCombos > MAX_GENERATED_VARIANTS) {
+      toast.error(
+        `That's ${totalCombos} combinations — narrow your selection to ${MAX_GENERATED_VARIANTS} or fewer at a time.`,
+      );
+      return -1;
+    }
 
     let combos = [{}];
     for (const axis of axes) {
@@ -584,7 +598,7 @@ function ProductFormModal({ product, onClose }) {
       JSON.stringify(Object.keys(attrs).sort().map((k) => [k, attrs[k]]));
     const existingSignatures = new Set((variants || []).map((v) => signature(v.attributes || {})));
 
-    let added = 0;
+    const newVariants = [];
     for (const combo of combos) {
       const attributes = {};
       const nameParts = [];
@@ -595,7 +609,7 @@ function ProductFormModal({ product, onClose }) {
       const sig = signature(attributes);
       if (existingSignatures.has(sig)) continue;
       existingSignatures.add(sig);
-      appendVariant({
+      newVariants.push({
         variantName: nameParts.join(" / "),
         sku: "",
         attributes,
@@ -604,9 +618,17 @@ function ProductFormModal({ product, onClose }) {
         stock: 0,
         images: [],
       });
-      added++;
     }
-    return added;
+    // One batched append (react-hook-form's useFieldArray.append() accepts
+    // an array) instead of calling appendVariant() once per combo in the
+    // loop — appending one at a time meant one full form re-render per
+    // combination (this form already watch()es several fields elsewhere),
+    // so checking even a handful of values across 2-3 axes easily reached
+    // hundreds of combinations and hundreds of synchronous re-renders in a
+    // row — the actual cause of the reported "modal stops responding, goes
+    // completely white" freeze, not the combination count by itself.
+    if (newVariants.length > 0) appendVariant(newVariants);
+    return newVariants.length;
   };
 
   const onSubmit = async (data) => {
@@ -973,6 +995,8 @@ function VariantGenerator({ variantAttrDefs, onGenerate }) {
 
   const handleGenerate = () => {
     const added = onGenerate(selections);
+    // -1: onGenerate already showed its own "too many combinations" toast.
+    if (added === -1) return;
     if (added > 0) toast.success(`${added} variant${added === 1 ? "" : "s"} generated`);
     else toast.error("Pick at least one value, and check they aren't already added");
   };

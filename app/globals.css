@@ -76,9 +76,22 @@
 
   --ease-in: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* Without this, a native <select>'s OPEN options popup (and other native
+     controls — scrollbars, the date/time picker UI) defaults to
+     color-scheme: light regardless of the app's own theme, because
+     nothing here had ever told the browser otherwise. In dark mode that
+     meant a plain white, black-text popup flashing open over an otherwise
+     fully dark page — the "dropdown has no style, shows the default"
+     look. This is the one standard, cross-browser lever a page has over
+     that OS-rendered popup's base palette; see the option{} rules below
+     for the (more limited, Chromium/Firefox-only) background/color
+     styling still applied on top where the browser allows it. */
+  color-scheme: light;
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;
   --canvas: #0b0b0d;
   --surface: #141416;
   --elev: #1b1b1f;
@@ -395,6 +408,22 @@
   textarea {
     font: inherit;
     color: inherit;
+  }
+
+  /* Chromium and Firefox both honor background-color/color on <option> —
+     Safari doesn't, but this is still a real, meaningful improvement for
+     the large majority of browsers, layered on top of the color-scheme
+     fix above (:root / [data-theme="dark"]) which is what actually fixes
+     the popup for every engine, including Safari. */
+  option {
+    background-color: var(--elev);
+    color: var(--ink);
+    padding: 6px 10px;
+  }
+
+  option:checked {
+    background-color: var(--verm);
+    color: #fff;
   }
 
   a {
