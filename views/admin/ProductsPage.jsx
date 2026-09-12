@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -94,10 +95,29 @@ export default function AdminProductsPage() {
   const can = usePermission();
   const canManage = can(PERMISSIONS.PRODUCTS_MANAGE);
   const [editing, setEditing] = useState(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Lets views/admin/ProductConfigPage.jsx's "Add New Product" card link
+  // straight to /admin/products?new=1 and have the create form actually
+  // open — previously that link only navigated here and left the admin to
+  // find and click "Add product" themselves, which read as "the form
+  // doesn't open at all." Reads the param once, lazily, then strips it
+  // from the URL so a refresh or the back button doesn't reopen it.
+  const [createOpen, setCreateOpen] = useState(() => searchParams.get("new") === "1");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [bulkConfirm, setBulkConfirm] = useState(false);
   const [selected, setSelected] = useState(new Set());
+
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      router.replace("/admin/products", { scroll: false });
+    }
+    // Only ever needs to run once, right after the lazy createOpen
+    // initializer above already consumed the param — re-running on every
+    // searchParams identity change would fight any other filter/query
+    // this page might gain later.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const {
     page, limit, search, sortBy, sortOrder, filters, activeFilterCount,

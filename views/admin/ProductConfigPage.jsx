@@ -152,7 +152,7 @@ export default function ProductConfigPage() {
         </button>
 
         <Link
-          href="/admin/products"
+          href="/admin/products?new=1"
           className="flex flex-col items-start gap-3 rounded-xl border border-border bg-background p-5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
         >
           <span className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
@@ -160,7 +160,7 @@ export default function ProductConfigPage() {
           </span>
           <div>
             <div className="font-semibold">Add New Product</div>
-            <p className="mt-1 text-xs text-muted-foreground">Go to Products to create a new product.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Opens the new-product form.</p>
             <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
               Open Products <ArrowRight className="h-3.5 w-3.5" />
             </span>

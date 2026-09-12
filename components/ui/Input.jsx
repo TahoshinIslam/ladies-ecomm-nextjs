@@ -24,7 +24,14 @@ const Input = forwardRef(
     const hintId = hint && !error ? `${inputId}-hint` : undefined;
 
     return (
-      <div className="w-full">
+      // `className` lands here, on the component's actual layout footprint
+      // (every call site passes a layout utility — max-w-*, a grid
+      // col-span — never something meant only for the inner <input>'s own
+      // look), not on the input itself below: a hardcoded "w-full" there
+      // ignored it completely, so a toolbar's "compact filter" max-width
+      // silently never applied and every such field rendered full-width
+      // instead — the exact bug behind "toolbar filters broken everywhere".
+      <div className={cn("w-full", className)}>
         {label && (
           <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-ink">
             {label}
@@ -45,7 +52,6 @@ const Input = forwardRef(
               Icon && "pl-10",
               isPassword && "pr-10",
               error && "border-danger",
-              className
             )}
             {...props}
           />

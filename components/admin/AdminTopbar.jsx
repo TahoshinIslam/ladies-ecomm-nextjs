@@ -1,38 +1,35 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useDispatch } from "react-redux";
-import { LayoutDashboard, LogOut, Menu, Moon, Sun, User as UserIcon } from "lucide-react";
+import { LogOut, Menu, Moon, Sun, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 
-import Breadcrumb from "../ui/Breadcrumb.jsx";
 import DropdownMenu, { DropdownMenuItem } from "../ui/DropdownMenu.jsx";
 import NotificationsDropdown from "./NotificationsDropdown.jsx";
 import LanguageSwitcher from "../layout/LanguageSwitcher.jsx";
 import { useTheme } from "../../context/ThemeProvider.jsx";
 import { clearCredentials } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
-import { matchNavItem } from "./adminNav.js";
 
 /**
- * Sticky topbar: mobile menu trigger, breadcrumb (doubles as the page-header
- * region), theme switcher, notifications (unchanged, real data), and a user
- * menu. Height stays fixed (h-16, matching the sidebar's brand row so they
- * align) regardless of what's visible at a given breakpoint — buttons hide,
- * the bar itself never grows.
+ * Sticky topbar: mobile menu trigger, theme switcher, notifications
+ * (unchanged, real data), and a user menu. Height stays fixed (h-16,
+ * matching the sidebar's brand row so they align) regardless of what's
+ * visible at a given breakpoint — buttons hide, the bar itself never grows.
+ *
+ * The "Admin > current page" breadcrumb used to live here, but a persistent
+ * header is the wrong place for it — it read as floating, disconnected
+ * chrome above the page rather than part of the page. It now renders in
+ * AdminLayout.jsx, directly above each page's own heading (e.g. right above
+ * "Products" / "3 products total"), the same relationship every storefront
+ * page's own breadcrumb already has to its heading.
  */
 export default function AdminTopbar({ onOpenMobileNav, mobileNavTriggerRef, user }) {
-  const pathname = usePathname();
   const router = useRouter();
   const dispatch = useDispatch();
   const { isDark, toggleTheme } = useTheme();
   const [logout] = useLogoutMutation();
-
-  const current = matchNavItem(pathname);
-  const breadcrumbItems = [
-    { label: "Admin", href: "/admin", icon: LayoutDashboard },
-    ...(current && current.to !== "/admin" ? [{ label: current.label }] : []),
-  ];
 
   const handleLogout = async () => {
     try {
@@ -57,7 +54,10 @@ export default function AdminTopbar({ onOpenMobileNav, mobileNavTriggerRef, user
         <Menu className="h-5 w-5" />
       </button>
 
-      <Breadcrumb items={breadcrumbItems} className="mb-0 min-w-0 flex-1" />
+      {/* Spacer — pushes the icon cluster to the right now that the
+          breadcrumb (moved to AdminLayout.jsx, above each page's heading)
+          no longer occupies this space. */}
+      <div className="min-w-0 flex-1" />
 
       <div className="flex flex-none items-center gap-1">
         <LanguageSwitcher

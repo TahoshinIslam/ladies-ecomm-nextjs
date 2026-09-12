@@ -18,10 +18,18 @@ import { cn } from "../../lib/utils.js";
  */
 export default function Breadcrumb({ items, className }) {
   return (
+    // Deliberately flex-nowrap, not flex-wrap: wrapping let the whole trail
+    // spill onto a second line whenever the last (usually longest — a full
+    // product name) segment didn't fit, which read as broken rather than a
+    // normal breadcrumb. Every earlier segment (Home, Shop, a category —
+    // `flex-none` below) keeps its full natural width; only the final,
+    // current-page segment is allowed to shrink and truncates with an
+    // ellipsis instead, the standard breadcrumb pattern for a long trailing
+    // title.
     <nav
       aria-label="Breadcrumb"
       className={cn(
-        "mb-6 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground",
+        "mb-6 flex items-center gap-x-1.5 text-sm text-muted-foreground",
         className,
       )}
     >
@@ -36,7 +44,10 @@ export default function Breadcrumb({ items, className }) {
         );
 
         return (
-          <span key={item.label} className="flex min-w-0 items-center gap-x-1.5">
+          <span
+            key={item.label}
+            className={cn("flex items-center gap-x-1.5", isLast ? "min-w-0 flex-1" : "flex-none")}
+          >
             {i > 0 && (
               <ChevronRight
                 aria-hidden="true"

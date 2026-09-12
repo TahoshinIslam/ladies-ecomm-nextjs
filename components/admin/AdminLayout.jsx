@@ -4,17 +4,19 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { motion, useReducedMotion } from "framer-motion";
+import { LayoutDashboard } from "lucide-react";
 
 import { selectAuthHydrated, selectCurrentUser } from "../../store/authSlice.js";
 import { hasPermission } from "../../lib/permissions.js";
 import { storage } from "../../lib/utils.js";
 import { useAdminEventStream } from "../../hooks/useAdminEventStream.js";
-import { filterAdminNav, findRequiredPermission } from "./adminNav.js";
+import { filterAdminNav, findRequiredPermission, matchNavItem } from "./adminNav.js";
 import AdminSidebar from "./AdminSidebar.jsx";
 import MobileSidebar from "./MobileSidebar.jsx";
 import AdminTopbar from "./AdminTopbar.jsx";
 import AdminFooter from "./AdminFooter.jsx";
 import AdminErrorState from "./AdminErrorState.jsx";
+import Breadcrumb from "../ui/Breadcrumb.jsx";
 
 const COLLAPSE_KEY = "tahos:adminSidebarCollapsed";
 
@@ -93,6 +95,13 @@ export default function AdminLayout({ children, initialUser = null }) {
   const user = hydrated ? reduxUser : initialUser;
   const canAccessAdmin = !!user && ["admin", "employee"].includes(user.role);
   const navItems = filterAdminNav(user);
+  // Rendered above {children} below, not in AdminTopbar's persistent
+  // header — see AdminTopbar.jsx's own comment for why that moved.
+  const currentNavItem = matchNavItem(pathname);
+  const breadcrumbItems = [
+    { label: "Admin", href: "/admin", icon: LayoutDashboard },
+    ...(currentNavItem && currentNavItem.to !== "/admin" ? [{ label: currentNavItem.label }] : []),
+  ];
   const shouldReduceMotion = useReducedMotion();
   useAdminEventStream();
 
@@ -194,6 +203,7 @@ export default function AdminLayout({ children, initialUser = null }) {
           transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
           className="min-w-0 flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8"
         >
+          <Breadcrumb items={breadcrumbItems} />
           {children}
         </motion.main>
 

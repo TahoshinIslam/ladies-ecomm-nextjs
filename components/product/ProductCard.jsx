@@ -308,7 +308,15 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
                 {categoryName}
               </div>
             )}
-            <h3 className="mt-1.5 text-[17.5px] font-semibold leading-[1.25] tracking-[-0.015em] text-ink">
+            {/* The grid stays 2-column all the way to `md` (see the grid
+                classes on the card container), so each card is only
+                ~150-170px wide on a phone — at the original 17.5px/
+                font-semibold size, an ordinary 2-3 word name ("Relaxed
+                Straight Jeans") didn't fit two words per line and wrapped
+                one word per line instead, reading as a broken vertical
+                stack. Smaller on narrow screens, back to the original size
+                once the grid gives cards more room. */}
+            <h3 className="mt-1.5 text-[14px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink md:text-[17.5px] md:leading-[1.25] md:tracking-[-0.015em]">
               {product.name}
             </h3>
             {

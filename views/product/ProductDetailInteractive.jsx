@@ -295,7 +295,12 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                   {product.brand.name}
                 </p>
               )}
-              <h1 className="mt-1 font-heading text-3xl font-black lg:text-4xl">
+              {/* text-3xl/font-black left no smaller step for phones — a
+                  longer compound name ("Saudi-Style Closed Burqa") wrapped
+                  across several lines at that size on a ~340px-wide
+                  viewport, reading as broken. Smaller base size on mobile,
+                  stepping back up to the original 3xl/4xl from `sm` up. */}
+              <h1 className="mt-1 font-heading text-2xl font-black sm:text-3xl lg:text-4xl">
                 {product.name}
               </h1>
             </div>
