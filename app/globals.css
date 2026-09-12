@@ -333,6 +333,31 @@
   }
 }
 
+/* A slim, palette-matched scrollbar for a container that genuinely needs
+   to show its scrollbar (unlike no-scrollbar above) — e.g.
+   components/ui/Select.jsx's custom options panel, whose whole point is
+   giving a long option list a real, styled scrollbar instead of the
+   browser's plain default one. Firefox via scrollbar-width/-color,
+   everything else via the ::-webkit-scrollbar-* pseudo-elements. */
+@utility themed-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--line);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--stone);
+  }
+}
+
 /* The board's page shell: 1480px, with padding that opens up with the viewport. */
 @utility container-x {
   width: 100%;
