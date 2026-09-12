@@ -358,14 +358,18 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.45, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-        // aspect-4/5, not the old full-bleed aspect-[2/1]: this box now
-        // matches ProductCard/PDP's own image plate exactly (one
-        // consistent aspect ratio site-wide), and it keeps the same side
-        // gutter as the eyebrow/heading/buttons above and below it instead
-        // of bleeding edge-to-edge — the old negative-margin bleed, on a
-        // short 2:1 box, also squeezed every real (portrait) product photo
-        // into a narrow letterboxed strip in the middle.
-        className="relative mt-3 aspect-4/5 max-h-[420px]"
+        // aspect-5/4 (same ratio as the desktop hero's own stage above),
+        // not the old full-bleed aspect-[2/1] this replaced, nor the
+        // portrait aspect-4/5 that briefly replaced THAT: this box holds a
+        // multi-model group photo (several people standing side by side),
+        // not a single product/PDP-style portrait shot — a tall 4/5 box
+        // forced object-cover to zoom in until the box's height was
+        // filled, cropping the two outer models down to a sliver on
+        // narrow phones (the actual reported bug). 5/4 keeps the same
+        // side gutter as the eyebrow/heading/buttons above and below it
+        // (no edge-to-edge bleed) while giving the photo enough width that
+        // cover only needs a modest crop to fill it.
+        className="relative mt-3 aspect-5/4 max-h-[420px]"
       >
         <div className="absolute inset-0 overflow-hidden rounded-2xl bg-media">
           {slide.image ? (
