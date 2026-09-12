@@ -45,9 +45,17 @@ export default function QuickAddSheet() {
 
   const open = !!product;
   const variants = product?.variants ?? [];
-  const { data: attrData } = useGetAttributesQuery(product?.topCategory, {
-    skip: !product?.topCategory,
-  });
+  // Whole-collection query (no category arg) — the exact same RTK Query
+  // cache entry ShopPageClient.jsx's own `cardAttributeMeta` computation
+  // already warms on mount. The previous per-category query
+  // (`useGetAttributesQuery(product.topCategory)`) was a DIFFERENT cache
+  // key from that shared one, so opening Quick Add always forced a fresh
+  // network round trip before any variant selector could render — the
+  // visible "snap into place" this was fixed for. getVariantAxes() below
+  // already tolerates a candidate-axis list wider than this one product's
+  // category (it only keeps axes the product's own variants actually
+  // have values for), so the unfiltered list is safe to use directly.
+  const { data: attrData } = useGetAttributesQuery(undefined, { skip: !open });
   const attrDefs = attrData?.attributes ?? [];
   // Candidate variant axes for this product's department come from
   // AttributeDefinition.derivedFromVariant — never a fixed clothing-only

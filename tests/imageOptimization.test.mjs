@@ -114,7 +114,7 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
 
   for (const [rel, fieldDesc] of [
     ["views/admin/SettingsPage.jsx", "the branding-logo picker"],
-    ["views/admin/UsersPage.jsx", "user.avatar"],
+    ["views/admin/UsersPageClient.jsx", "user.avatar"],
     ["components/review/ReviewList.jsx", "review.user.avatar"],
   ]) {
     test(`${rel}: ${fieldDesc} renders via next/image when approved, and never falls back to a raw <img>`, () => {

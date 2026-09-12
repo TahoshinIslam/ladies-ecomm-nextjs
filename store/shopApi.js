@@ -388,4 +388,5 @@ export const {
   useCreateAttributeMutation,
   useUpdateAttributeMutation,
   useDeleteAttributeMutation,
+  usePrefetch,
 } = shopApi;

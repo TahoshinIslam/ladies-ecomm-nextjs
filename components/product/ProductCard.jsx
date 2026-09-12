@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import {
   useToggleWishlistMutation,
   useGetWishlistQuery,
+  usePrefetch,
 } from "../../store/shopApi.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { addToCompare, removeFromCompare, openQuickAdd } from "../../store/uiSlice.js";
@@ -35,6 +36,11 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
 
   const [toggleWishlist, { isLoading: wlLoading }] = useToggleWishlistMutation();
   const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
+  // Warms QuickAddSheet's own attributes query (the same whole-collection
+  // cache entry, undefined args — see QuickAddSheet.jsx) on hover/focus, so
+  // by the time a shopper actually clicks Quick Add the data is already
+  // resolved instead of only starting to fetch after the sheet opens.
+  const prefetchAttributes = usePrefetch("getAttributes");
   const compareList = useSelector((s) => s.ui.compareList);
 
   const isCompared = compareList.includes(product._id);
@@ -141,8 +147,12 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-8% 0px -12%" }}
       transition={{ duration: 0.5, delay: Math.min(index, 7) * 0.06, ease: [0.16, 1, 0.3, 1] }}
-      onMouseEnter={() => setHovered(true)}
+      onMouseEnter={() => {
+        setHovered(true);
+        prefetchAttributes(undefined);
+      }}
       onMouseLeave={() => setHovered(false)}
+      onFocus={() => prefetchAttributes(undefined)}
       className={cn("group relative flex flex-col", className)}
     >
       {/* Phase 10 — the image area and the action buttons (wishlist/

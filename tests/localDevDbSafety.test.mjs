@@ -11,6 +11,7 @@
 // reveals a URI or credential in any error message it throws.
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
+import mongoose from "mongoose";
 
 import connectDB from "../config/db.js";
 import { disconnectTestDb } from "./helpers/testDb.mjs";
@@ -37,38 +38,45 @@ function restoreEnv(snapshot) {
   }
 }
 
-function resetConnectionCache() {
-  const cache = globalThis.__mongooseCache;
-  const saved = cache ? { conn: cache.conn, promise: cache.promise } : null;
-  if (cache) {
-    cache.conn = null;
-    cache.promise = null;
-  }
-  return saved;
+// Forces a genuinely clean slate before AND after every test in this file —
+// never just swaps `globalThis.__mongooseCache`'s pointers. Several tests
+// here deliberately attempt a real mongoose.connect() against a bogus/
+// unreachable host (to prove the guard never even tries the forbidden
+// fallback in practice); the MongoDB driver keeps background server-
+// selection/heartbeat monitoring alive on the shared default connection
+// even after that connect() promise rejects, so merely restoring a saved
+// cache snapshot (this file's first version) left that monitoring running
+// into the NEXT test — and, worse, into whichever test file `test:core`
+// runs next in the same process, hanging the entire suite indefinitely.
+// Explicitly disconnecting (bounded by a timeout, so a hang here can never
+// re-introduce the exact bug this exists to prevent) before resetting the
+// cache to a real empty state is what actually guarantees no connection or
+// timer survives past this file's own tests.
+async function forceCleanMongooseState() {
+  await Promise.race([
+    mongoose.disconnect().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 2000)),
+  ]);
+  const cache = (globalThis.__mongooseCache ??= { conn: null, promise: null });
+  cache.conn = null;
+  cache.promise = null;
 }
 
-function restoreConnectionCache(saved) {
-  const cache = globalThis.__mongooseCache;
-  if (cache && saved) {
-    cache.conn = saved.conn;
-    cache.promise = saved.promise;
-  }
-}
-
-// Runs `fn` with a clean, fully-controlled env + connection cache, always
-// restoring both afterward regardless of pass/fail — every test in this
-// file must leave the real test-DB connection other test files rely on
-// exactly as it found it.
+// Runs `fn` with a clean, fully-controlled env + connection state, always
+// tearing both down afterward regardless of pass/fail — every test in this
+// file must leave mongoose fully disconnected so the next test (in this
+// file, or the next file in the same test:core process) starts from a
+// real clean slate rather than inheriting a half-open connection.
 async function withIsolatedEnv(overrides, fn) {
   const envSnapshot = snapshotEnv();
-  const cacheSnapshot = resetConnectionCache();
+  await forceCleanMongooseState();
   try {
     for (const k of ENV_KEYS) delete process.env[k];
     Object.assign(process.env, overrides);
     await fn();
   } finally {
+    await forceCleanMongooseState();
     restoreEnv(envSnapshot);
-    restoreConnectionCache(cacheSnapshot);
   }
 }
 
