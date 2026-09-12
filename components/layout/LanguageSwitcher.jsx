@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Languages } from "lucide-react";
 
 import { useLocale } from "../../context/LocaleProvider.jsx";
@@ -18,18 +19,35 @@ const LABEL_KEY = { "bn-BD": "language.bn", "en-BD": "language.en" };
  * topbar that use a different, icon-only square-button style.
  * `showLabel`: "sm" (label from the sm breakpoint up — default), "always",
  * or "never" (icon-only, matching an icon-only toolbar).
- * Switching locale only writes the locale cookie (see LocaleProvider) and
- * re-renders text in place; it never touches the router, so cart, filters,
- * search and scroll position are all untouched by a language change.
+ *
+ * Switching locale writes the cookie (LocaleProvider) — that alone only
+ * re-renders CLIENT Component text in place (t() calls in "use client"
+ * files). Every Server Component page in this app (HomePage, ShopPage,
+ * ProductDetailPage, OrdersPage, DashboardPage, the admin Overview, ...)
+ * resolves its own text server-side via getT()/getServerLocale() at
+ * request time and bakes it into the HTML it already sent — that text
+ * doesn't change just because the client-side cookie did, which is
+ * exactly the "still shows Bangla after switching to English" bug this
+ * used to have. router.refresh() re-requests the current route's Server
+ * Component payload (picking up the just-written cookie) without a full
+ * page reload, so it updates that server-rendered text too — it does NOT
+ * reset any client-side state (cart, filters, search, scroll position),
+ * since only the server-rendered parts of the tree are re-fetched.
  */
 export default function LanguageSwitcher({ className, showLabel = "sm" }) {
   const { locale, setLocale, t } = useLocale();
+  const router = useRouter();
   const nextLocale = OTHER_LOCALE[locale] ?? "en-BD";
+
+  const handleSwitch = () => {
+    setLocale(nextLocale);
+    router.refresh();
+  };
 
   return (
     <button
       type="button"
-      onClick={() => setLocale(nextLocale)}
+      onClick={handleSwitch}
       aria-label={t("language.switchTo", { lang: t(LABEL_KEY[nextLocale]) })}
       title={t("language.switchTo", { lang: t(LABEL_KEY[nextLocale]) })}
       className={cn(

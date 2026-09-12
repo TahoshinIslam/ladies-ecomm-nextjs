@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -72,19 +72,21 @@ function AccountSection({ crumbLabel, crumbIcon, title, subtitle, children }) {
           </Button>
         </div>
       ) : (
-        <div className="mt-8 max-w-xl">{children}</div>
+        // No width cap here — this sits in the account sidebar's content
+        // column (app/(routes)/(account)/layout.jsx), which is already
+        // its own reasonably-sized column, not the full page; capping it
+        // AGAIN at max-w-xl (576px) on top of that left a large empty gap
+        // on the right on any normal desktop viewport. Each tab below caps
+        // its own <form> at a sensible reading width instead (a form's
+        // single-column text fields still shouldn't stretch edge to edge),
+        // while AddressesTab's card grid is free to use the full column.
+        <div className="mt-8">{children}</div>
       )}
     </div>
   );
 }
 
 // =========== PROFILE INFO (/profile) ===========
-const infoSchema = z.object({
-  name: z.string().min(2, "Required"),
-  email: z.string().email("Invalid email"),
-  phone: z.string().optional(),
-});
-
 export default function ProfilePage() {
   const { t } = useLocale();
   return (
@@ -100,9 +102,20 @@ export default function ProfilePage() {
 }
 
 function InfoTab() {
+  const { t } = useLocale();
   const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const [updateMe, { isLoading }] = useUpdateMeMutation();
+
+  const infoSchema = useMemo(
+    () =>
+      z.object({
+        name: z.string().min(2, t("account.nameRequired")),
+        email: z.string().email(t("auth.validEmail")),
+        phone: z.string().optional(),
+      }),
+    [t],
+  );
 
   const {
     register,
@@ -121,48 +134,33 @@ function InfoTab() {
     try {
       const res = await updateMe(data).unwrap();
       dispatch(setCredentials(res.user));
-      toast.warning("Profile updated");
+      toast.warning(t("account.profileUpdated"));
     } catch (e) {
-      toast.error(e?.data?.message || "Could not update");
+      toast.error(e?.data?.message || t("account.profileUpdateFailed"));
     }
   };
 
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
-      className="space-y-4 rounded-lg border border-border bg-background p-6"
+      className="max-w-xl space-y-4 rounded-lg border border-border bg-background p-6"
     >
-      <Input label="Name" error={errors.name?.message} {...register("name")} />
+      <Input label={t("account.nameLabel")} error={errors.name?.message} {...register("name")} />
       <Input
-        label="Email"
+        label={t("account.emailLabel")}
         type="email"
         error={errors.email?.message}
         {...register("email")}
       />
-      <Input label="Phone" error={errors.phone?.message} {...register("phone")} />
+      <Input label={t("account.phoneLabel")} error={errors.phone?.message} {...register("phone")} />
       <Button type="submit" loading={isLoading}>
-        Save changes
+        {t("account.saveChanges")}
       </Button>
     </form>
   );
 }
 
 // =========== PASSWORD (/profile/password) ===========
-const pwdSchema = z
-  .object({
-    currentPassword: z.string().min(1, "Required"),
-    // PASSWORD_MIN_LENGTH matches schemas/authSchemas.js's passwordSchema
-    // exactly — previously this required only 6, while the server's
-    // updateMeSchema always required 8, so a password that passed this
-    // client-side check could still be rejected by the server.
-    newPassword: z.string().min(PASSWORD_MIN_LENGTH, `At least ${PASSWORD_MIN_LENGTH} characters`),
-    confirmPassword: z.string(),
-  })
-  .refine((d) => d.newPassword === d.confirmPassword, {
-    message: "Passwords don't match",
-    path: ["confirmPassword"],
-  });
-
 export function ProfilePasswordPage() {
   const { t } = useLocale();
   return (
@@ -178,7 +176,28 @@ export function ProfilePasswordPage() {
 }
 
 function PasswordTab() {
+  const { t } = useLocale();
   const [updateMe, { isLoading }] = useUpdateMeMutation();
+
+  // PASSWORD_MIN_LENGTH matches schemas/authSchemas.js's passwordSchema
+  // exactly — previously this required only 6, while the server's
+  // updateMeSchema always required 8, so a password that passed this
+  // client-side check could still be rejected by the server.
+  const pwdSchema = useMemo(
+    () =>
+      z
+        .object({
+          currentPassword: z.string().min(1, t("account.currentPasswordRequired")),
+          newPassword: z.string().min(PASSWORD_MIN_LENGTH, t("auth.passwordMinLength")),
+          confirmPassword: z.string(),
+        })
+        .refine((d) => d.newPassword === d.confirmPassword, {
+          message: t("account.passwordMismatch"),
+          path: ["confirmPassword"],
+        }),
+    [t],
+  );
+
   const {
     register,
     handleSubmit,
@@ -189,38 +208,38 @@ function PasswordTab() {
   const onSubmit = async ({ confirmPassword, ...data }) => {
     try {
       await updateMe(data).unwrap();
-      toast.warning("Password updated");
+      toast.warning(t("account.passwordUpdated"));
       reset();
     } catch (e) {
-      toast.error(e?.data?.message || "Could not update password");
+      toast.error(e?.data?.message || t("account.passwordUpdateFailed"));
     }
   };
 
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
-      className="space-y-4 rounded-lg border border-border bg-background p-6"
+      className="max-w-xl space-y-4 rounded-lg border border-border bg-background p-6"
     >
       <Input
-        label="Current password"
+        label={t("account.currentPasswordLabel")}
         type="password"
         error={errors.currentPassword?.message}
         {...register("currentPassword")}
       />
       <Input
-        label="New password"
+        label={t("account.newPasswordLabel")}
         type="password"
         error={errors.newPassword?.message}
         {...register("newPassword")}
       />
       <Input
-        label="Confirm new password"
+        label={t("account.confirmNewPasswordLabel")}
         type="password"
         error={errors.confirmPassword?.message}
         {...register("confirmPassword")}
       />
       <Button type="submit" loading={isLoading}>
-        Update password
+        {t("account.updatePassword")}
       </Button>
     </form>
   );
@@ -253,7 +272,14 @@ export function ProfileAddressesPage() {
   );
 }
 
+const ADDRESS_LABEL_KEY = {
+  home: "account.addressLabelHome",
+  work: "account.addressLabelWork",
+  other: "account.addressLabelOther",
+};
+
 function AddressesTab() {
+  const { t } = useLocale();
   const { data, isLoading } = useGetMyAddressesQuery();
   const [createAddress, { isLoading: creating }] = useCreateAddressMutation();
   const [updateAddress, { isLoading: updating }] = useUpdateAddressMutation();
@@ -286,24 +312,24 @@ function AddressesTab() {
     try {
       if (editing) {
         await updateAddress({ id: editing._id, ...formData }).unwrap();
-        toast.warning("Address updated");
+        toast.warning(t("account.addressUpdated"));
       } else {
         await createAddress(formData).unwrap();
-        toast.success("Address added");
+        toast.success(t("account.addressAdded"));
       }
       setModalOpen(false);
     } catch (e) {
-      toast.error(e?.data?.message || "Could not save");
+      toast.error(e?.data?.message || t("account.addressSaveFailed"));
     }
   };
 
   const handleDelete = async () => {
     try {
       await deleteAddress(confirmDelete._id).unwrap();
-      toast.success("Address deleted");
+      toast.success(t("account.addressDeleted"));
       setConfirmDelete(null);
     } catch (e) {
-      toast.error(e?.data?.message || "Could not delete");
+      toast.error(e?.data?.message || t("account.addressDeleteFailed"));
     }
   };
 
@@ -313,20 +339,20 @@ function AddressesTab() {
     <>
       <div className="rounded-lg border border-border bg-background p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-heading text-lg font-bold">Saved addresses</h2>
-          <Button onClick={openNew}>+ Add address</Button>
+          <h2 className="font-heading text-lg font-bold">{t("account.savedAddresses")}</h2>
+          <Button onClick={openNew}>+ {t("account.addAddress")}</Button>
         </div>
 
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
         ) : addresses.length === 0 ? (
           <EmptyState
             icon={MapPin}
-            title="No addresses yet"
-            message="Add a shipping address to speed up checkout."
+            title={t("account.noAddressesYet")}
+            message={t("account.noAddressesBody")}
           />
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {addresses.map((a) => (
               <li
                 key={a._id}
@@ -336,8 +362,8 @@ function AddressesTab() {
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold flex items-center gap-2">
                       {a.fullName}
-                      {a.isDefault && <Badge variant="accent">Default</Badge>}
-                      <Badge variant="outline" className="capitalize">{a.label}</Badge>
+                      {a.isDefault && <Badge variant="accent">{t("account.defaultBadge")}</Badge>}
+                      <Badge variant="outline">{t(ADDRESS_LABEL_KEY[a.label] ?? "account.addressLabelOther")}</Badge>
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {a.street}, {a.city}
@@ -351,14 +377,14 @@ function AddressesTab() {
                     <button
                       onClick={() => openEdit(a)}
                       className="rounded p-1.5 text-muted-foreground hover:bg-background hover:text-foreground"
-                      aria-label="Edit"
+                      aria-label={t("common.edit")}
                     >
                       <Edit2 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => setConfirmDelete(a)}
                       className="rounded p-1.5 text-muted-foreground hover:bg-danger/10 hover:text-danger"
-                      aria-label="Delete"
+                      aria-label={t("common.delete")}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -374,38 +400,38 @@ function AddressesTab() {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editing ? "Edit address" : "Add address"}
+        title={editing ? t("account.editAddressTitle") : t("account.addAddress")}
         size="lg"
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 p-5">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Input label="Full name" error={errors.fullName?.message} {...register("fullName")} />
-            <Input label="Phone" error={errors.phone?.message} {...register("phone")} />
+            <Input label={t("account.fullNameLabel")} error={errors.fullName?.message} {...register("fullName")} />
+            <Input label={t("account.phoneLabel")} error={errors.phone?.message} {...register("phone")} />
           </div>
-          <Input label="Street" error={errors.street?.message} {...register("street")} />
+          <Input label={t("account.streetLabel")} error={errors.street?.message} {...register("street")} />
           <div className="grid gap-3 sm:grid-cols-3">
-            <Input label="City" error={errors.city?.message} {...register("city")} />
-            <Input label="State" {...register("state")} />
-            <Input label="Postal code" error={errors.postalCode?.message} {...register("postalCode")} />
+            <Input label={t("account.cityLabel")} error={errors.city?.message} {...register("city")} />
+            <Input label={t("account.stateLabel")} {...register("state")} />
+            <Input label={t("account.postalCodeLabel")} error={errors.postalCode?.message} {...register("postalCode")} />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Input label="Country" error={errors.country?.message} {...register("country")} />
-            <Select label="Label" {...register("label")}>
-              <option value="home">Home</option>
-              <option value="work">Work</option>
-              <option value="other">Other</option>
+            <Input label={t("account.countryLabel")} error={errors.country?.message} {...register("country")} />
+            <Select label={t("account.addressLabelField")} {...register("label")}>
+              <option value="home">{t("account.addressLabelHome")}</option>
+              <option value="work">{t("account.addressLabelWork")}</option>
+              <option value="other">{t("account.addressLabelOther")}</option>
             </Select>
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="h-4 w-4 accent-accent" {...register("isDefault")} />
-            Make this my default address
+            {t("account.makeDefault")}
           </label>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => setModalOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" loading={creating || updating}>
-              {editing ? "Update" : "Save"}
+              {editing ? t("account.update") : t("common.save")}
             </Button>
           </div>
         </form>
@@ -415,7 +441,7 @@ function AddressesTab() {
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
         onConfirm={handleDelete}
-        title="Delete this address?"
+        title={t("account.deleteAddressTitle")}
         description={confirmDelete ? `${confirmDelete.street}, ${confirmDelete.city}` : ""}
         loading={deleting}
       />

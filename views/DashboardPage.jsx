@@ -18,7 +18,7 @@ import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 import { getMyOrders } from "../services/orderService.js";
 import { requireServerUser } from "../lib/serverPageAuth.js";
 import { serializeForClient } from "../lib/serialize.js";
-import { formatCurrency } from "../lib/utils.js";
+import { cn, formatCurrency } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
 
@@ -50,6 +50,39 @@ const statusLabelKey = {
   refunded: "orders.statusRefunded",
 };
 
+// Same tone treatment as views/admin/OverviewCharts.jsx's KpiCard. A first
+// pass here used an 8%-opacity tint fading to plain background — too
+// subtle to read as anything but white at a glance. This version commits
+// harder: a solid-colored icon chip, a real gradient wash, and a colored
+// top accent bar, so each card has an actual, unmistakable identity.
+const STAT_TONES = {
+  default: {
+    icon: "bg-ink text-canvas",
+    card: "border-border bg-gradient-to-br from-muted to-background",
+    bar: "bg-muted-foreground/40",
+  },
+  accent: {
+    icon: "bg-accent text-accent-foreground",
+    card: "border-accent/25 bg-gradient-to-br from-accent/[0.16] via-accent/[0.04] to-background",
+    bar: "bg-accent",
+  },
+  success: {
+    icon: "bg-success text-white",
+    card: "border-success/25 bg-gradient-to-br from-success/[0.16] via-success/[0.04] to-background",
+    bar: "bg-success",
+  },
+  warning: {
+    icon: "bg-warning text-white",
+    card: "border-warning/25 bg-gradient-to-br from-warning/[0.16] via-warning/[0.04] to-background",
+    bar: "bg-warning",
+  },
+  danger: {
+    icon: "bg-danger text-white",
+    card: "border-danger/25 bg-gradient-to-br from-danger/[0.16] via-danger/[0.04] to-background",
+    bar: "bg-danger",
+  },
+};
+
 // Real Server Component, same pattern as views/OrdersPage.jsx: authenticates
 // via the cookie session, reads only this user's own orders
 // (services/orderService.js's getMyOrders() already scopes by user id), and
@@ -74,16 +107,17 @@ export default async function DashboardPage() {
   const deliveredOrders = orders.filter((o) => o.status === "delivered").length;
 
   const STATS = [
-    { key: "totalOrders", icon: Package, value: totalOrders, labelKey: "dashboard.statTotalOrders" },
+    { key: "totalOrders", icon: Package, value: totalOrders, labelKey: "dashboard.statTotalOrders", tone: "default" },
     {
       key: "totalSpent",
       icon: Banknote,
       value: formatCurrency(totalSpent, locale),
       labelKey: "dashboard.statTotalSpent",
+      tone: "accent",
     },
-    { key: "active", icon: Truck, value: activeOrders, labelKey: "dashboard.statActiveOrders" },
-    { key: "delivered", icon: CheckCircle2, value: deliveredOrders, labelKey: "dashboard.statDeliveredOrders" },
-    { key: "cancelled", icon: XCircle, value: cancelledOrders, labelKey: "dashboard.statCancelledOrders" },
+    { key: "active", icon: Truck, value: activeOrders, labelKey: "dashboard.statActiveOrders", tone: "warning" },
+    { key: "delivered", icon: CheckCircle2, value: deliveredOrders, labelKey: "dashboard.statDeliveredOrders", tone: "success" },
+    { key: "cancelled", icon: XCircle, value: cancelledOrders, labelKey: "dashboard.statCancelledOrders", tone: "danger" },
   ];
 
   const recentOrders = orders.slice(0, 5);
@@ -102,19 +136,33 @@ export default async function DashboardPage() {
       <p className="mt-1 text-sm text-muted-foreground">{t("dashboard.subtitle")}</p>
 
       <div className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        {STATS.map((s) => (
-          <div key={s.key} className="rounded-lg border border-border bg-background p-5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {t(s.labelKey)}
-              </span>
-              <s.icon className="h-4 w-4 flex-none text-muted-foreground" />
+        {STATS.map((s) => {
+          const toneClasses = STAT_TONES[s.tone] ?? STAT_TONES.default;
+          return (
+            <div
+              key={s.key}
+              className={cn(
+                "overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md",
+                toneClasses.card,
+              )}
+            >
+              <div className={cn("h-1", toneClasses.bar)} />
+              <div className="p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t(s.labelKey)}
+                  </span>
+                  <span className={cn("flex h-8 w-8 flex-none items-center justify-center rounded-full shadow-sm", toneClasses.icon)}>
+                    <s.icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <p className="mt-3 font-heading text-2xl font-black" data-tabular>
+                  {s.value}
+                </p>
+              </div>
             </div>
-            <p className="mt-3 font-heading text-2xl font-black" data-tabular>
-              {s.value}
-            </p>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="mt-10">

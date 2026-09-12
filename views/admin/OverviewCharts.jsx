@@ -86,15 +86,31 @@ export default function OverviewCharts({ overview, series, topProducts, statusBr
 
       {/* Secondary KPIs */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-4">
-          <Star className="h-5 w-5 text-yellow-500" />
+        <div className="flex items-center gap-3 rounded-lg border border-yellow-500/25 bg-gradient-to-br from-yellow-500/[0.16] via-yellow-500/[0.04] to-background p-4 shadow-sm">
+          <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-yellow-500 text-white shadow-sm">
+            <Star className="h-4 w-4" />
+          </span>
           <div>
             <p className="text-xs text-muted-foreground">Average rating</p>
             <p className="text-xl font-bold">{o.avgRating || "No reviews"}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-4">
-          <AlertTriangle className={cn("h-5 w-5", o.outOfStockProducts > 0 ? "text-warning" : "text-muted-foreground")} />
+        <div
+          className={cn(
+            "flex items-center gap-3 rounded-lg border p-4 shadow-sm",
+            o.outOfStockProducts > 0
+              ? "border-warning/25 bg-gradient-to-br from-warning/[0.16] via-warning/[0.04] to-background"
+              : "border-border bg-gradient-to-br from-muted to-background",
+          )}
+        >
+          <span
+            className={cn(
+              "flex h-9 w-9 flex-none items-center justify-center rounded-full shadow-sm",
+              o.outOfStockProducts > 0 ? "bg-warning text-white" : "bg-ink text-canvas",
+            )}
+          >
+            <AlertTriangle className="h-4 w-4" />
+          </span>
           <div>
             <p className="text-xs text-muted-foreground">Low/out of stock</p>
             <p className="text-xl font-bold">{o.outOfStockProducts} products</p>
@@ -263,21 +279,54 @@ export default function OverviewCharts({ overview, series, topProducts, statusBr
   );
 }
 
+// Each tone tints BOTH the icon badge (unchanged) and the card itself — a
+// flat bg-background on every card regardless of tone (the old behavior)
+// read as plain/unfinished, even after a first pass added an 8%-opacity
+// tint — still too subtle to register as anything but white. This
+// version commits harder: a solid-colored icon chip, a real gradient
+// wash, and a colored top accent bar, so each KPI has an actual,
+// unmistakable identity instead of four identical white boxes.
+const KPI_TONES = {
+  default: {
+    icon: "bg-ink text-canvas",
+    card: "border-border bg-gradient-to-br from-muted to-background",
+    bar: "bg-muted-foreground/40",
+  },
+  accent: {
+    icon: "bg-accent text-accent-foreground",
+    card: "border-accent/25 bg-gradient-to-br from-accent/[0.16] via-accent/[0.04] to-background",
+    bar: "bg-accent",
+  },
+  success: {
+    icon: "bg-success text-white",
+    card: "border-success/25 bg-gradient-to-br from-success/[0.16] via-success/[0.04] to-background",
+    bar: "bg-success",
+  },
+  warning: {
+    icon: "bg-warning text-white",
+    card: "border-warning/25 bg-gradient-to-br from-warning/[0.16] via-warning/[0.04] to-background",
+    bar: "bg-warning",
+  },
+  danger: {
+    icon: "bg-danger text-white",
+    card: "border-danger/25 bg-gradient-to-br from-danger/[0.16] via-danger/[0.04] to-background",
+    bar: "bg-danger",
+  },
+};
+
 function KpiCard({ icon: Icon, label, value, sub, tone = "default", trendUp }) {
-  const tones = {
-    default: "bg-muted text-foreground",
-    accent: "bg-accent/10 text-accent",
-    success: "bg-success/10 text-success",
-    warning: "bg-warning/10 text-warning",
-    danger: "bg-danger/10 text-danger",
-  };
+  const toneClasses = KPI_TONES[tone] ?? KPI_TONES.default;
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-lg border border-border bg-background p-5"
+      className={cn(
+        "overflow-hidden rounded-lg border shadow-sm transition-shadow hover:shadow-md",
+        toneClasses.card,
+      )}
     >
-      <div className="flex items-start justify-between">
+      <div className={cn("h-1", toneClasses.bar)} />
+      <div className="flex items-start justify-between p-5">
         <div>
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
             {label}
@@ -290,7 +339,7 @@ function KpiCard({ icon: Icon, label, value, sub, tone = "default", trendUp }) {
             </p>
           )}
         </div>
-        <div className={cn("flex h-10 w-10 items-center justify-center rounded-md", tones[tone])}>
+        <div className={cn("flex h-10 w-10 flex-none items-center justify-center rounded-full shadow-sm", toneClasses.icon)}>
           <Icon className="h-5 w-5" />
         </div>
       </div>
