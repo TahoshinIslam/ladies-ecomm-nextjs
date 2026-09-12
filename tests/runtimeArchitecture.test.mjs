@@ -57,9 +57,31 @@ describe("Phase 9 — recharts stays isolated to the admin-only chunk (no dynami
     }
   });
 
-  test("no next/dynamic was introduced — the recharts admin chunk is already isolated by ordinary route-based code splitting, not a new dynamic import", () => {
-    const offenders = allSourceFiles.filter((f) => /next\/dynamic/.test(fs.readFileSync(f, "utf8")));
-    assert.deepEqual(offenders.map((f) => path.relative(ROOT, f)), []);
+  test("next/dynamic is used only for the two reviewed code-split boundaries — recharts/OverviewCharts.jsx stays isolated by ordinary route-based splitting, never wrapped in a dynamic import of its own", () => {
+    // An actual `next/dynamic` import, not just a comment mentioning the
+    // term (components/admin/ProductFormModal.jsx's own doc comment
+    // explains why it's structured for dynamic import from ProductsPage.jsx
+    // without itself calling dynamic()).
+    const offenders = allSourceFiles.filter((f) => /from ["']next\/dynamic["']/.test(fs.readFileSync(f, "utf8")));
+    const offenderPaths = offenders.map((f) => path.relative(ROOT, f)).sort();
+    // Performance audit fix: these two files defer components that render
+    // nothing until a user interaction (cart/search/quick-add/finder/
+    // compare overlays; the admin product create/edit modal) out of their
+    // page's initial JS. A THIRD file appearing here means either a new,
+    // deliberate code-split boundary (update this list after reviewing it)
+    // or an accidental one that should be reverted — either way, this
+    // assertion is meant to force that review, not silently pass either way.
+    assert.deepEqual(offenderPaths, [
+      "components/layout/StorefrontShell.jsx",
+      "views/admin/ProductsPage.jsx",
+    ]);
+    for (const f of offenders) {
+      const content = fs.readFileSync(f, "utf8");
+      assert.ok(
+        !/dynamic\(\s*\(\)\s*=>\s*import\([^)]*OverviewCharts/.test(content),
+        `${path.relative(ROOT, f)} must not dynamically import OverviewCharts.jsx — recharts' own chunk stays isolated by route-based splitting alone`,
+      );
+    }
   });
 });
 

@@ -123,10 +123,10 @@ describe("Phase 10 — forms expose labels and validation errors accessibly", ()
     assert.match(content, /showPassword \? "Hide password" : "Show password"/);
   });
 
-  test("the admin Field helper (views/admin/SettingsPage.jsx) and ComboField (views/admin/ProductsPage.jsx) associate label and control via htmlFor/id", () => {
+  test("the admin Field helper (views/admin/SettingsPage.jsx) and ComboField (components/admin/ProductFormModal.jsx) associate label and control via htmlFor/id", () => {
     const settings = read("views/admin/SettingsPage.jsx");
     assert.match(settings, /htmlFor=\{controlId\}/);
-    const products = read("views/admin/ProductsPage.jsx");
+    const products = read("components/admin/ProductFormModal.jsx");
     assert.match(products, /htmlFor=\{inputId\}/);
   });
 });

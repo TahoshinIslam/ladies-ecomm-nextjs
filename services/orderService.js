@@ -127,8 +127,21 @@ const calcTotals = async (
   let subtotal = 0;
   const lineItems = [];
 
+  // Performance audit fix: batched into ONE query instead of one
+  // `Product.findById` per cart line — for N lines that was N sequential
+  // round trips inside this same transaction/session. `$in` on `_id`
+  // naturally dedupes at the DB level when the same product appears more
+  // than once (two variants of one product, or a genuine duplicate line),
+  // so each `it` below still independently resolves its own variant/
+  // stock/price from the one shared document — per-item validation, error
+  // messages (still keyed off the original `it.productId`, not a
+  // resolved id), and the original item ordering are all unchanged.
+  const productIds = [...new Set(items.map((it) => String(it.productId)))];
+  const products = await Product.find({ _id: { $in: productIds } }).session(session);
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+
   for (const it of items) {
-    const product = await Product.findById(it.productId).session(session);
+    const product = productById.get(String(it.productId));
     if (!product || !product.isActive) {
       throw new HttpError(400, `Product ${it.productId} unavailable`);
     }

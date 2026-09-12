@@ -1,18 +1,28 @@
 "use client";
 
 import { Suspense, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
 import { WifiOff } from "lucide-react";
 
 import Header from "@/components/layout/Header.jsx";
 import Footer from "@/components/layout/Footer.jsx";
-import CartDrawer from "@/components/layout/CartDrawer.jsx";
-import SearchModal from "@/components/layout/SearchModal.jsx";
 import MobileNav from "@/components/layout/MobileNav.jsx";
-import CompareTray from "@/components/product/CompareTray.jsx";
-import QuickAddSheet from "@/components/product/QuickAddSheet.jsx";
-import ProductFinder from "@/components/product/ProductFinder.jsx";
 import ScrollToTop from "@/components/layout/ScrollToTop.jsx";
 import { useLocale } from "@/context/LocaleProvider.jsx";
+
+// These five overlays are mounted unconditionally below (so their own
+// Redux open/closed state survives navigation — see this file's own
+// comment) but render nothing until the shopper actually opens one, so
+// none of their code needs to be in the initial JS every storefront page
+// pays for. `ssr: false` is safe here specifically because they show
+// nothing meaningful in server-rendered HTML anyway (closed by default);
+// their own internal `open` Redux state is unaffected — this only moves
+// WHEN their code downloads, not their mount lifecycle or behavior.
+const CartDrawer = dynamic(() => import("@/components/layout/CartDrawer.jsx"), { ssr: false });
+const SearchModal = dynamic(() => import("@/components/layout/SearchModal.jsx"), { ssr: false });
+const CompareTray = dynamic(() => import("@/components/product/CompareTray.jsx"), { ssr: false });
+const QuickAddSheet = dynamic(() => import("@/components/product/QuickAddSheet.jsx"), { ssr: false });
+const ProductFinder = dynamic(() => import("@/components/product/ProductFinder.jsx"), { ssr: false });
 
 /**
  * Storefront chrome. Everything customer-facing renders inside this; /admin

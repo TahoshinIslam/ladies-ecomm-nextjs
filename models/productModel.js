@@ -228,6 +228,13 @@ productSchema.index({ category: 1, topCategory: 1, ageGroup: 1 });
 productSchema.index({ basePrice: 1 });
 // Default list view sorts by -createdAt and filters by isActive
 productSchema.index({ isActive: 1, createdAt: -1 });
+// The single most common shop-browse query (services/productService.js's
+// buildFilter()): {isActive: true, topCategory: {$in: [...]}} — a
+// department page — sorted by -createdAt by default. Without `topCategory`
+// in the index, that filter only used {isActive,createdAt} as a prefix and
+// then scanned every active product in memory to find the ones in this
+// department; this index serves the whole filter+sort directly.
+productSchema.index({ isActive: 1, topCategory: 1, createdAt: -1 });
 // Featured carousel: { isFeatured, isActive } + sort by -rating
 productSchema.index({ isFeatured: 1, isActive: 1, rating: -1 });
 // Facet filter queries: { attributes: { $elemMatch: { key, values } } }

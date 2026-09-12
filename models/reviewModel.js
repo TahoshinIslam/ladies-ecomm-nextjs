@@ -53,6 +53,14 @@ const reviewSchema = new mongoose.Schema(
 // One review per user per product
 reviewSchema.index({ user: 1, product: 1 }, { unique: true });
 
+// services/reviewService.js's getProductReviews() — the PDP reviews tab,
+// read on every product page view — filters {product} and sorts
+// -createdAt. The unique index above has `product` as its SECOND key, so
+// it can't serve as a prefix for a product-only filter; without this,
+// that query collection-scans and sorts in memory as the reviews
+// collection grows.
+reviewSchema.index({ product: 1, createdAt: -1 });
+
 // Update product's average rating after save
 reviewSchema.statics.calcAverageRating = async function (productId) {
   const stats = await this.aggregate([

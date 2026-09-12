@@ -2,7 +2,7 @@
 //
 // This goes beyond tests/clientSchemaImportability.test.mjs's "the files
 // are importable" check: it proves a REAL client form module
-// (views/RegisterPage.jsx, views/ProfilePage.jsx) actually imports the
+// (views/RegisterPage.jsx, views/ProfileForms.jsx) actually imports the
 // shared numeric/enum boundary values from schemas/*.js, that those values
 // equal the ones the real server schema enforces, and that a concrete
 // boundary password (7 chars — previously accepted by the client's
@@ -42,8 +42,8 @@ describe("Phase 5C — real client forms actually import shared schema primitive
     assert.ok(!/password:\s*z\.string\(\)\.min\(6/.test(source), "the old hand-copied, server-mismatched min(6) must be gone");
   });
 
-  test("views/ProfilePage.jsx imports PASSWORD_MIN_LENGTH and ADDRESS_LABELS from schemas/*.js", () => {
-    const source = read("views/ProfilePage.jsx");
+  test("views/ProfileForms.jsx imports PASSWORD_MIN_LENGTH and ADDRESS_LABELS from schemas/*.js", () => {
+    const source = read("views/ProfileForms.jsx");
     assert.match(source, /import\s*\{\s*PASSWORD_MIN_LENGTH\s*\}\s*from\s*["']\.\.\/schemas\/authSchemas\.js["']/);
     assert.match(source, /import\s*\{\s*ADDRESS_LABELS\s*\}\s*from\s*["']\.\.\/schemas\/addressSchemas\.js["']/);
     assert.match(source, /newPassword:\s*z\.string\(\)\.min\(PASSWORD_MIN_LENGTH/);
@@ -122,8 +122,8 @@ describe("Phase 5D — real client forms actually import the remaining shared en
     assert.ok(!/discountType:\s*z\.enum\(\["percentage",\s*"flat"\]\)/.test(source), "the old hand-copied enum literal must be gone");
   });
 
-  test("views/admin/ProductsPage.jsx imports AGE_GROUP_VALUES_LIST and AVAILABILITY_VALUES from schemas/catalogSchemas.js", () => {
-    const source = read("views/admin/ProductsPage.jsx");
+  test("components/admin/ProductFormModal.jsx imports AGE_GROUP_VALUES_LIST and AVAILABILITY_VALUES from schemas/catalogSchemas.js", () => {
+    const source = read("components/admin/ProductFormModal.jsx");
     assert.match(source, /import\s*\{\s*AGE_GROUP_VALUES_LIST,\s*AVAILABILITY_VALUES\s*\}\s*from\s*["']\.\.\/\.\.\/schemas\/catalogSchemas\.js["']/);
     assert.match(source, /ageGroup:\s*z\.enum\(AGE_GROUP_VALUES_LIST\)/);
     assert.match(source, /availability:\s*z\.enum\(AVAILABILITY_VALUES\)/);

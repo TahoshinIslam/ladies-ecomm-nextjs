@@ -14,7 +14,8 @@ export async function getProductReviews(productId, { page = 1, limit = 10 } = {}
       .populate("adminReply.repliedBy", "name")
       .sort("-createdAt")
       .skip(skip)
-      .limit(Number(limit)),
+      .limit(Number(limit))
+      .lean(),
     Review.countDocuments(filter),
   ]);
   return { total, page: Number(page), pages: Math.ceil(total / Number(limit)) || 1, count: reviews.length, reviews };

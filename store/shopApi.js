@@ -57,7 +57,9 @@ const orderEndpoints = (b) => ({
       body,
       headers: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,
     }),
-    invalidatesTags: ["Order", "Cart"],
+    // A new order has no existing per-id tag to invalidate (nothing was
+    // cached under its id before this) — only LIST membership changes.
+    invalidatesTags: [{ type: "Order", id: "LIST" }, "Cart"],
   }),
   getOrder: b.query({
     query: (id) => `/orders/${id}`,
@@ -65,12 +67,26 @@ const orderEndpoints = (b) => ({
   }),
   cancelOrder: b.mutation({
     query: (id) => ({ url: `/orders/${id}/cancel`, method: "POST" }),
-    invalidatesTags: (r, e, a) => [{ type: "Order", id: a }, "Order"],
+    // The specific order's own tag (its detail query, and any admin list
+    // page that currently includes this row) + LIST (a cancellation can
+    // move this row out of a status-filtered list view).
+    invalidatesTags: (r, e, a) => [{ type: "Order", id: a }, { type: "Order", id: "LIST" }],
   }),
   // Admin
   getAllOrders: b.query({
     query: (params = {}) => `/orders?${buildQueryString(params)}`,
-    providesTags: ["Order"],
+    // Performance audit fix: per-row tags + a LIST tag, replacing the old
+    // bare "Order" collection-wide tag every row shared. A mutation on one
+    // order (updateOrderStatus/cancelOrder below, or the SSE handler in
+    // hooks/useAdminEventStream.js) can now invalidate just that row's
+    // tag — which only refetches THIS query if the currently-displayed
+    // page/filter actually contains that row — instead of forcing every
+    // open admin session's every orders-list page/filter to refetch on any
+    // single order change anywhere.
+    providesTags: (result) =>
+      result?.orders
+        ? [...result.orders.map((o) => ({ type: "Order", id: o._id })), { type: "Order", id: "LIST" }]
+        : [{ type: "Order", id: "LIST" }],
   }),
   updateOrderStatus: b.mutation({
     query: ({ id, ...body }) => ({
@@ -78,7 +94,10 @@ const orderEndpoints = (b) => ({
       method: "PUT",
       body,
     }),
-    invalidatesTags: (r, e, a) => [{ type: "Order", id: a.id }, "Order"],
+    // Same reasoning as cancelOrder above: the specific row + LIST (a
+    // status change can move this row across a status-filtered view's
+    // boundary).
+    invalidatesTags: (r, e, a) => [{ type: "Order", id: a.id }, { type: "Order", id: "LIST" }],
   }),
 });
 

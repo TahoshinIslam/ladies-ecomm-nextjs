@@ -765,9 +765,17 @@ const CARD_FIELDS =
 
 export async function getProductByIdOrSlug(idOrSlug) {
   const isId = mongoose.isValidObjectId(idOrSlug);
+  // Read-only: this powers the PDP (via lib/serverDataCache.js's cached
+  // wrapper) and getRelatedProducts()'s own lookup below, neither of which
+  // ever saves the result back — .lean() skips Mongoose document
+  // hydration for a query that's serialized to the client either way.
+  // lib/i18n/localize.js's toPlain() already handles this returning a
+  // plain object instead of a Document (it's had to, since the CARD_FIELDS
+  // list queries elsewhere in this file were already .lean()-ed).
   const product = await Product.findOne(isId ? { _id: idOrSlug } : { slug: idOrSlug })
     .populate("brand", "name slug")
-    .populate("category", "name slug");
+    .populate("category", "name slug")
+    .lean();
   if (!product) throw new HttpError(404, "Product not found");
   return product;
 }
@@ -805,36 +813,101 @@ export async function listFeatured(limit = 8) {
 // department); with one, groups by that category's direct children (real
 // leaf/style categories). Only categories/departments with at least one
 // active product are included.
+// Performance audit fix: this used to run 2 extra DB round trips PER
+// category (a Category lookup/exists check, then a Product count) — for
+// N categories, 2N+1 total queries. Both branches below now use a fixed,
+// small number of queries regardless of how many categories exist:
+// one batched lookup for the "which categories have children" question
+// (replacing N per-category `isLeafCategory`/children lookups), and one
+// or two grouped aggregations (replacing N per-category `countDocuments`
+// calls). Every rule below is preserved exactly: `isActive` filtering,
+// which field each tier counts by, the sortOrder/name category sort, the
+// response shape, and "only categories with at least one active product"
+// (count > 0) filtering.
 export async function listGroupings(categoryId) {
   if (categoryId) requireObjectIdFormat(categoryId, "category");
   const parentFilter = categoryId ? { parent: categoryId } : { parent: null };
   const categories = await Category.find(parentFilter).sort("sortOrder name").lean();
+  if (categories.length === 0) return [];
 
-  const groupings = await Promise.all(
-    categories.map(async (c) => {
-      if (!categoryId) {
-        // Top level: c is a root department. A real product's topCategory
-        // is always c's own id — c's leaf-style children never appear
-        // there — but counting across c plus its direct children in one
-        // query is still correct (the children just never match) and
-        // avoids a second, department-specific code path.
-        const scopeIds = [c._id, ...(await Category.find({ parent: c._id }).distinct("_id"))];
-        const count = await Product.countDocuments({ isActive: true, topCategory: { $in: scopeIds } });
-        return { _id: c._id, name: c.name, nameBn: c.nameBn, slug: c.slug, count, isLeaf: false };
-      }
-      // Drilling into a specific department: c is always a real leaf/style
-      // (matched via `category`) — no product's `category` field is ever
-      // a department.
-      const isLeaf = await isLeafCategory(c._id);
-      const count = await Product.countDocuments({
-        isActive: true,
-        [isLeaf ? "category" : "topCategory"]: c._id,
-      });
-      return { _id: c._id, name: c.name, nameBn: c.nameBn, slug: c.slug, count, isLeaf };
-    }),
-  );
+  const categoryIds = categories.map((c) => c._id);
 
-  return groupings.filter((g) => g.count > 0);
+  if (!categoryId) {
+    // Top level: each `c` is a root department. A real product's
+    // topCategory is always the root's own id — a root's leaf-style
+    // children never appear there — but counting across a root plus its
+    // direct children in one query is still correct (the children simply
+    // never match) and avoids a second, department-specific code path.
+    // One batched query replaces what used to be one `Category.find`
+    // per root.
+    const children = await Category.find({ parent: { $in: categoryIds } }).select("_id parent").lean();
+    const childToRoot = new Map(children.map((ch) => [String(ch._id), String(ch.parent)]));
+    const allScopeIds = [...categoryIds, ...children.map((ch) => ch._id)];
+
+    const counted = await Product.aggregate([
+      { $match: { isActive: true, topCategory: { $in: allScopeIds } } },
+      { $group: { _id: "$topCategory", count: { $sum: 1 } } },
+    ]);
+
+    const countByRoot = new Map();
+    for (const row of counted) {
+      const rootId = childToRoot.get(String(row._id)) ?? String(row._id);
+      countByRoot.set(rootId, (countByRoot.get(rootId) ?? 0) + row.count);
+    }
+
+    return categories
+      .map((c) => ({
+        _id: c._id,
+        name: c.name,
+        nameBn: c.nameBn,
+        slug: c.slug,
+        count: countByRoot.get(String(c._id)) ?? 0,
+        isLeaf: false,
+      }))
+      .filter((g) => g.count > 0);
+  }
+
+  // Drilling into a specific department: each `c` is always a real
+  // leaf/style category (matched via `category`) — no product's
+  // `category` field is ever a department. One batched query (instead of
+  // one `isLeafCategory()` call per category) determines which of these
+  // categories themselves have children (= not a leaf).
+  const grandchildren = await Category.find({ parent: { $in: categoryIds } }).distinct("parent");
+  const nonLeafIds = new Set(grandchildren.map(String));
+  const leafIds = categoryIds.filter((id) => !nonLeafIds.has(String(id)));
+  const nonLeafIdsArr = categoryIds.filter((id) => nonLeafIds.has(String(id)));
+
+  const [leafCounts, nonLeafCounts] = await Promise.all([
+    leafIds.length
+      ? Product.aggregate([
+          { $match: { isActive: true, category: { $in: leafIds } } },
+          { $group: { _id: "$category", count: { $sum: 1 } } },
+        ])
+      : [],
+    nonLeafIdsArr.length
+      ? Product.aggregate([
+          { $match: { isActive: true, topCategory: { $in: nonLeafIdsArr } } },
+          { $group: { _id: "$topCategory", count: { $sum: 1 } } },
+        ])
+      : [],
+  ]);
+
+  const countById = new Map();
+  for (const row of [...leafCounts, ...nonLeafCounts]) countById.set(String(row._id), row.count);
+
+  return categories
+    .map((c) => {
+      const isLeaf = !nonLeafIds.has(String(c._id));
+      return {
+        _id: c._id,
+        name: c.name,
+        nameBn: c.nameBn,
+        slug: c.slug,
+        count: countById.get(String(c._id)) ?? 0,
+        isLeaf,
+      };
+    })
+    .filter((g) => g.count > 0);
 }
 
 // Related = same leaf category ranks above same-department-only, and within

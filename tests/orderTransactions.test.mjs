@@ -24,6 +24,7 @@ import {
   requestAs,
   createTestUser,
   createTestProduct,
+  createTestCategory,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -31,7 +32,7 @@ const reason = skipReason;
 
 describe("Order transactions: creation, stock, cart, promo, cancellation, ownership", { skip: !canRun && reason }, () => {
   let createOrderPOST, getOrderGET, cancelOrderPOST;
-  let Order, Product, Cart, User, Settings;
+  let Order, Product, Cart, User, Settings, Category;
 
   before(async () => {
     await connectTestDb();
@@ -43,6 +44,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
     ({ default: Cart } = await import("../models/cartModel.js"));
     ({ default: User } = await import("../models/userModel.js"));
     ({ default: Settings } = await import("../models/settingsModel.js"));
+    ({ default: Category } = await import("../models/categoryModel.js"));
   });
 
   after(async () => {
@@ -99,6 +101,88 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(json.order.subtotal, 360000);
     } finally {
       await cleanup(buyer, productA, productB);
+    }
+  });
+
+  // Performance audit fix: calcTotals() (services/orderService.js) now
+  // resolves all line items' products via one batched `$in` query instead
+  // of one Product.findById() per item. These two tests specifically
+  // guard the failure mode a naive "dedupe by productId" batching mistake
+  // would introduce — dropping or cross-mixing a line item that shares a
+  // productId with another line.
+  test("duplicate product lines: the same product+variant appearing twice as separate cart lines produces two order items, not one merged/dropped line", async () => {
+    const { buyer, productA } = await makeBuyerAndProducts();
+    try {
+      const req = requestAs({
+        method: "POST",
+        url: "http://test/api/orders",
+        session: await createTestSession(buyer._id),
+        body: {
+          items: [
+            { productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 2 },
+            { productId: productA._id.toString(), variantId: productA.variants[0]._id.toString(), quantity: 3 },
+          ],
+          shippingAddress: address(),
+        },
+      });
+      const res = await createOrderPOST(req);
+      assert.equal(res.status, 201);
+      const json = await res.json();
+      assert.equal(json.order.items.length, 2, "two separate cart lines must remain two separate order items");
+      assert.deepEqual(json.order.items.map((i) => i.quantity).sort(), [2, 3]);
+
+      const updated = await Product.findById(productA._id);
+      assert.equal(updated.variants[0].stock, 10 - 2 - 3, "stock must be decremented by the SUM of both duplicate lines' quantities");
+    } finally {
+      await cleanup(buyer, productA);
+    }
+  });
+
+  test("multiple variants of one product: two lines for the same product but different variants each resolve their own variant's price/stock, never cross-mixed", async () => {
+    const buyer = await createTestUser({ role: "customer" });
+    const category = await createTestCategory();
+    const multiVariant = await Product.create({
+      name: "Test Multi-Variant Product",
+      description: "Created by orderTransactions.test.mjs — safe to delete.",
+      category: category._id,
+      basePrice: 1000,
+      images: ["https://placehold.co/400x400?text=test"],
+      variants: [
+        { variantName: "Small", sku: "TMV-S", stock: 5, price: 800 },
+        { variantName: "Large", sku: "TMV-L", stock: 5, price: 1200 },
+      ],
+    });
+    try {
+      const req = requestAs({
+        method: "POST",
+        url: "http://test/api/orders",
+        session: await createTestSession(buyer._id),
+        body: {
+          items: [
+            { productId: multiVariant._id.toString(), variantId: multiVariant.variants[0]._id.toString(), quantity: 1 },
+            { productId: multiVariant._id.toString(), variantId: multiVariant.variants[1]._id.toString(), quantity: 1 },
+          ],
+          shippingAddress: address(),
+        },
+      });
+      const res = await createOrderPOST(req);
+      assert.equal(res.status, 201);
+      const json = await res.json();
+      assert.equal(json.order.items.length, 2);
+      const skus = json.order.items.map((i) => i.snapshot?.sku).sort();
+      assert.deepEqual(skus, ["TMV-L", "TMV-S"], "each line must resolve its OWN variant's snapshot, not the other line's");
+      // 800 + 1200 = 2000 USD * 120 BDT rate = 240000
+      assert.equal(json.order.subtotal, 240000, "each variant's own price must be charged — never the other variant's price");
+
+      const updated = await Product.findById(multiVariant._id);
+      assert.equal(updated.variants[0].stock, 4, "the Small variant's own stock must decrement by 1");
+      assert.equal(updated.variants[1].stock, 4, "the Large variant's own stock must decrement by 1, independently of the Small variant");
+    } finally {
+      await Order.deleteMany({ user: buyer._id });
+      await Cart.deleteOne({ userId: buyer._id });
+      await Product.deleteOne({ _id: multiVariant._id });
+      await Category.deleteOne({ _id: category._id });
+      await User.deleteOne({ _id: buyer._id });
     }
   });
 

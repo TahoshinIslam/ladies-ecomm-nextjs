@@ -20,6 +20,32 @@ const cache = (globalThis.__mongooseCache ??= { conn: null, promise: null });
 const connectDB = async () => {
   if (cache.conn) return cache.conn;
 
+  // `next build`'s static-generation workers execute Server Component
+  // trees to probe whether a route COULD be static, before any route's
+  // own runtime logic (this app's own proxy.js middleware, which reads
+  // the session cookie on every real request) ever runs — so a shared
+  // Server Component that fetches data unconditionally (no
+  // `force-dynamic`, no dynamic API call ahead of it) can get invoked
+  // during the build itself, not just at request time. That already
+  // happened here once: app/(routes)/layout.jsx's category fetch was
+  // silently connecting to and reading MONGO_URI (this project's
+  // Production database) on every `npm run build`. NEXT_PHASE is the
+  // official, documented way (next/dist/shared/lib/constants) to detect
+  // exactly that build phase — failing loudly here is the actual fix
+  // (app/(routes)/layout.jsx now also declares `force-dynamic`, which is
+  // what should prevent this from being reached during a build at all),
+  // this is the fail-safe for any other page/layout that adds a data
+  // fetch later without that same guard.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    throw new Error(
+      "connectDB() was called during `next build` (NEXT_PHASE=phase-production-build). " +
+        "This app has no legitimate build-time database access — every route is " +
+        "request-time dynamic (see proxy.js). Whatever Server Component reached this " +
+        "needs `export const dynamic = \"force-dynamic\"` (or its data fetch moved " +
+        "behind a request-time-only code path) instead of connecting here.",
+    );
+  }
+
   if (!cache.promise) {
     mongoose.set("strictQuery", true);
 

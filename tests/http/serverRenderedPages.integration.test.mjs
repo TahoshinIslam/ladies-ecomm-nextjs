@@ -181,6 +181,32 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
     assert.ok(!html.includes("Test item"), "another customer's order item data must never render");
   });
 
+  // Performance audit fix: getOrder() and getPaymentByOrder() now run
+  // concurrently (Promise.allSettled) instead of sequentially — this
+  // proves that change preserved both halves of the original contract:
+  // an order with no Payment row still renders (payment is genuinely
+  // optional), and a 403/404 from the order lookup itself still resolves
+  // to the real 404 page rather than an unhandled rejection/500 — even
+  // though the (now-concurrent) payment lookup for that same, invalid/
+  // unauthorized order id is also in flight at the same time.
+  test("order detail with no Payment row still renders 200 (payment lookup failure never blocks the page)", async () => {
+    const order = await createDeliveredOrderFor(customer._id, product._id, product.variants[0]._id);
+    createdIds.orders.push(order._id);
+    const cookie = await cookieHeaderFor(customer._id);
+    const res = await fetch(`${BASE_URL}/orders/${order._id}`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(html.includes(order._id.toString().slice(-8).toUpperCase()));
+  });
+
+  test("a different customer's concurrent order+payment lookup still resolves to the real 404 (the now-parallel payment fetch never leaks a 200 or a 500)", async () => {
+    const order = await createDeliveredOrderFor(customer._id, product._id, product.variants[0]._id);
+    createdIds.orders.push(order._id);
+    const cookie = await cookieHeaderFor(otherCustomer._id);
+    const res = await fetch(`${BASE_URL}/orders/${order._id}`, { headers: { cookie } });
+    assert.equal(res.status, 404);
+  });
+
   test("the order-detail HTML never contains internal fields (idempotency hash, raw session/CSRF cookie values)", async () => {
     const order = await createDeliveredOrderFor(customer._id, product._id, product.variants[0]._id);
     createdIds.orders.push(order._id);
@@ -188,6 +214,51 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
     const res = await fetch(`${BASE_URL}/orders/${order._id}`, { headers: { cookie } });
     const html = await res.text();
     assert.ok(!/idempotencyKeyHash|requestFingerprint/i.test(html));
+  });
+
+  // ---------- Profile / Password / Addresses (performance-audit fix:
+  // these three previously had NO server-side auth at all — only a
+  // client-side useSelector gate — unlike every other authenticated route
+  // above. Same shape of proof as /orders and /admin above: a real
+  // redirect() when unauthenticated, real server-rendered content when
+  // authenticated. ----------
+  for (const rel of ["/profile", "/profile/addresses", "/profile/password"]) {
+    test(`unauthenticated access to ${rel} redirects to login (real server-side auth, not a client-rendered gate)`, async () => {
+      const res = await fetch(`${BASE_URL}${rel}`, { redirect: "manual" });
+      assert.ok([302, 303, 307].includes(res.status), `expected a redirect, got ${res.status}`);
+      assert.match(res.headers.get("location") || "", new RegExp(`/login\\?redirect=${encodeURIComponent(rel).replace(/[/]/g, "%2F")}`));
+    });
+  }
+
+  test("authenticated /profile server-renders the real user's name and email in the initial HTML (not just after client hydration)", async () => {
+    const cookie = await cookieHeaderFor(customer._id);
+    const res = await fetch(`${BASE_URL}/profile`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(html.includes(customer.name), "the real user's name must be in the server-rendered HTML");
+    assert.ok(html.includes(customer.email), "the real user's email must be in the server-rendered HTML");
+  });
+
+  test("authenticated /profile/addresses server-renders its real shell (breadcrumb, heading) — the address LIST itself is client-fetched (RTK Query), not server-rendered, so it is deliberately not asserted here", async () => {
+    // No locale cookie set here -> this app's real default locale is
+    // bn-BD (Bangla, this storefront's primary market — see
+    // lib/i18n/config.js's DEFAULT_LOCALE), not English. `lang="bn-BD"`
+    // on the actual response confirmed this — the English string
+    // assertion here originally failed for that reason alone, not because
+    // anything was unrendered.
+    const cookie = `${await cookieHeaderFor(customer._id)}; tahos_locale=en-BD`;
+    const res = await fetch(`${BASE_URL}/profile/addresses`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(html.includes("Saved addresses"), "the page shell (breadcrumb/heading/section title) must be server-rendered");
+  });
+
+  test("authenticated /profile/password server-renders its real shell (the password form has no server-fetched data to assert beyond the auth gate itself)", async () => {
+    const cookie = `${await cookieHeaderFor(customer._id)}; tahos_locale=en-BD`;
+    const res = await fetch(`${BASE_URL}/profile/password`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.ok(html.includes("Current password") || html.includes("current password"));
   });
 
   // ---------- Admin overview ----------

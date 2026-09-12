@@ -26,19 +26,29 @@ export default async function ProductDetailPage({ params }) {
   const { idOrSlug } = await params;
   const locale = await getServerLocale();
 
-  let rawProduct;
+  // getCachedRelatedProducts()/getCachedPublicSettings() don't depend on
+  // `rawProduct` at all — related-products resolves the product itself
+  // internally (services/productService.js's listRelated()), and settings
+  // is global — so both run concurrently with the initial product fetch
+  // instead of waiting for it to resolve first. Only
+  // getCachedAttributesForCategory() has a real dependency
+  // (rawProduct.topCategory) and stays a genuine second step. Same
+  // Promise.all semantics as before (any rejection still propagates,
+  // still resolved by the same catch below) — this only removes the
+  // waterfall, it does not add new error-swallowing that wasn't here.
+  let rawProduct, rawRelated, settings;
   try {
-    rawProduct = await getCachedProductByIdOrSlug(idOrSlug);
+    [rawProduct, rawRelated, settings] = await Promise.all([
+      getCachedProductByIdOrSlug(idOrSlug),
+      getCachedRelatedProducts(idOrSlug, 8),
+      getCachedPublicSettings(),
+    ]);
   } catch (err) {
     if (err instanceof HttpError && err.status === 404) notFound();
     throw err;
   }
 
-  const [rawRelated, rawAttrDefs, settings] = await Promise.all([
-    getCachedRelatedProducts(idOrSlug, 8),
-    getCachedAttributesForCategory(rawProduct.topCategory),
-    getCachedPublicSettings(),
-  ]);
+  const rawAttrDefs = await getCachedAttributesForCategory(rawProduct.topCategory);
 
   const product = serializeForClient(localizeProduct(rawProduct, locale));
   const relatedProducts = serializeForClient(localizeProductList(rawRelated, locale));

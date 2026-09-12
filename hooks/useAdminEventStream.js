@@ -27,13 +27,40 @@ const TOAST_COPY = {
 // (including routine ones with no toast) still need this so one admin's
 // click is reflected live for anyone else with the list open — missing
 // this entirely for cancel/status-update was the reported bug.
+//
+// Performance audit fix (Orders): each entry can be a plain tag array (the
+// Product ones, unchanged — Products' RTK Query layer already has
+// per-id/LIST tags of its own, and its SSE scoping is a separate,
+// not-yet-done follow-up, deliberately out of scope here) or a function of
+// the event payload, used for the three Order event types so a status
+// change on ONE order invalidates that order's own {id} tag (its detail
+// query, and any admin's currently-open list page that happens to include
+// that row) plus the LIST tag (since a status change can move a row across
+// a status-filtered list's boundary — matching store/shopApi.js's own
+// updateOrderStatus/cancelOrder invalidatesTags) — instead of broadcasting
+// a bare "Order" invalidation that forced EVERY open admin session's EVERY
+// orders-list query (any page, any filter) to refetch on any order change
+// anywhere. Falls back to the old broad "Order" tag if a payload is ever
+// missing `orderId` (a malformed/incomplete event must still fail safe,
+// not silently skip invalidating anything).
 const TAGS_BY_TYPE = {
-  NEW_ORDER: ["Order"],
-  ORDER_CANCELLED: ["Order"],
-  ORDER_STATUS_CHANGED: ["Order"],
+  NEW_ORDER: () => [{ type: "Order", id: "LIST" }],
+  ORDER_CANCELLED: (p) => (p.orderId ? [{ type: "Order", id: p.orderId }, { type: "Order", id: "LIST" }] : ["Order"]),
+  ORDER_STATUS_CHANGED: (p) => (p.orderId ? [{ type: "Order", id: p.orderId }, { type: "Order", id: "LIST" }] : ["Order"]),
   LOW_STOCK_ALERT: ["Product"],
   PRODUCT_CREATED: ["Product"],
   PRODUCT_UPDATED: ["Product"],
+};
+
+// Exported (not just a local helper) specifically so the mapping logic
+// itself is directly testable without mounting this hook as a real React
+// component (this repo has no jsdom/RTL) — same "verify the underlying
+// logic directly since the hook itself can't be mounted" approach
+// tests/clientAuthIntegration.test.mjs already documents for useAuthBoot.js.
+export const tagsForEvent = (type, payload) => {
+  const entry = TAGS_BY_TYPE[type];
+  if (!entry) return [];
+  return typeof entry === "function" ? entry(payload) : entry;
 };
 
 /**
@@ -82,7 +109,7 @@ export function useAdminEventStream() {
       } catch {
         return;
       }
-      dispatch(shopApi.util.invalidateTags(["Notification", ...(TAGS_BY_TYPE[payload.type] || [])]));
+      dispatch(shopApi.util.invalidateTags(["Notification", ...tagsForEvent(payload.type, payload)]));
       const describe = TOAST_COPY[payload.type];
       if (describe) toast.message(describe(payload));
     };

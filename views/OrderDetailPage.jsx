@@ -46,24 +46,24 @@ export default async function OrderDetailPage({ params }) {
 
   if (!isObjectIdFormat(id)) notFound();
 
-  let rawOrder;
-  try {
-    rawOrder = await getOrder(user._id, user.role, id);
-  } catch (err) {
+  // getOrder() and getPaymentByOrder() don't depend on each other — both
+  // only need `id`/`user._id`/`user.role`, already known here — so they run
+  // concurrently instead of one full round trip waiting on the other.
+  // Payment stays genuinely optional (an order can legitimately have no
+  // Payment row yet): allSettled means a rejected payment lookup can never
+  // itself throw or block resolving the order below.
+  const [orderResult, paymentResult] = await Promise.allSettled([
+    getOrder(user._id, user.role, id),
+    getPaymentByOrder(id, user._id, user.role),
+  ]);
+
+  if (orderResult.status === "rejected") {
+    const err = orderResult.reason;
     if (err instanceof HttpError && (err.status === 404 || err.status === 403)) notFound();
     throw err;
   }
-  const order = serializeForClient(rawOrder);
-
-  // Optional — an order can legitimately have no Payment row visible yet;
-  // never let that (or any other lookup failure) take down the whole page.
-  let payment = null;
-  try {
-    const rawPayment = await getPaymentByOrder(id, user._id, user.role);
-    payment = serializeForClient(rawPayment);
-  } catch {
-    payment = null;
-  }
+  const order = serializeForClient(orderResult.value);
+  const payment = paymentResult.status === "fulfilled" ? serializeForClient(paymentResult.value) : null;
 
   const isFreeShippingPromo = /first order free/i.test(order.shippingTier || "");
   const isDelivered = order.status === "delivered";

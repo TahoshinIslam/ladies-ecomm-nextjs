@@ -43,7 +43,11 @@ export async function isLeafCategory(categoryId) {
 }
 
 export async function listCategories() {
-  const categories = await Category.find().sort("sortOrder name");
+  // Read-only — its one caller (lib/serverDataCache.js's getCachedCategories())
+  // immediately serializeForClient()s the result, and this read fires on
+  // every single storefront/admin page load (see app/api/categories/route.js's
+  // own comment), so it's worth skipping Mongoose document hydration for.
+  const categories = await Category.find().sort("sortOrder name").lean();
   return categories;
 }
 
