@@ -143,16 +143,18 @@ function InfoTab() {
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
-      className="max-w-xl space-y-4 rounded-lg border border-border bg-background p-6"
+      className="space-y-4 rounded-lg border border-border bg-background p-6"
     >
       <Input label={t("account.nameLabel")} error={errors.name?.message} {...register("name")} />
-      <Input
-        label={t("account.emailLabel")}
-        type="email"
-        error={errors.email?.message}
-        {...register("email")}
-      />
-      <Input label={t("account.phoneLabel")} error={errors.phone?.message} {...register("phone")} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label={t("account.emailLabel")}
+          type="email"
+          error={errors.email?.message}
+          {...register("email")}
+        />
+        <Input label={t("account.phoneLabel")} error={errors.phone?.message} {...register("phone")} />
+      </div>
       <Button type="submit" loading={isLoading}>
         {t("account.saveChanges")}
       </Button>
@@ -218,7 +220,7 @@ function PasswordTab() {
   return (
     <form
       onSubmit={handleSubmit(onSubmit)}
-      className="max-w-xl space-y-4 rounded-lg border border-border bg-background p-6"
+      className="space-y-4 rounded-lg border border-border bg-background p-6"
     >
       <Input
         label={t("account.currentPasswordLabel")}
@@ -226,18 +228,20 @@ function PasswordTab() {
         error={errors.currentPassword?.message}
         {...register("currentPassword")}
       />
-      <Input
-        label={t("account.newPasswordLabel")}
-        type="password"
-        error={errors.newPassword?.message}
-        {...register("newPassword")}
-      />
-      <Input
-        label={t("account.confirmNewPasswordLabel")}
-        type="password"
-        error={errors.confirmPassword?.message}
-        {...register("confirmPassword")}
-      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          label={t("account.newPasswordLabel")}
+          type="password"
+          error={errors.newPassword?.message}
+          {...register("newPassword")}
+        />
+        <Input
+          label={t("account.confirmNewPasswordLabel")}
+          type="password"
+          error={errors.confirmPassword?.message}
+          {...register("confirmPassword")}
+        />
+      </div>
       <Button type="submit" loading={isLoading}>
         {t("account.updatePassword")}
       </Button>
