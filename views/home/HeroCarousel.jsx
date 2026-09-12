@@ -220,7 +220,19 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
                       fill
                       sizes="50vw"
                       fetchPriority="high"
-                      className="object-contain"
+                      // object-cover (not object-contain): contain was
+                      // leaving visible gaps on the left/right of this
+                      // group photo where its aspect ratio didn't exactly
+                      // match the box, showing the bg-wash fill color
+                      // through them. cover + object-center fills the box
+                      // completely; the wrapper's own `overflow-hidden`
+                      // (unchanged, just above) crops anything that
+                      // extends past the rounded corners. scale-[1.02] is
+                      // a deliberately tiny zoom — just enough to eat the
+                      // final subpixel sliver some browsers leave at the
+                      // very edge with cover, without cropping any more of
+                      // the models than that.
+                      className="scale-[1.02] object-cover object-center"
                     />
                   ) : (
                     <div className="grid h-full w-full place-items-center">
@@ -368,7 +380,11 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
               fill
               sizes="100vw"
               fetchPriority="high"
-              className="object-contain"
+              // See the desktop hero's own comment above: object-cover +
+              // object-center fills the box (no more left/right gaps),
+              // cropped to the rounded wrapper's existing overflow-hidden;
+              // scale-[1.02] only to erase a subpixel edge sliver.
+              className="scale-[1.02] object-cover object-center"
             />
           ) : (
             <>
@@ -493,7 +509,11 @@ function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
               fill
               sizes="100vw"
               fetchPriority="high"
-              className="object-contain"
+              // See the desktop hero's own comment above: object-cover +
+              // object-center fills the box (no more left/right gaps),
+              // cropped to the rounded wrapper's existing overflow-hidden;
+              // scale-[1.02] only to erase a subpixel edge sliver.
+              className="scale-[1.02] object-cover object-center"
             />
           ) : (
             <>
