@@ -36,15 +36,26 @@ export const userApi = apiSlice.injectEndpoints({
     // admin
     listUsers: b.query({
       query: (params = {}) => `/users?${buildQueryString(params)}`,
-      providesTags: ["User"],
+      // Performance audit fix, same shape as store/shopApi.js's
+      // getAllOrders: per-row tags + one LIST tag, replacing a single
+      // bare "User" tag every row shared — an edit to one user no longer
+      // forces every open admin session's every users-list page/filter
+      // to refetch.
+      providesTags: (result) =>
+        result?.users
+          ? [...result.users.map((u) => ({ type: "User", id: u._id })), { type: "User", id: "LIST" }]
+          : [{ type: "User", id: "LIST" }],
     }),
     updateUser: b.mutation({
       query: ({ id, ...body }) => ({ url: `/users/${id}`, method: "PUT", body }),
-      invalidatesTags: ["User"],
+      // Role changes can move a row across a role-filtered list's
+      // boundary — same "id + LIST when membership/filter inclusion can
+      // change" rule as Orders' updateOrderStatus.
+      invalidatesTags: (r, e, a) => [{ type: "User", id: a.id }, { type: "User", id: "LIST" }],
     }),
     deleteUser: b.mutation({
       query: (id) => ({ url: `/users/${id}`, method: "DELETE" }),
-      invalidatesTags: ["User"],
+      invalidatesTags: (r, e, a) => [{ type: "User", id: a }, { type: "User", id: "LIST" }],
     }),
   }),
 });

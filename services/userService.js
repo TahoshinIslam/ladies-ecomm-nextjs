@@ -144,7 +144,18 @@ export async function listUsers({ page = 1, limit = 20, search, sortBy, sortOrde
   const skip = (pageNum - 1) * limitNum;
 
   const [users, total] = await Promise.all([
-    User.find(filter).sort({ [sortField]: sortDir }).skip(skip).limit(limitNum),
+    // Read-only (this function's one real caller, GET /api/users,
+    // immediately JSON-serializes the response) — .lean() skips document
+    // hydration. Projected to exactly what the admin users table + its
+    // edit modal render (name/email/avatar/role/createdAt/isVerified/
+    // permissions); password/resetPasswordToken/etc. are already
+    // select:false on the schema and excluded either way.
+    User.find(filter)
+      .select("name email avatar role createdAt isVerified permissions")
+      .sort({ [sortField]: sortDir })
+      .skip(skip)
+      .limit(limitNum)
+      .lean(),
     User.countDocuments(filter),
   ]);
   return {

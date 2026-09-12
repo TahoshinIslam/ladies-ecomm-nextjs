@@ -61,6 +61,15 @@ reviewSchema.index({ user: 1, product: 1 }, { unique: true });
 // collection grows.
 reviewSchema.index({ product: 1, createdAt: -1 });
 
+// Performance audit Closure Pass 2 — explain("executionStats") evidence
+// (scripts/perfSeedAndExplain.mjs, ~400 synthetic reviews) showed the
+// unfiltered admin reviews list (services/reviewService.js's
+// listAllReviews() with no rating/product filter — the default view)
+// examining every document and sorting in memory: 409 examined for 20
+// returned, in-memory SORT stage present. This index serves that exact
+// shape directly.
+reviewSchema.index({ createdAt: -1 });
+
 // Update product's average rating after save
 reviewSchema.statics.calcAverageRating = async function (productId) {
   const stats = await this.aggregate([

@@ -29,6 +29,17 @@ const SKELETON_ROWS = 8;
  * state lives in useTableQueryState (URL-synced, the admin default) or
  * plain useState.
  */
+// TEMP INSTRUMENTATION — Performance audit Closure Pass 2, Section 8.
+// Counts DataTable render-function executions and per-row render-callback
+// executions, exposed on window for Playwright-driven measurement. Removed
+// once the DataTable profiling task is finished.
+function __perfInstrument(rowCount) {
+  if (typeof window === "undefined") return;
+  const s = (window.__dtPerf ??= { renders: 0, rowRenders: 0 });
+  s.renders += 1;
+  s.rowRenders += rowCount;
+}
+
 export default function DataTable({
   columns,
   data = [],
@@ -62,6 +73,7 @@ export default function DataTable({
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
   const someSelected = !allSelected && pageIds.some((id) => selected.has(id));
   const colSpan = columns.length + (selectable ? 1 : 0);
+  __perfInstrument(data.length);
 
   const handleSort = (col) => {
     if (!col.sortable || !onSortChange) return;

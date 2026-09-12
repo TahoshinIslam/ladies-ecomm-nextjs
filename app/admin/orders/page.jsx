@@ -4,8 +4,8 @@ export const metadata = {
   title: "Orders",
 };
 
-export default function Page() {
+export default function Page({ searchParams }) {
   return (
-    <AdminOrdersPage />
+    <AdminOrdersPage searchParams={searchParams} />
   );
 }

@@ -118,13 +118,16 @@ export async function listAllReviews({ page = 1, limit = 20, rating, productId, 
   const sortDir = sortOrder === "asc" ? 1 : -1;
 
   const [reviews, total] = await Promise.all([
+    // .lean(): this admin list's one caller (GET /api/reviews) only ever
+    // serializes the result to JSON — no document methods/save() needed.
     Review.find(filter)
       .populate("user", "name email avatar")
       .populate("product", "name images slug")
       .populate("adminReply.repliedBy", "name")
       .sort({ [sortField]: sortDir })
       .skip(skip)
-      .limit(Number(limit)),
+      .limit(Number(limit))
+      .lean(),
     Review.countDocuments(filter),
   ]);
 

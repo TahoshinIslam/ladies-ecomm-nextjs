@@ -491,12 +491,21 @@ async function checkLowStock(items) {
 }
 
 export async function getMyOrders(userId) {
-  return Order.find({ user: userId }).sort("-createdAt");
+  // Read-only (both real callers — GET /api/orders/my and the
+  // Server Components DashboardPage.jsx/OrdersPage.jsx — immediately
+  // serialize the result; neither saves it back) — .lean() skips
+  // document hydration. No field projection here (unlike the admin list):
+  // this same result is used by more than one consumer with different
+  // field needs (dashboard stats vs. the full customer order list), so
+  // only the safe, universally-applicable .lean() change is made.
+  return Order.find({ user: userId }).sort("-createdAt").lean();
 }
 
 export async function getOrder(userId, role, orderId) {
   requireObjectIdFormat(orderId, "orderId");
-  const order = await Order.findById(orderId).populate("user", "name email");
+  // Read-only (both real callers — GET /api/orders/[id] and
+  // OrderDetailPage.jsx — immediately serialize the result).
+  const order = await Order.findById(orderId).populate("user", "name email").lean();
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user._id.toString() === String(userId);
   if (!isOwner && role !== "admin") throw new HttpError(403, "Not authorized");
@@ -607,11 +616,23 @@ export async function getAllOrders({ status, search, sortBy, sortOrder, page = 1
 
   const skip = (Number(page) - 1) * Number(limit);
   const [orders, total] = await Promise.all([
+    // Read-only (this function's one real caller, GET /api/orders,
+    // immediately JSON-serializes the response — confirmed via grep, no
+    // caller ever mutates/saves an order from this list) — .lean() skips
+    // Mongoose document hydration. Projected to exactly what the admin
+    // orders table + its status-update modal render (order id, customer,
+    // date, total, status, tracking number, item count); every other
+    // field (shippingAddress, notes, subtotal/tax/discount breakdown,
+    // coupon, paymentMethod) is fetched but unused by that UI today.
+    // idempotencyKeyHash/idempotencyRequestHash are select:false on the
+    // schema already, so they're excluded either way.
     Order.find(filter)
+      .select("user status total createdAt trackingNumber items")
       .populate("user", "name email")
       .sort({ [sortField]: sortDir })
       .skip(skip)
-      .limit(Number(limit)),
+      .limit(Number(limit))
+      .lean(),
     Order.countDocuments(filter),
   ]);
   return {

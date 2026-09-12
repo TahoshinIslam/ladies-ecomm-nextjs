@@ -79,6 +79,14 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+// Performance audit Closure Pass 2 — explain("executionStats") evidence
+// (scripts/perfSeedAndExplain.mjs, 60 synthetic users) showed the
+// unfiltered admin users list (services/userService.js's listUsers() with
+// no role filter — the default "All roles" view) examining every document
+// and sorting in memory: 77 examined for 20 returned, in-memory SORT stage
+// present. This index serves that exact shape directly.
+userSchema.index({ createdAt: -1 });
+
 // Hash password before saving
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;

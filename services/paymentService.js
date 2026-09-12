@@ -117,7 +117,9 @@ export async function codCreate(orderId, userId) {
 
 export async function getPaymentByOrder(orderId, userId, role) {
   requireObjectIdFormat(orderId, "orderId");
-  const payment = await Payment.findOne({ order: orderId });
+  // Read-only (its one real caller, GET /api/payments/order/[orderId],
+  // immediately serializes the result).
+  const payment = await Payment.findOne({ order: orderId }).lean();
   if (!payment) throw new HttpError(404, "Payment not found");
   if (payment.user.toString() !== String(userId) && role !== "admin") {
     throw new HttpError(403, "Not authorized");

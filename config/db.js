@@ -7,6 +7,46 @@ import mongoose from "mongoose";
 // a plain module-level variable would not.
 const cache = (globalThis.__mongooseCache ??= { conn: null, promise: null });
 
+// --- Local-machine safety guard (incident response, 2026-09-12) ---
+//
+// Root cause of the incident: a plain `next dev` (or an equally plain local
+// `next start`), run directly on a developer's own machine with none of
+// the two pre-existing test-only overrides set, silently fell through to
+// `MONGO_URI` — the real Production database — with no guard at all. An
+// ordinary admin-UI verification session on that server mutated a real
+// order. See the incident report for the full account (not committed to
+// the repo).
+//
+// `VERCEL` is the correct discriminator, not NODE_ENV: Vercel sets
+// `VERCEL=1` automatically on every Preview and Production deployment,
+// both at build time and at runtime, and never on a developer's own
+// machine — so gating on it (rather than trying to infer "local" from
+// NODE_ENV, which `next start` also forces to "production") protects both
+// `next dev` and a bare local `next start` while leaving real Vercel
+// Preview/Production behavior completely untouched.
+function isVercelRuntime() {
+  return !!process.env.VERCEL;
+}
+
+// Parses only the database name and hostname out of a URI — never returns
+// or logs the URI itself, so a thrown error built from this can never leak
+// credentials or query parameters.
+function extractDbInfo(uri) {
+  try {
+    const u = new URL(uri);
+    const dbName = u.pathname.replace(/^\//, "").split("?")[0] || null;
+    return { dbName, hostname: u.hostname || null };
+  } catch {
+    return { dbName: null, hostname: null };
+  }
+}
+
+const SAFE_LOCAL_DB_NAME_PATTERN = /(_dev|_test|_preview)$/i;
+
+function isLocalHostname(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 // No pino/logger dependency here on purpose — `pino`/`pino-pretty` were
 // never installed packages (the old, unreferenced utlis/logger.js that
 // wanted them was confirmed dead and removed in Phase 6). Plain console
@@ -60,19 +100,59 @@ const connectDB = async () => {
     // deployment the way trusting NODE_ENV alone could.
     const useTestServerOverride =
       process.env.ALLOW_TEST_DB_OVERRIDE === "true" && !!process.env.TEST_SERVER_MONGO_URI;
+    const isNodeTestEnv = process.env.NODE_ENV === "test";
+    // Any local-machine run (developer's own `next dev` or a bare local
+    // `next start`) that isn't already covered by one of the two existing,
+    // explicitly-flagged exceptions above. See the guard block above this
+    // function for why VERCEL (not NODE_ENV) is the right discriminator.
+    const isLocalMachineRuntime = !isVercelRuntime() && !useTestServerOverride && !isNodeTestEnv;
 
-    const uri = useTestServerOverride
-      ? process.env.TEST_SERVER_MONGO_URI
-      : process.env.NODE_ENV === "test"
-        ? process.env.MONGO_URI_TEST
-        : process.env.MONGO_URI;
+    let uri;
+    let missingVarLabel;
+    if (useTestServerOverride) {
+      uri = process.env.TEST_SERVER_MONGO_URI;
+      missingVarLabel = "TEST_SERVER_MONGO_URI";
+    } else if (isNodeTestEnv) {
+      uri = process.env.MONGO_URI_TEST;
+      missingVarLabel = "MONGO_URI_TEST";
+    } else if (isLocalMachineRuntime) {
+      const devUri = process.env.MONGO_URI_DEV || process.env.MONGO_URI_TEST;
+      const devVarName = process.env.MONGO_URI_DEV ? "MONGO_URI_DEV" : "MONGO_URI_TEST";
+      if (!devUri) {
+        throw new Error(
+          "Running locally (not on Vercel) requires MONGO_URI_DEV or MONGO_URI_TEST to be set. " +
+            "Refusing to fall back to MONGO_URI — that is the Production database and must never " +
+            "be reachable from a plain local `next dev`/`next start`.",
+        );
+      }
+      const { dbName, hostname } = extractDbInfo(devUri);
+      if (dbName === "nextjs_ecomm") {
+        throw new Error(
+          `${devVarName} resolves to database "nextjs_ecomm" (the Production database name) — ` +
+            "refusing to use it for local development.",
+        );
+      }
+      if (!dbName || !SAFE_LOCAL_DB_NAME_PATTERN.test(dbName)) {
+        throw new Error(
+          `${devVarName}'s database name ("${dbName || "unknown"}") doesn't look like a safe local/` +
+            'development database (expected a name ending in "_dev", "_test", or "_preview") — refusing to use it.',
+        );
+      }
+      if (hostname && !isLocalHostname(hostname) && process.env.ALLOW_REMOTE_DEV_DB !== "true") {
+        throw new Error(
+          `${devVarName} points at a remote host ("${hostname}"), not localhost. If this is an intentional ` +
+            "shared remote dev/preview database, set ALLOW_REMOTE_DEV_DB=true to confirm that explicitly.",
+        );
+      }
+      uri = devUri;
+      missingVarLabel = devVarName;
+    } else {
+      // Vercel Preview/Production (VERCEL is set) — unchanged behavior.
+      uri = process.env.MONGO_URI;
+      missingVarLabel = "MONGO_URI";
+    }
     if (!uri) {
-      const missingVar = useTestServerOverride
-        ? "TEST_SERVER_MONGO_URI"
-        : process.env.NODE_ENV === "test"
-          ? "MONGO_URI_TEST"
-          : "MONGO_URI";
-      throw new Error(`${missingVar} is not set`);
+      throw new Error(`${missingVarLabel} is not set`);
     }
     // Phase 11, section H — explicit pool/timeout settings for a Vercel
     // Fluid Compute deployment. Fluid Compute REUSES a warm function

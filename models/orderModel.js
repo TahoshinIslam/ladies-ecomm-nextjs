@@ -113,6 +113,14 @@ const orderSchema = new mongoose.Schema(
 // Index for the most common admin query
 orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ user: 1, createdAt: -1 });
+// Performance audit Closure Pass 2 — explain("executionStats") evidence
+// (scripts/perfSeedAndExplain.mjs, 150 synthetic orders) showed the
+// unfiltered admin orders list (services/orderService.js's getAllOrders()
+// with no status filter — the default "All statuses" view) examining
+// every document and sorting in memory (no usable index for a plain
+// {createdAt: -1} scan): 166 examined for 20 returned, in-memory SORT
+// stage present. This index serves that exact shape directly.
+orderSchema.index({ createdAt: -1 });
 
 // The database-level idempotency guarantee: at most one order per
 // (user, idempotencyKeyHash) pair. `partialFilterExpression` scopes the
