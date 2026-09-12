@@ -5,13 +5,18 @@
 // requires a client boundary. Kept as its own small island rather than
 // pulling the rest of the (static) home page along with it.
 import { useDispatch } from "react-redux";
+import Image from "next/image";
 import { ArrowRight } from "lucide-react";
 
 import Button from "../../components/ui/Button.jsx";
 import { setFinderOpen } from "../../store/uiSlice.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
+import { resolveImage } from "../../lib/utils.js";
 
-export default function GuidedFinderSection() {
+// `image` is an admin-set URL (Shop Config → Guided Discovery) — plain,
+// already-resolved data from the Server Component parent, not a fetch.
+// Unset (the default) keeps the existing hatch-pattern placeholder.
+export default function GuidedFinderSection({ image }) {
   const { t } = useLocale();
   const dispatch = useDispatch();
 
@@ -45,8 +50,12 @@ export default function GuidedFinderSection() {
             {t("home.threeQuestions")}
           </div>
         </div>
-        <div className="relative hidden min-h-[340px] border-l border-line bg-media lg:grid lg:place-items-center">
-          <div aria-hidden="true" className="absolute inset-0 hatch" />
+        <div className="relative hidden min-h-[340px] overflow-hidden border-l border-line bg-media lg:grid lg:place-items-center">
+          {image ? (
+            <Image src={resolveImage(image, 700)} alt="" fill sizes="50vw" className="object-cover" />
+          ) : (
+            <div aria-hidden="true" className="absolute inset-0 hatch" />
+          )}
           <div className="relative flex gap-3.5">
             <span className="rounded-lg border border-line bg-elev px-4 py-2.5 text-[14.5px] font-medium">
               {t("home.everyday")}

@@ -11,7 +11,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
-import { Store, GalleryHorizontal, Image as ImageIcon, Megaphone, Upload, X, Loader2 } from "lucide-react";
+import {
+  Store,
+  GalleryHorizontal,
+  Image as ImageIcon,
+  Megaphone,
+  Upload,
+  X,
+  Loader2,
+  LayoutGrid,
+  Shirt,
+  CalendarHeart,
+  Compass,
+} from "lucide-react";
 
 import Button from "../../components/ui/Button.jsx";
 import Input from "../../components/ui/Input.jsx";
@@ -47,6 +59,10 @@ const uploadImage = async (file, folder = "homepage") => {
 const CONFIG_ITEMS = [
   { key: "shopName", title: "Shop Name", description: "Change the store's name.", icon: Store },
   { key: "carousel", title: "Carousel", description: "Set the hero carousel images.", icon: GalleryHorizontal },
+  { key: "departments", title: "Departments", description: "Set each department card's photo.", icon: LayoutGrid },
+  { key: "fabrics", title: "Fabric Story", description: "Set each fabric card's photo.", icon: Shirt },
+  { key: "occasions", title: "Occasions", description: "Set each occasion card's photo.", icon: CalendarHeart },
+  { key: "guidedFinder", title: "Guided Discovery", description: "Set the \"Not sure where to start?\" panel photo.", icon: Compass },
   { key: "banner", title: "Banner", description: "Set the homepage promotional banner.", icon: ImageIcon },
   { key: "campaign", title: "Campaign", description: "Run an offer message for visitors.", icon: Megaphone },
 ];
@@ -107,7 +123,9 @@ export default function ShopConfigPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Shop Config</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Shop name, carousel, banner, and campaign — the storefront&apos;s front page.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Shop name, carousel, department/fabric/occasion photos, banner, and campaign — the storefront&apos;s front page.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -134,6 +152,18 @@ export default function ShopConfigPage() {
       )}
       {openKey === "carousel" && (
         <CarouselModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
+      )}
+      {openKey === "departments" && (
+        <DepartmentsModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
+      )}
+      {openKey === "fabrics" && (
+        <FabricsModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
+      )}
+      {openKey === "occasions" && (
+        <OccasionsModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
+      )}
+      {openKey === "guidedFinder" && (
+        <GuidedFinderModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
       )}
       {openKey === "banner" && (
         <BannerModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
@@ -281,6 +311,195 @@ function CarouselModal({ homepage, onClose, onSaved }) {
         <ImagePickerField label="Burqa" value={images.burqa} onChange={(v) => setImages((s) => ({ ...s, burqa: v }))} />
         <ImagePickerField label="Abaya" value={images.abaya} onChange={(v) => setImages((s) => ({ ...s, abaya: v }))} />
         <ImagePickerField label="Hijab" value={images.hijab} onChange={(v) => setImages((s) => ({ ...s, hijab: v }))} />
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DepartmentsModal({ homepage, onClose, onSaved }) {
+  const existing = homepage?.departmentImages || {};
+  const [images, setImages] = useState({
+    burqa: existing.burqa || "",
+    abaya: existing.abaya || "",
+    hijab: existing.hijab || "",
+    niqab: existing.niqab || "",
+    khimar: existing.khimar || "",
+    "modest-sets": existing["modest-sets"] || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveSettings({ homepage: { ...homepage, departmentImages: images } });
+      toast.warning("Departments updated");
+      onSaved({ homepage: saved.homepage });
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Departments" size="md">
+      <div className="space-y-4 p-5">
+        <p className="text-xs text-muted-foreground">
+          The photo shown on each department&apos;s card in &quot;Shop by department.&quot; Burqa/Abaya/Khimar fall back to
+          that department&apos;s own top-rated product photo when left blank; Hijab/Niqab/Modest Sets show a plain
+          color card until a photo is set here.
+        </p>
+        <ImagePickerField label="Burqa" value={images.burqa} onChange={set("burqa")} />
+        <ImagePickerField label="Abaya" value={images.abaya} onChange={set("abaya")} />
+        <ImagePickerField label="Hijab" value={images.hijab} onChange={set("hijab")} />
+        <ImagePickerField label="Niqab" value={images.niqab} onChange={set("niqab")} />
+        <ImagePickerField label="Khimar" value={images.khimar} onChange={set("khimar")} />
+        <ImagePickerField label="Modest Sets" value={images["modest-sets"]} onChange={set("modest-sets")} />
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function FabricsModal({ homepage, onClose, onSaved }) {
+  const existing = homepage?.fabricImages || {};
+  const [images, setImages] = useState({
+    nida: existing.nida || "",
+    crepe: existing.crepe || "",
+    chiffon: existing.chiffon || "",
+    jersey: existing.jersey || "",
+    georgette: existing.georgette || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveSettings({ homepage: { ...homepage, fabricImages: images } });
+      toast.warning("Fabric Story updated");
+      onSaved({ homepage: saved.homepage });
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Fabric Story" size="md">
+      <div className="space-y-4 p-5">
+        <p className="text-xs text-muted-foreground">
+          The photo shown on each fabric&apos;s card in &quot;What it&apos;s made of matters.&quot; Left blank keeps
+          the existing plain placeholder.
+        </p>
+        <ImagePickerField label="Nida" value={images.nida} onChange={set("nida")} />
+        <ImagePickerField label="Crepe" value={images.crepe} onChange={set("crepe")} />
+        <ImagePickerField label="Chiffon" value={images.chiffon} onChange={set("chiffon")} />
+        <ImagePickerField label="Jersey" value={images.jersey} onChange={set("jersey")} />
+        <ImagePickerField label="Georgette" value={images.georgette} onChange={set("georgette")} />
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function OccasionsModal({ homepage, onClose, onSaved }) {
+  const existing = homepage?.occasionImages || {};
+  const [images, setImages] = useState({
+    eid: existing.eid || "",
+    everyday: existing.everyday || "",
+    bridal: existing.bridal || "",
+    prayer: existing.prayer || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveSettings({ homepage: { ...homepage, occasionImages: images } });
+      toast.warning("Occasions updated");
+      onSaved({ homepage: saved.homepage });
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Occasions" size="md">
+      <div className="space-y-4 p-5">
+        <p className="text-xs text-muted-foreground">
+          The photo shown on each occasion&apos;s card in &quot;Dressed for the moment.&quot; Left blank keeps the
+          existing plain bordered card.
+        </p>
+        <ImagePickerField label="Eid" value={images.eid} onChange={set("eid")} />
+        <ImagePickerField label="Daily Wear" value={images.everyday} onChange={set("everyday")} />
+        <ImagePickerField label="Wedding" value={images.bridal} onChange={set("bridal")} />
+        <ImagePickerField label="Prayer" value={images.prayer} onChange={set("prayer")} />
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function GuidedFinderModal({ homepage, onClose, onSaved }) {
+  const [image, setImage] = useState(homepage?.guidedFinderImage || "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveSettings({ homepage: { ...homepage, guidedFinderImage: image } });
+      toast.warning("Guided Discovery updated");
+      onSaved({ homepage: saved.homepage });
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Guided Discovery" size="md">
+      <div className="space-y-4 p-5">
+        <p className="text-xs text-muted-foreground">
+          The photo shown beside &quot;Not sure where to start?&quot; on desktop. Left blank keeps the existing plain
+          placeholder.
+        </p>
+        <ImagePickerField label="Guided Discovery photo" value={image} onChange={setImage} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel

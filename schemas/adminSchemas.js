@@ -113,6 +113,37 @@ export const updateSettingsSchema = z
           })
           .strict()
           .partial(),
+        departmentImages: z
+          .object({
+            burqa: z.string().trim().max(2000),
+            abaya: z.string().trim().max(2000),
+            hijab: z.string().trim().max(2000),
+            niqab: z.string().trim().max(2000),
+            khimar: z.string().trim().max(2000),
+            "modest-sets": z.string().trim().max(2000),
+          })
+          .strict()
+          .partial(),
+        fabricImages: z
+          .object({
+            nida: z.string().trim().max(2000),
+            crepe: z.string().trim().max(2000),
+            chiffon: z.string().trim().max(2000),
+            jersey: z.string().trim().max(2000),
+            georgette: z.string().trim().max(2000),
+          })
+          .strict()
+          .partial(),
+        occasionImages: z
+          .object({
+            eid: z.string().trim().max(2000),
+            everyday: z.string().trim().max(2000),
+            bridal: z.string().trim().max(2000),
+            prayer: z.string().trim().max(2000),
+          })
+          .strict()
+          .partial(),
+        guidedFinderImage: z.string().trim().max(2000),
         banner: z
           .object({
             enabled: z.boolean(),

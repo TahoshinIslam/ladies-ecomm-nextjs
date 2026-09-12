@@ -56,6 +56,42 @@ const settingsSchema = new mongoose.Schema(
         abaya: { type: String, default: "" },
         hijab: { type: String, default: "" },
       },
+      // Per-department photo for the "Shop by department" grid
+      // (views/HomePage.jsx) — independent of carouselImages above (that
+      // one is the rotating hero's own full-bleed shot; this is the
+      // smaller department-card crop). Every department key exists here,
+      // including the ones that otherwise render as a plain solid-color
+      // card (hijab/modest-sets/niqab) with no image mechanism at all —
+      // unset (the default) keeps that existing solid-tone look exactly
+      // as before.
+      departmentImages: {
+        burqa: { type: String, default: "" },
+        abaya: { type: String, default: "" },
+        hijab: { type: String, default: "" },
+        niqab: { type: String, default: "" },
+        khimar: { type: String, default: "" },
+        "modest-sets": { type: String, default: "" },
+      },
+      // "What it's made of matters" fabric cards — unset keeps the
+      // existing hatch-pattern placeholder.
+      fabricImages: {
+        nida: { type: String, default: "" },
+        crepe: { type: String, default: "" },
+        chiffon: { type: String, default: "" },
+        jersey: { type: String, default: "" },
+        georgette: { type: String, default: "" },
+      },
+      // "Dressed for the moment" occasion cards — unset keeps the
+      // existing plain bordered card with no image.
+      occasionImages: {
+        eid: { type: String, default: "" },
+        everyday: { type: String, default: "" },
+        bridal: { type: String, default: "" },
+        prayer: { type: String, default: "" },
+      },
+      // The guided-finder ("Not sure where to start?") card's right-hand
+      // panel — unset keeps the existing hatch placeholder.
+      guidedFinderImage: { type: String, default: "" },
       banner: {
         enabled: { type: Boolean, default: false },
         imageUrl: { type: String, default: "" },

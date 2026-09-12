@@ -123,6 +123,13 @@ export default async function HomePage() {
     hijab: homepageSettings.carouselImages?.hijab || heroHijab[0]?.images?.[0] || null,
     khimar: heroKhimar[0]?.images?.[0] || null,
   };
+  // Admin-set images (Shop Config → Departments/Fabric Story/Occasions/
+  // Guided Discovery) — every key defaults to "" server-side, so a plain
+  // object read is always safe without per-field optional chaining below.
+  const departmentImages = homepageSettings.departmentImages || {};
+  const fabricImages = homepageSettings.fabricImages || {};
+  const occasionImages = homepageSettings.occasionImages || {};
+  const guidedFinderImage = homepageSettings.guidedFinderImage || null;
 
   return (
     <>
@@ -172,6 +179,13 @@ export default async function HomePage() {
             const copy = DEPARTMENT_COPY[d.slug] || { num: "•", bodyKey: null, tone: "media" };
             const body = copy.bodyKey ? t(copy.bodyKey) : d.description || "";
             const deptName = departmentName(locale, d.slug, d.name);
+            // Admin-set department-card photo (Shop Config → Departments)
+            // takes priority; "media"-tone departments fall back to their
+            // existing top-rated-product/carousel photo when unset. A
+            // coral/night-tone department (hijab, modest-sets, niqab) has
+            // no such fallback — it stays a plain solid-color card until
+            // an admin sets one here.
+            const deptImage = departmentImages[d.slug] || (copy.tone === "media" ? heroImageBySlug[d.slug] : null);
             return (
               <Link
                 key={d._id}
@@ -187,27 +201,29 @@ export default async function HomePage() {
                   copy.tone === "night" && "bg-[#101012]",
                 )}
               >
-                {copy.tone === "media" && (
+                {deptImage ? (
                   <>
-                    {heroImageBySlug[d.slug] ? (
-                      <Image
-                        src={resolveImage(heroImageBySlug[d.slug], 700)}
-                        alt=""
-                        fill
-                        sizes="(max-width: 1024px) 100vw, 33vw"
-                        className="object-cover"
-                      />
-                    ) : (
-                      <div aria-hidden="true" className="absolute inset-0 hatch" />
-                    )}
+                    <Image
+                      src={resolveImage(deptImage, 700)}
+                      alt=""
+                      fill
+                      sizes="(max-width: 1024px) 100vw, 33vw"
+                      className="object-cover"
+                    />
                     <div aria-hidden="true" className="absolute inset-0 scrim" />
                   </>
-                )}
-                {copy.tone === "night" && (
-                  <div
-                    aria-hidden="true"
-                    className="absolute inset-0 bg-[radial-gradient(90%_70%_at_70%_20%,rgba(212,255,69,0.14),transparent_60%)]"
-                  />
+                ) : copy.tone === "media" ? (
+                  <>
+                    <div aria-hidden="true" className="absolute inset-0 hatch" />
+                    <div aria-hidden="true" className="absolute inset-0 scrim" />
+                  </>
+                ) : (
+                  copy.tone === "night" && (
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 bg-[radial-gradient(90%_70%_at_70%_20%,rgba(212,255,69,0.14),transparent_60%)]"
+                    />
+                  )
                 )}
                 <div
                   className={cn(
@@ -331,7 +347,17 @@ export default async function HomePage() {
               data-reveal
               className="group relative flex min-h-[220px] flex-col justify-end overflow-hidden rounded-2xl bg-media p-6 focus-ring"
             >
-              <div aria-hidden="true" className="absolute inset-0 hatch" />
+              {fabricImages[f.value] ? (
+                <Image
+                  src={resolveImage(fabricImages[f.value], 500)}
+                  alt=""
+                  fill
+                  sizes="(max-width: 1024px) 50vw, 20vw"
+                  className="object-cover"
+                />
+              ) : (
+                <div aria-hidden="true" className="absolute inset-0 hatch" />
+              )}
               <div aria-hidden="true" className="absolute inset-0 scrim" />
               <div className="relative">
                 <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(f.nameKey)}</h3>
@@ -360,20 +386,34 @@ export default async function HomePage() {
               key={o.value}
               href={`/shop?occasion=${o.value}`}
               data-reveal
-              className="group flex min-h-[200px] flex-col justify-end rounded-2xl border border-line p-6 transition-colors hover:border-ink focus-ring"
+              className="group relative flex min-h-[200px] flex-col justify-end overflow-hidden rounded-2xl border border-line p-6 transition-colors hover:border-ink focus-ring"
             >
-              <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(o.nameKey)}</h3>
-              <p className="mt-2 text-[13.5px] leading-[1.5] text-stone">{t(o.bodyKey)}</p>
-              <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-verm">
-                {t("home.shopOccasion", { name: t(o.nameKey) })}
-                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-              </span>
+              {occasionImages[o.value] && (
+                <>
+                  <Image
+                    src={resolveImage(occasionImages[o.value], 500)}
+                    alt=""
+                    fill
+                    sizes="(max-width: 1024px) 50vw, 25vw"
+                    className="object-cover"
+                  />
+                  <div aria-hidden="true" className="absolute inset-0 scrim" />
+                </>
+              )}
+              <div className="relative">
+                <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(o.nameKey)}</h3>
+                <p className="mt-2 text-[13.5px] leading-[1.5] text-stone">{t(o.bodyKey)}</p>
+                <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-verm">
+                  {t("home.shopOccasion", { name: t(o.nameKey) })}
+                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                </span>
+              </div>
             </Link>
           ))}
         </div>
       </section>
 
-      <GuidedFinderSection />
+      <GuidedFinderSection image={guidedFinderImage} />
 
       {/* Campaign */}
       <section id="campaign" aria-labelledby="camp-h" className="container-x pt-32">
