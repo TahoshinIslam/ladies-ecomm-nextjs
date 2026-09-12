@@ -20,10 +20,10 @@ export const GET = withRoute(async (request, { params }) => {
 });
 
 export const PUT = withRoute(async (request, { params }) => {
-  await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
+  const actor = await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
   const { idOrSlug } = await params;
   const body = await parseJsonBody(request, updateProductSchema);
-  const product = await updateProduct(idOrSlug, body);
+  const product = await updateProduct(idOrSlug, body, actor._id.toString());
   // updateProduct() requires a real ObjectId (never a slug) — see its own
   // requireObjectIdFormat() call, already passed by the time we're here.
   // Price/discount/stock/images/variants/attributes/activation can all

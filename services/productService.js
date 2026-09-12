@@ -1084,7 +1084,7 @@ async function assertRequiredAttributes(data, topCategoryId) {
   }
 }
 
-export async function createProduct(body) {
+export async function createProduct(body, actorId) {
   const data = pickWritable(body);
   if (!data.category) throw new HttpError(400, "Category is required");
   if (!data.variants?.length) throw new HttpError(400, "At least one variant is required");
@@ -1100,11 +1100,20 @@ export async function createProduct(body) {
   // failure is observed/logged before returning, but never fails the
   // already-succeeded product creation itself. See lib/events.js's
   // emitBestEffort() for the documented policy.
-  await emitBestEffort(emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name }));
+  //
+  // `actorId` (the admin who submitted this request, from the route's own
+  // requirePermission() call) rides along on the broadcast event so the
+  // SAME admin's own useAdminEventStream subscription can skip showing a
+  // second, redundant toast for an action they already got direct
+  // form-submit feedback for — every OTHER open admin session (no
+  // matching actorId) still sees the real-time toast as before.
+  await emitBestEffort(
+    emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name, actorId }),
+  );
   return product;
 }
 
-export async function updateProduct(id, body) {
+export async function updateProduct(id, body, actorId) {
   requireObjectIdFormat(id, "id");
   const product = await Product.findById(id);
   if (!product) throw new HttpError(404, "Product not found");
@@ -1128,7 +1137,9 @@ export async function updateProduct(id, body) {
 
   Object.assign(product, data);
   await product.save();
-  await emitBestEffort(emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name }));
+  await emitBestEffort(
+    emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name, actorId }),
+  );
   return product;
 }
 

@@ -80,7 +80,19 @@ export default function Modal({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             onClick={onClose}
-            className="absolute inset-0 bg-black/50 backdrop-blur-[3px]"
+            // No backdrop-blur here (was `backdrop-blur-[3px]`): a
+            // `backdrop-filter` behind a Framer Motion-animated panel is a
+            // known GPU-compositing trigger in Chromium/WebKit for exactly
+            // the bug reported against this modal — any state update
+            // inside the panel (e.g. toggling a checkbox in
+            // ProductFormModal's variant generator) could leave the
+            // compositor painting the panel blank/white while the
+            // underlying DOM and React state stayed completely correct and
+            // interactive (confirmed: form fields, close button, etc. all
+            // still worked via direct DOM queries/clicks — only the paint
+            // was wrong). The blur was purely cosmetic; dropping it removes
+            // the trigger with no functional loss.
+            className="absolute inset-0 bg-black/50"
           />
           <motion.div
             ref={panelRef}

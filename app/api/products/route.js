@@ -50,9 +50,9 @@ export const GET = withRoute(async (request) => {
 });
 
 export const POST = withRoute(async (request) => {
-  await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
+  const actor = await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
   const body = await parseJsonBody(request, createProductSchema);
-  const product = await createProduct(body);
+  const product = await createProduct(body, actor._id.toString());
   // A newly created product can change every product-list-shaped cached
   // read (home sections, shop listing) — invalidated only after the
   // write above has actually committed.

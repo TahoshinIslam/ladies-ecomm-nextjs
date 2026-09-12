@@ -565,7 +565,13 @@ export async function cancelOrder(userId, role, orderId) {
       // included) rolls back with it.
       const orderNumber = orderId.toString().slice(-6);
       await emitOrderEvent(orderId, { orderId, status: "cancelled" }, { session });
-      await emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber }, { session });
+      // `actorId` (whoever called this — a customer cancelling their own
+      // order, or an admin cancelling via the admin dropdown) rides along
+      // so the SAME admin session that just did this gets to skip the
+      // redundant SSE toast on top of the direct "Order updated" feedback
+      // their own status-update submit already showed — every other open
+      // admin session still gets the real-time notification.
+      await emitAdminEvent({ type: "ORDER_CANCELLED", orderId: orderId.toString(), orderNumber, actorId: userId?.toString() }, { session });
 
       updatedOrder = order;
     });

@@ -111,7 +111,17 @@ export function useAdminEventStream() {
       }
       dispatch(shopApi.util.invalidateTags(["Notification", ...tagsForEvent(payload.type, payload)]));
       const describe = TOAST_COPY[payload.type];
-      if (describe) toast.message(describe(payload));
+      // Skip the toast (never the cache invalidation above, which every
+      // session — including this one — still needs) when this admin's own
+      // action is what caused the event: their own mutation already showed
+      // direct submit feedback (ProductFormModal's "Product updated"/
+      // "Product created", OrdersPageClient's "Order updated"), so this
+      // broadcast echo would otherwise double it up — confirmed reported
+      // bug ("multiple toast messages for update a product"). Every OTHER
+      // open admin session has a different user._id (or none stored
+      // in-flight), so they still get the real-time notification.
+      const isOwnAction = payload.actorId && user?._id && String(payload.actorId) === String(user._id);
+      if (describe && !isOwnAction) toast.message(describe(payload));
     };
 
     // Derived from the two maps above rather than hand-listed — a type
