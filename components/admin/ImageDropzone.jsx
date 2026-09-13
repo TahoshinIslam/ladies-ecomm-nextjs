@@ -17,16 +17,33 @@ import { cn, resolveImage } from "../../lib/utils.js";
  * Image dropzone with:
  *  - Native HTML5 drag-and-drop from the desktop (Chrome / Safari / Firefox).
  *  - Click-to-pick fallback (mobile Safari can't drop, but `<input type="file">` works).
- *  - Thumbnail strip with framer-motion `Reorder` for drag-to-reorder.
+ *  - Thumbnail strip with framer-motion `Reorder` for drag-to-reorder (multi mode only).
  *  - Multi-file upload (parallel, batched at 8 because /upload/multiple's cap).
+ *
+ * Two modes, both drag-and-drop — this is the ONE upload widget every admin
+ * form should use instead of a plain click-only `<input type="file">` or a
+ * paste-a-URL text box (both existed here before this was unified: one in
+ * views/admin/ShopConfigPage.jsx's homepage-content editors, one in
+ * views/admin/SettingsPage.jsx's branding fields):
+ *
+ *  - `multiple` (default, unchanged from before): `value`/`onChange` are a
+ *    plain string ARRAY — a real image gallery (product photos, a
+ *    swatch-color's own image set), with reordering and "add more".
+ *  - `multiple={false}`: `value`/`onChange` are a plain STRING (the single
+ *    image URL, "" when unset) — one photo slot (a logo, a favicon, a
+ *    homepage section's one photo). Dropping/picking a new file replaces
+ *    the existing one instead of appending; no reorder handle, since
+ *    there's never more than one thumbnail to reorder.
  *
  * Returns image URLs as strings — caller stores them in whatever shape it wants.
  */
 export default function ImageDropzone({
-  value = [],
+  value,
   onChange,
   folder = "products",
   maxFileMB = 5,
+  multiple = true,
+  accept = "image/*",
   className,
 }) {
   const [uploadImage, { isLoading: uploadingOne }] = useUploadImageMutation();
@@ -40,9 +57,19 @@ export default function ImageDropzone({
   const dragCounter = useRef(0);
   const fileInputRef = useRef(null);
 
+  // Normalized array view of `value` regardless of mode, used only for
+  // rendering — every write path below converts back to the caller's own
+  // shape (array for multiple, plain string for single) before calling
+  // onChange, so the two modes never leak into each other.
+  const valueArray = multiple ? value || [] : value ? [value] : [];
+
   const processFiles = async (rawFiles) => {
-    const all = Array.from(rawFiles || []);
+    let all = Array.from(rawFiles || []);
     if (all.length === 0) return;
+    if (!multiple && all.length > 1) {
+      toast.error("Only one image is used here — uploading the first file, ignoring the rest");
+      all = all.slice(0, 1);
+    }
 
     const images = all.filter((f) => f.type.startsWith("image/"));
     const skipped = all.length - images.length;
@@ -76,7 +103,11 @@ export default function ImageDropzone({
           urls.push(...res.files.map((f) => f.url));
         }
       }
-      onChange?.([...(value || []), ...urls]);
+      if (multiple) {
+        onChange?.([...(value || []), ...urls]);
+      } else {
+        onChange?.(urls[0]);
+      }
       toast.success(`Uploaded ${urls.length} image${urls.length === 1 ? "" : "s"}`);
     } catch (err) {
       // The backend returns a specific message — show it instead of "Upload failed".
@@ -129,7 +160,8 @@ export default function ImageDropzone({
   };
 
   const removeAt = (idx) => {
-    onChange?.(value.filter((_, i) => i !== idx));
+    if (multiple) onChange?.((value || []).filter((_, i) => i !== idx));
+    else onChange?.("");
   };
   const reorder = (next) => {
     onChange?.(next);
@@ -153,72 +185,100 @@ export default function ImageDropzone({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
-        multiple
+        accept={accept}
+        multiple={multiple}
         onChange={handleFileInputChange}
         className="hidden"
       />
 
       {/* Thumbnails (only when there are images). Sits inside the dropzone so
           users can keep dropping more files even when there are images. */}
-      {value.length > 0 && (
-        <div
-          className="mb-5 flex items-start gap-2 overflow-x-auto pb-2"
-          // stop drag events here from firing the parent onClick fallback
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Reorder.Group
-            axis="x"
-            as="div"
-            values={value}
-            onReorder={reorder}
-            className="flex flex-shrink-0 gap-2"
+      {valueArray.length > 0 &&
+        (multiple ? (
+          <div
+            className="mb-5 flex items-start gap-2 overflow-x-auto pb-2"
+            // stop drag events here from firing the parent onClick fallback
+            onClick={(e) => e.stopPropagation()}
           >
-            {value.map((img, i) => (
-              <Reorder.Item
-                key={img}
-                value={img}
-                as="div"
-                whileDrag={{
-                  scale: 1.08,
-                  zIndex: 10,
-                  boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
-                }}
-                className="group relative h-20 w-20 flex-shrink-0 cursor-grab overflow-hidden rounded-md border border-border bg-muted touch-none active:cursor-grabbing"
-              >
-                <Image
-                  src={resolveImage(img, 160)}
-                  alt=""
-                  fill
-                  sizes="80px"
-                  loading="lazy"
-                  className="pointer-events-none select-none object-contain"
-                />
-                {i === 0 && (
-                  <span className="pointer-events-none absolute bottom-0 left-0 right-0 bg-accent/90 px-1 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider text-accent-foreground">
-                    Cover
-                  </span>
-                )}
-                <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/40 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100">
-                  <GripVertical className="h-3 w-3" />
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeAt(i);
+            <Reorder.Group
+              axis="x"
+              as="div"
+              values={valueArray}
+              onReorder={reorder}
+              className="flex flex-shrink-0 gap-2"
+            >
+              {valueArray.map((img, i) => (
+                <Reorder.Item
+                  key={img}
+                  value={img}
+                  as="div"
+                  whileDrag={{
+                    scale: 1.08,
+                    zIndex: 10,
+                    boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
                   }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  aria-label="Remove image"
-                  className="absolute right-0.5 top-0.5 rounded-full bg-danger p-0.5 text-white"
+                  className="group relative h-20 w-20 flex-shrink-0 cursor-grab overflow-hidden rounded-md border border-border bg-muted touch-none active:cursor-grabbing"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </Reorder.Item>
-            ))}
-          </Reorder.Group>
-        </div>
-      )}
+                  <Image
+                    src={resolveImage(img, 160)}
+                    alt=""
+                    fill
+                    sizes="80px"
+                    loading="lazy"
+                    className="pointer-events-none select-none object-contain"
+                  />
+                  {i === 0 && (
+                    <span className="pointer-events-none absolute bottom-0 left-0 right-0 bg-accent/90 px-1 py-0.5 text-center text-[9px] font-bold uppercase tracking-wider text-accent-foreground">
+                      Cover
+                    </span>
+                  )}
+                  <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/40 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    <GripVertical className="h-3 w-3" />
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeAt(i);
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    aria-label="Remove image"
+                    className="absolute right-0.5 top-0.5 rounded-full bg-danger p-0.5 text-white"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Reorder.Item>
+              ))}
+            </Reorder.Group>
+          </div>
+        ) : (
+          // Single mode: one thumbnail, no reorder handle/drag (nothing to
+          // reorder against) — same remove button and "Cover" affordance
+          // dropped since there's only ever one image.
+          <div className="mb-5 flex items-start" onClick={(e) => e.stopPropagation()}>
+            <div className="group relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-md border border-border bg-muted">
+              <Image
+                src={resolveImage(valueArray[0], 160)}
+                alt=""
+                fill
+                sizes="80px"
+                loading="lazy"
+                className="pointer-events-none select-none object-contain"
+              />
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeAt(0);
+                }}
+                aria-label="Remove image"
+                className="absolute right-0.5 top-0.5 rounded-full bg-danger p-0.5 text-white"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        ))}
 
       {/* Drop hint + upload button */}
       <motion.div
@@ -238,18 +298,20 @@ export default function ImageDropzone({
         )}
         <div>
           <p className="text-sm font-medium text-foreground">
-            {isDragOver ? "Drop to upload" : "Drag & drop images here"}
+            {isDragOver ? "Drop to upload" : multiple ? "Drag & drop images here" : "Drag & drop an image here"}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            PNG, JPG, WebP · up to {maxFileMB} MB each · pick multiple at once
+            PNG, JPG, WebP · up to {maxFileMB} MB{multiple ? " each · pick multiple at once" : ""}
           </p>
         </div>
         <Button type="button" size="sm" onClick={openFilePicker} disabled={uploading}>
           <Upload className="h-4 w-4" />
           {uploading
             ? "Uploading..."
-            : value.length > 0
-              ? "Add more"
+            : valueArray.length > 0
+              ? multiple
+                ? "Add more"
+                : "Replace image"
               : "Upload file"}
         </Button>
       </motion.div>

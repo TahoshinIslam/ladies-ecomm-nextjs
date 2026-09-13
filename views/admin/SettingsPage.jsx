@@ -1,12 +1,11 @@
 "use client";
 
-import { Children, cloneElement, useCallback, useEffect, useId, useRef, useState } from "react";
-import Image from "next/image";
+import { Children, cloneElement, useCallback, useEffect, useId, useState } from "react";
 import { toast } from "sonner";
-import { Save, Plus, Trash2, Gift, Image as ImageIcon, Upload, X } from "lucide-react";
+import { Save, Plus, Trash2, Gift } from "lucide-react";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
-import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
+import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
@@ -22,28 +21,6 @@ const csrfHeaders = () => {
   const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE_NAME}=([^;]*)`));
   const token = match ? decodeURIComponent(match[1]) : null;
   return token ? { "X-CSRF-Token": token } : {};
-};
-
-// Upload a single image file via the existing /api/upload endpoint and
-// return the resulting Cloudinary URL. We POST FormData so multer sees it —
-// no Content-Type header, the browser sets the multipart boundary itself.
-const uploadImage = async (file, folder = "branding") => {
-  const fd = new FormData();
-  fd.append("image", file);
-  const res = await fetch(
-    `${baseUrl}/upload?folder=${encodeURIComponent(folder)}`,
-    {
-      method: "POST",
-      credentials: "include",
-      headers: { ...csrfHeaders() },
-      body: fd,
-    },
-  );
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) {
-    throw new Error(data.message || `Upload failed (${res.status})`);
-  }
-  return data.url;
 };
 
 const Section = ({ title, children, action }) => (
@@ -106,97 +83,19 @@ const Toggle = ({ checked, onChange, label, help }) => (
 );
 
 /**
- * Reusable image picker. Shows a preview of the current URL, lets the
- * admin paste a URL OR upload a file. The "uploading" state is local so
- * each picker spins independently when fired in parallel.
+ * Reusable image picker — a thin Field wrapper around the shared
+ * drag-and-drop ImageDropzone (single-image mode), the same widget
+ * ProductFormModal.jsx's product-photo fields and
+ * views/admin/ShopConfigPage.jsx's homepage-content editors use. Was
+ * previously its own click-only <input type="file"> + paste-a-URL text
+ * box with no drag-and-drop, the last of three near-identical copies of
+ * that same older pattern in the admin.
  */
-const ImagePicker = ({ value, onChange, label, help, accept = "image/*" }) => {
-  const inputRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
-
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const url = await uploadImage(file, "branding");
-      onChange(url);
-      toast.success(`${label} uploaded`);
-    } catch (err) {
-      toast.error(err.message || "Upload failed");
-    } finally {
-      setUploading(false);
-      // Reset so the same file can be re-picked if needed
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  };
-
-  return (
-    <Field label={label} help={help}>
-      <div className="flex items-start gap-3">
-        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
-          {value && isApprovedImageSource(value) ? (
-            <Image
-              src={value}
-              alt={label}
-              fill
-              sizes="64px"
-              className="object-contain"
-            />
-          ) : value ? (
-            // `value` is a free-text branding URL (see the text input
-            // right below — placeholder "https://… (or upload)") that an
-            // admin can paste directly, not only a Cloudinary URL from
-            // the upload button. An unapproved host isn't just ineligible
-            // for next/image — proxy.js's production CSP `img-src`
-            // ('self' https://res.cloudinary.com data: blob:) already
-            // blocks the browser from ever loading it directly, so a raw
-            // <img> here would silently fail in production anyway. The
-            // icon fallback below is what actually renders for that case.
-            <ImageIcon className="h-6 w-6 text-muted-foreground" />
-          ) : (
-            <ImageIcon className="h-6 w-6 text-muted-foreground" />
-          )}
-        </div>
-        <div className="flex-1 space-y-2">
-          <Input
-            type="text"
-            placeholder="https://… (or upload)"
-            value={value || ""}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <div className="flex items-center gap-2">
-            <input
-              ref={inputRef}
-              type="file"
-              accept={accept}
-              onChange={handleFile}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-            >
-              <Upload size={12} />
-              {uploading ? "Uploading…" : "Upload"}
-            </button>
-            {value && (
-              <button
-                type="button"
-                onClick={() => onChange("")}
-                className="inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
-              >
-                <X size={12} /> Clear
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </Field>
-  );
-};
+const ImagePicker = ({ value, onChange, label, help, accept = "image/*" }) => (
+  <Field label={label} help={help}>
+    <ImageDropzone value={value || ""} onChange={onChange} folder="branding" multiple={false} accept={accept} />
+  </Field>
+);
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState(null);

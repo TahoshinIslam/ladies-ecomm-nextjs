@@ -31,7 +31,12 @@ export async function generateMetadata({ params }) {
   // section) — a product with none of these set behaves exactly as before
   // this fell back existed.
   const title = product.metaTitle || product.name;
-  const description = product.metaDescription || truncateDescription(product.description);
+  // truncateDescription() applies whether the description came from the
+  // admin's own meta-description override or the auto-derived product
+  // description — previously only the auto-derived fallback was bounded,
+  // so a long admin-entered override could reach <meta name="description">
+  // untruncated.
+  const description = truncateDescription(product.metaDescription || product.description);
   const image = product.ogImage
     ? resolveImage(product.ogImage, 1200)
     : product.images?.[0]

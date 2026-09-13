@@ -1,11 +1,16 @@
+import { headers } from "next/headers";
+
 import ShopPageClient from "./shop/ShopPageClient.jsx";
 import connectDB from "../config/db.js";
 import { listProducts, parseProductListQuery } from "../services/productService.js";
 import { assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../lib/validation.js";
 import { parseQueryParams, HttpError } from "../lib/http.js";
 import { serializeForClient } from "../lib/serialize.js";
-import { getCachedProductList } from "../lib/serverDataCache.js";
+import { getCachedProductList, getCachedCategories } from "../lib/serverDataCache.js";
 import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
+import { getServerLocale, getT } from "../lib/i18n/server.js";
+import { localizeCategory } from "../lib/i18n/localize.js";
+import { absoluteUrl, safeJsonLd } from "../lib/seo.js";
 import EmptyState from "../components/ui/EmptyState.jsx";
 import { AlertCircle } from "lucide-react";
 
@@ -91,6 +96,61 @@ export default async function ShopPage({ searchParams }) {
   // first page instead of carrying over stale state from the previous
   // filter selection.
   return (
-    <ShopPageClient key={usp.toString()} initialProducts={initialProducts} total={total} facets={facets} />
+    <>
+      <ShopBreadcrumbJsonLd rawSearchParams={rawSearchParams} />
+      <ShopPageClient key={usp.toString()} initialProducts={initialProducts} total={total} facets={facets} />
+    </>
+  );
+}
+
+// Phase 10 — BreadcrumbList structured data mirroring the exact visible
+// trail views/shop/ShopPageClient.jsx renders (Home > Shop > [department,
+// whenever `?category=` names one it can resolve] — see its
+// `selectedDeptObj` logic, which — unlike app/(routes)/shop/page.jsx's
+// narrower `getIndexableCategoryId` used only to decide indexability —
+// shows the department for ANY request naming a resolvable category,
+// alongside other filters/search/sort/pagination). Reuses the same
+// Phase 8 cached category read + localization the /api/categories route
+// itself uses, so the department name always matches what the client's
+// own useGetCategoriesQuery call would render.
+async function ShopBreadcrumbJsonLd({ rawSearchParams }) {
+  const categoryId = typeof rawSearchParams?.category === "string" ? rawSearchParams.category : undefined;
+
+  const [nonce, locale, t] = await Promise.all([
+    headers().then((h) => h.get("x-nonce") || undefined),
+    getServerLocale(),
+    getT(),
+  ]);
+
+  let department = null;
+  if (categoryId) {
+    const categories = await getCachedCategories();
+    const category = categories.find((c) => String(c._id) === categoryId);
+    if (category) department = localizeCategory(category, locale);
+  }
+
+  const breadcrumbItems = [
+    { name: t("navigation.home"), url: absoluteUrl("/") },
+    { name: t("navigation.shop"), url: absoluteUrl("/shop") },
+    ...(department ? [{ name: department.name, url: absoluteUrl(`/shop?category=${categoryId}`) }] : []),
+  ];
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: breadcrumbItems.map((item, idx) => ({
+      "@type": "ListItem",
+      position: idx + 1,
+      name: item.name,
+      item: item.url,
+    })),
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      nonce={nonce}
+      dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbJsonLd) }}
+    />
   );
 }

@@ -5,8 +5,9 @@ import ProductDetailInteractive from "./product/ProductDetailInteractive.jsx";
 import { getCachedProductByIdOrSlug, getCachedRelatedProducts, getCachedAttributesForCategory, getCachedPublicSettings } from "../lib/serverDataCache.js";
 import { serializeForClient } from "../lib/serialize.js";
 import { HttpError } from "../lib/http.js";
-import { getServerLocale } from "../lib/i18n/server.js";
+import { getServerLocale, getT } from "../lib/i18n/server.js";
 import { localizeProduct, localizeProductList, localizeAttributeDefinitionList } from "../lib/i18n/localize.js";
+import { departmentName } from "../lib/i18n/catalog.js";
 import { resolveImage } from "../lib/utils.js";
 import { usdToBdt } from "../lib/currency.js";
 import { absoluteUrl, truncateDescription, safeJsonLd } from "../lib/seo.js";
@@ -25,6 +26,7 @@ import { absoluteUrl, truncateDescription, safeJsonLd } from "../lib/seo.js";
 export default async function ProductDetailPage({ params }) {
   const { idOrSlug } = await params;
   const locale = await getServerLocale();
+  const t = await getT();
 
   // getCachedRelatedProducts()/getCachedPublicSettings() don't depend on
   // `rawProduct` at all — related-products resolves the product itself
@@ -56,7 +58,7 @@ export default async function ProductDetailPage({ params }) {
 
   return (
     <>
-      <ProductJsonLd product={rawProduct} settings={settings} />
+      <ProductJsonLd product={rawProduct} settings={settings} locale={locale} t={t} />
       <ProductDetailInteractive
         product={product}
         relatedProducts={relatedProducts}
@@ -76,7 +78,7 @@ export default async function ProductDetailPage({ params }) {
 // lib/seo.js's safeJsonLd() and rendered with the same per-request CSP
 // nonce every other inline mechanism in this app relies on (proxy.js
 // sets it on the `x-nonce` request header).
-async function ProductJsonLd({ product, settings }) {
+async function ProductJsonLd({ product, settings, locale, t }) {
   const nonce = (await headers()).get("x-nonce") || undefined;
   const canonicalPath = `/product/${product.slug}`;
   const rate = settings?.currency?.usdToBdt;
@@ -111,11 +113,47 @@ async function ProductJsonLd({ product, settings }) {
       : {}),
   };
 
+  // BreadcrumbList — mirrors the exact visible trail
+  // views/product/ProductDetailInteractive.jsx renders (Home > Shop >
+  // [department, if the product has one] > product name), per Google's
+  // requirement that structured data match on-page content.
+  const breadcrumbItems = [
+    { name: t("navigation.home"), url: absoluteUrl("/") },
+    { name: t("navigation.shop"), url: absoluteUrl("/shop") },
+    ...(product.category?.name
+      ? [
+          {
+            name: departmentName(locale, product.category.slug, product.category.name),
+            url: absoluteUrl(`/shop?category=${product.topCategory}`),
+          },
+        ]
+      : []),
+    { name: product.name, url: absoluteUrl(canonicalPath) },
+  ];
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: breadcrumbItems.map((item, idx) => ({
+      "@type": "ListItem",
+      position: idx + 1,
+      name: item.name,
+      item: item.url,
+    })),
+  };
+
   return (
-    <script
-      type="application/ld+json"
-      nonce={nonce}
-      dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
-    />
+    <>
+      <script
+        type="application/ld+json"
+        nonce={nonce}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        nonce={nonce}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbJsonLd) }}
+      />
+    </>
   );
 }

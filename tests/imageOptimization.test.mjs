@@ -113,7 +113,6 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
   });
 
   for (const [rel, fieldDesc] of [
-    ["views/admin/SettingsPage.jsx", "the branding-logo picker"],
     ["views/admin/UsersPageClient.jsx", "user.avatar"],
     ["components/review/ReviewList.jsx", "review.user.avatar"],
   ]) {
@@ -122,6 +121,15 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
       assert.match(content, /from ["'].*lib\/approvedImageSource\.js["']/, `${rel} must import the shared classifier`);
       assert.match(content, /isApprovedImageSource\(/, `${rel} must gate its <Image> render on the classifier`);
       assert.ok(!RAW_IMG_RE.test(stripComments(content)), `${rel} must not contain a raw <img> fallback`);
+    });
+  }
+
+  for (const rel of ["views/admin/SettingsPage.jsx", "views/admin/ShopConfigPage.jsx"]) {
+    test(`${rel} no longer needs the isApprovedImageSource classifier — its image fields are upload-only (ImageDropzone), never a free-text URL an admin could paste an unapproved host into`, () => {
+      const content = stripComments(read(rel));
+      assert.match(content, /from ["'].*components\/admin\/ImageDropzone\.jsx["']/, `${rel} must use the shared drag-and-drop ImageDropzone for its image field(s)`);
+      assert.doesNotMatch(content, /isApprovedImageSource/, `${rel} should have no remaining reference to the classifier — it's no longer needed once the only path to a value is an upload that always returns an approved Cloudinary URL`);
+      assert.ok(!RAW_IMG_RE.test(content), `${rel} must not contain a raw <img> fallback`);
     });
   }
 });

@@ -8,16 +8,13 @@
 // uses; each save here sends the *whole* `store`/`homepage` object back
 // (the API replaces those keys wholesale), merged from the last full
 // load plus just the one field group being edited.
-import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Store,
   GalleryHorizontal,
   Image as ImageIcon,
   Megaphone,
-  Upload,
-  X,
   Loader2,
   LayoutGrid,
   Shirt,
@@ -29,9 +26,9 @@ import Button from "../../components/ui/Button.jsx";
 import Input from "../../components/ui/Input.jsx";
 import Textarea from "../../components/ui/Textarea.jsx";
 import Modal from "../../components/ui/Modal.jsx";
+import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
-import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api` : "/api";
 
@@ -40,20 +37,6 @@ const csrfHeaders = () => {
   const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE_NAME}=([^;]*)`));
   const token = match ? decodeURIComponent(match[1]) : null;
   return token ? { "X-CSRF-Token": token } : {};
-};
-
-const uploadImage = async (file, folder = "homepage") => {
-  const fd = new FormData();
-  fd.append("image", file);
-  const res = await fetch(`${baseUrl}/upload?folder=${encodeURIComponent(folder)}`, {
-    method: "POST",
-    credentials: "include",
-    headers: { ...csrfHeaders() },
-    body: fd,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.success) throw new Error(data.message || `Upload failed (${res.status})`);
-  return data.url;
 };
 
 const CONFIG_ITEMS = [
@@ -187,61 +170,19 @@ async function saveSettings(body) {
   return data.settings;
 }
 
-function ImagePickerField({ value, onChange, label }) {
-  const inputRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
-
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      onChange(await uploadImage(file));
-      toast.success(`${label} uploaded`);
-    } catch (err) {
-      toast.error(err.message || "Upload failed");
-    } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  };
-
+// Thin wrapper keeping the same {label, value, onChange} call signature
+// every modal below already uses, backed by the shared drag-and-drop
+// ImageDropzone (single-image mode) instead of a click-only <input
+// type="file"> + paste-a-URL text box — the same widget
+// ProductFormModal.jsx's product-photo fields already use, so every image
+// field in the admin now behaves the same way (drag-and-drop, upload
+// progress, one clear "Replace image" affordance) instead of this one
+// corner of the admin being the one place without it.
+function ImagePickerField({ value, onChange, label, folder = "homepage" }) {
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-ink">{label}</label>
-      <div className="flex items-start gap-3">
-        <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-background">
-          {value && isApprovedImageSource(value) ? (
-            <Image src={value} alt={label} fill sizes="64px" className="object-cover" />
-          ) : (
-            <ImageIcon className="h-6 w-6 text-muted-foreground" />
-          )}
-        </div>
-        <div className="flex-1 space-y-2">
-          <Input placeholder="https://… (or upload)" value={value || ""} onChange={(e) => onChange(e.target.value)} />
-          <div className="flex items-center gap-2">
-            <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-            >
-              <Upload size={12} />
-              {uploading ? "Uploading…" : "Upload"}
-            </button>
-            {value && (
-              <button
-                type="button"
-                onClick={() => onChange("")}
-                className="inline-flex items-center gap-1 rounded border border-border px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10"
-              >
-                <X size={12} /> Clear
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      <ImageDropzone value={value || ""} onChange={onChange} folder={folder} multiple={false} />
     </div>
   );
 }
