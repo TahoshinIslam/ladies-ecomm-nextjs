@@ -6,6 +6,7 @@ import { Save, Plus, Trash2, Gift } from "lucide-react";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
 import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
+import Skeleton from "../../components/ui/Skeleton.jsx";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL
   ? `${process.env.NEXT_PUBLIC_API_URL}/api`
@@ -135,9 +136,9 @@ export default function SettingsPage() {
   }, [loadSettings]);
 
   if (!settings) {
-    return (
-      <div className="p-6 max-w-lg">
-        {loadError ? (
+    if (loadError) {
+      return (
+        <div className="p-6 max-w-lg">
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-6">
             <h2 className="text-lg font-semibold text-destructive">
               Couldn’t load settings
@@ -150,9 +151,25 @@ export default function SettingsPage() {
               Retry
             </button>
           </div>
-        ) : (
-          <div className="text-sm text-muted-foreground">Loading…</div>
-        )}
+        </div>
+      );
+    }
+    // Mirrors the real page below: five bordered Section cards (Store
+    // info / Branding / Currency / Exchange policy / Tax rules), each a
+    // title bar plus a couple of field-height bars — same skeleton
+    // language DataTable.jsx/ProductConfigPage.jsx already use elsewhere
+    // in the admin, instead of this page's own one-off spinner+text.
+    return (
+      <div className="p-6">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="rounded-lg border border-border bg-card p-6 mb-6">
+            <Skeleton className="mb-4 h-5 w-40" />
+            <div className="space-y-3">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </div>
+        ))}
       </div>
     );
   }

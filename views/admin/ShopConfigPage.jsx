@@ -15,7 +15,6 @@ import {
   GalleryHorizontal,
   Image as ImageIcon,
   Megaphone,
-  Loader2,
   LayoutGrid,
   Shirt,
   CalendarHeart,
@@ -26,6 +25,7 @@ import Button from "../../components/ui/Button.jsx";
 import Input from "../../components/ui/Input.jsx";
 import Textarea from "../../components/ui/Textarea.jsx";
 import Modal from "../../components/ui/Modal.jsx";
+import Skeleton from "../../components/ui/Skeleton.jsx";
 import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
@@ -83,9 +83,9 @@ export default function ShopConfigPage() {
   };
 
   if (!settings) {
-    return (
-      <div className="max-w-lg p-6">
-        {loadError ? (
+    if (loadError) {
+      return (
+        <div className="max-w-lg p-6">
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-6">
             <h2 className="text-lg font-semibold text-destructive">Couldn&apos;t load settings</h2>
             <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
@@ -93,11 +93,23 @@ export default function ShopConfigPage() {
               Retry
             </Button>
           </div>
-        ) : (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
-        )}
+        </div>
+      );
+    }
+    // Mirrors the real page below (a heading plus a grid of CONFIG_ITEMS
+    // cards) — same Skeleton language the rest of the admin already uses,
+    // instead of this page's own one-off spinner+text.
+    return (
+      <div className="space-y-6 p-6">
+        <div>
+          <Skeleton className="h-7 w-40" />
+          <Skeleton className="mt-2 h-4 w-96 max-w-full" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {CONFIG_ITEMS.map((item) => (
+            <Skeleton key={item.key} className="h-28 w-full rounded-xl" />
+          ))}
+        </div>
       </div>
     );
   }
