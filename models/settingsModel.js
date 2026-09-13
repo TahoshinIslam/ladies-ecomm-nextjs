@@ -92,6 +92,13 @@ const settingsSchema = new mongoose.Schema(
       // The guided-finder ("Not sure where to start?") card's right-hand
       // panel — unset keeps the existing hatch placeholder.
       guidedFinderImage: { type: String, default: "" },
+      // The header's "Occasions" mega-menu promo tile (components/layout
+      // /Header.jsx) — a separate nav element from the homepage's own
+      // "Dressed for the moment" section above (occasionImages), and
+      // previously had no settings field at all, so its promo box was
+      // hardcoded to always show the hatch placeholder with no way for an
+      // admin to set a real photo. Unset keeps that same placeholder.
+      occasionMenuImage: { type: String, default: "" },
       banner: {
         enabled: { type: Boolean, default: false },
         imageUrl: { type: String, default: "" },

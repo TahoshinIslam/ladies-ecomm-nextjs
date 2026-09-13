@@ -144,6 +144,7 @@ export const updateSettingsSchema = z
           .strict()
           .partial(),
         guidedFinderImage: z.string().trim().max(2000),
+        occasionMenuImage: z.string().trim().max(2000),
         banner: z
           .object({
             enabled: z.boolean(),

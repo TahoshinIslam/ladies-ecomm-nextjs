@@ -94,7 +94,17 @@ export default function NewsletterPoster() {
                 aria-describedby="nl-note"
                 aria-invalid={state === "invalid"}
                 className={cn(
-                  "h-[54px] flex-1 rounded-[9px] border bg-[rgba(245,242,234,0.06)] px-4 text-base text-canvas placeholder:text-[rgba(245,242,234,0.45)] focus-ring",
+                  // `flex-1` (flex-basis: 0%) only makes sense once the
+                  // wrapper switches to sm:flex-row — the input needs to
+                  // grow and share the row with the button there. Below
+                  // sm: the wrapper is flex-col, and a 0% flex-basis on a
+                  // column item can collapse height back toward content
+                  // size in some engines, fighting the explicit h-[54px]
+                  // (exactly the "email field is tiny on mobile" bug this
+                  // fixes). `min-h-[54px]` is a second, redundant
+                  // safeguard so the box can never shrink below 54px
+                  // regardless of any flex-basis interaction.
+                  "h-[54px] min-h-[54px] sm:flex-1 rounded-[9px] border bg-[rgba(245,242,234,0.06)] px-4 text-base text-canvas placeholder:text-[rgba(245,242,234,0.45)] focus-ring",
                   state === "invalid"
                     ? "border-verm"
                     : "border-[rgba(245,242,234,0.22)]",

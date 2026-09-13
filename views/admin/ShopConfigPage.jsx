@@ -19,6 +19,7 @@ import {
   Shirt,
   CalendarHeart,
   Compass,
+  Menu,
 } from "lucide-react";
 
 import Button from "../../components/ui/Button.jsx";
@@ -46,6 +47,7 @@ const CONFIG_ITEMS = [
   { key: "fabrics", title: "Fabric Story", description: "Set each fabric card's photo.", icon: Shirt },
   { key: "occasions", title: "Occasions", description: "Set each occasion card's photo.", icon: CalendarHeart },
   { key: "guidedFinder", title: "Guided Discovery", description: "Set the \"Not sure where to start?\" panel photo.", icon: Compass },
+  { key: "occasionMenu", title: "Occasions Menu", description: "Set the header's Occasions dropdown photo.", icon: Menu },
   { key: "banner", title: "Banner", description: "Set the homepage promotional banner.", icon: ImageIcon },
   { key: "campaign", title: "Campaign", description: "Run an offer message for visitors.", icon: Megaphone },
 ];
@@ -159,6 +161,9 @@ export default function ShopConfigPage() {
       )}
       {openKey === "guidedFinder" && (
         <GuidedFinderModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
+      )}
+      {openKey === "occasionMenu" && (
+        <OccasionMenuModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
       )}
       {openKey === "banner" && (
         <BannerModal homepage={settings.homepage} onClose={() => setOpenKey(null)} onSaved={onSaved} />
@@ -453,6 +458,44 @@ function GuidedFinderModal({ homepage, onClose, onSaved }) {
           placeholder.
         </p>
         <ImagePickerField label="Guided Discovery photo" value={image} onChange={setImage} />
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function OccasionMenuModal({ homepage, onClose, onSaved }) {
+  const [image, setImage] = useState(homepage?.occasionMenuImage || "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await saveSettings({ homepage: { ...homepage, occasionMenuImage: image } });
+      toast.warning("Occasions Menu updated");
+      onSaved({ homepage: saved.homepage });
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Occasions Menu" size="md">
+      <div className="space-y-4 p-5">
+        <p className="text-xs text-muted-foreground">
+          The photo shown in the header&apos;s &quot;Occasions&quot; dropdown menu — a separate spot from the
+          homepage&apos;s &quot;Dressed for the moment&quot; cards. Left blank keeps the existing plain placeholder.
+        </p>
+        <ImagePickerField label="Occasions menu photo" value={image} onChange={setImage} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel

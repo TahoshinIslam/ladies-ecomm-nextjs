@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { cn } from "../../lib/utils.js";
+import { cn, resolveImage } from "../../lib/utils.js";
 import { useTheme } from "../../context/ThemeProvider.jsx";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
@@ -625,7 +626,17 @@ export default function Header({ initialDepartments = [] }) {
                 </div>
                 <div>
                   <div className="relative aspect-4/3 overflow-hidden rounded-2xl bg-media">
-                    <div aria-hidden="true" className="absolute inset-0 hatch" />
+                    {settings?.homepage?.occasionMenuImage ? (
+                      <Image
+                        src={resolveImage(settings.homepage.occasionMenuImage, 500)}
+                        alt=""
+                        fill
+                        sizes="(max-width: 1024px) 100vw, 25vw"
+                        className="object-cover object-top"
+                      />
+                    ) : (
+                      <div aria-hidden="true" className="absolute inset-0 hatch" />
+                    )}
                   </div>
                   <p className="mt-3.5 max-w-[34ch] text-[15px] leading-relaxed text-stone">
                     {t("header.occasionsBlurb")}
