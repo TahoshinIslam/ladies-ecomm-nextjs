@@ -252,7 +252,19 @@ export default async function HomePage() {
                       alt=""
                       fill
                       sizes="(max-width: 1024px) 100vw, 33vw"
-                      className="object-cover"
+                      // object-top, not the object-cover default (center):
+                      // these cards' heights are fixed per span (275-560px)
+                      // independent of whatever aspect ratio an admin
+                      // uploads, so object-cover almost always has to crop
+                      // some height. Centered cropping took equally off top
+                      // and bottom, cutting into a model's face/head — the
+                      // one part of a fashion photo that must never be
+                      // cropped. Anchoring to the top means any necessary
+                      // crop always comes off the bottom instead, so every
+                      // uploaded photo frames gracefully without an admin
+                      // needing to hand-check each one against every card's
+                      // specific aspect ratio.
+                      className="object-cover object-top"
                     />
                     <div aria-hidden="true" className="absolute inset-0 scrim" />
                   </>
@@ -397,7 +409,9 @@ export default async function HomePage() {
                   alt=""
                   fill
                   sizes="(max-width: 1024px) 50vw, 20vw"
-                  className="object-cover"
+                  // object-top — see the department card's own comment
+                  // above (same fixed-min-height-vs-arbitrary-upload issue).
+                  className="object-cover object-top"
                 />
               ) : (
                 <div aria-hidden="true" className="absolute inset-0 hatch" />
@@ -439,7 +453,9 @@ export default async function HomePage() {
                     alt=""
                     fill
                     sizes="(max-width: 1024px) 50vw, 25vw"
-                    className="object-cover"
+                    // object-top — see the department card's own comment
+                    // above (same fixed-min-height-vs-arbitrary-upload issue).
+                    className="object-cover object-top"
                   />
                   <div aria-hidden="true" className="absolute inset-0 scrim" />
                 </>

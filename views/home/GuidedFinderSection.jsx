@@ -52,7 +52,12 @@ export default function GuidedFinderSection({ image }) {
         </div>
         <div className="relative hidden min-h-[340px] overflow-hidden border-l border-line bg-media lg:grid lg:place-items-center">
           {image ? (
-            <Image src={resolveImage(image, 700)} alt="" fill sizes="50vw" className="object-cover" />
+            // object-top: this box's height is fixed independent of
+            // whatever aspect ratio gets uploaded (Shop Config → Guided
+            // Discovery photo) — same reasoning as the department/fabric/
+            // occasion cards in views/HomePage.jsx, so any necessary crop
+            // comes off the bottom, never a subject's face at the top.
+            <Image src={resolveImage(image, 700)} alt="" fill sizes="50vw" className="object-cover object-top" />
           ) : (
             <div aria-hidden="true" className="absolute inset-0 hatch" />
           )}
