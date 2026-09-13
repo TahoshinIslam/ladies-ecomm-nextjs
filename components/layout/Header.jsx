@@ -6,6 +6,9 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  Bell,
+  Check,
+  CheckCheck,
   Heart,
   LayoutDashboard,
   LogIn,
@@ -15,7 +18,7 @@ import {
   Package,
   Scale,
   Search,
-  ShoppingBag,
+  ShoppingCart,
   Sun,
   User as UserIcon,
   X,
@@ -34,7 +37,14 @@ import {
   clearCredentials,
 } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
-import { useGetCartQuery, useGetWishlistQuery, useGetCategoriesQuery } from "../../store/shopApi.js";
+import {
+  useGetCartQuery,
+  useGetWishlistQuery,
+  useGetCategoriesQuery,
+  useGetNotificationsQuery,
+  useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
+} from "../../store/shopApi.js";
 import {
   toggleCart,
   toggleMobileMenu,
@@ -42,6 +52,7 @@ import {
   setMobileMenuOpen,
 } from "../../store/uiSlice.js";
 import useDialogFocus from "../../hooks/useDialogFocus.js";
+import { useUserEventStream } from "../../hooks/useUserEventStream.js";
 
 // Free-shipping amount comes from live settings (see ANNOUNCEMENTS below,
 // built in the component body) so this copy can never drift from the real,
@@ -93,6 +104,11 @@ export default function Header({ initialDepartments = [] }) {
   const { t, locale } = useLocale();
   const settings = useSettings();
   const user = useSelector(selectCurrentUser);
+  // Mounted once here — Header renders on every storefront page — so a
+  // signed-in shopper's order-status/delivery notifications reach their
+  // bell live, matching how useAdminEventStream is mounted once in
+  // AdminLayout for the same reason on the admin side.
+  useUserEventStream();
   const isAdmin = useSelector(selectCanAccessAdmin);
   const mobileMenuOpen = useSelector((s) => s.ui.mobileMenuOpen);
   const compareCount = useSelector((s) => s.ui.compareList.length);
@@ -302,12 +318,13 @@ export default function Header({ initialDepartments = [] }) {
           >
             {isDark ? <Sun className="h-[20px] w-[20px]" /> : <Moon className="h-[20px] w-[20px]" />}
           </button>
+          {user && <NotificationBell />}
           <button
             onClick={() => dispatch(toggleCart())}
             aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
             className="relative grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
           >
-            <ShoppingBag className="h-[21px] w-[21px]" strokeWidth={1.6} />
+            <ShoppingCart className="h-[21px] w-[21px]" strokeWidth={1.6} />
             {cartCount > 0 && <Badge count={cartCount} />}
           </button>
         </div>
@@ -500,13 +517,15 @@ export default function Header({ initialDepartments = [] }) {
               </AnimatePresence>
             </div>
 
+            {user && <NotificationBell />}
+
             {/* Cart */}
             <button
               onClick={() => dispatch(toggleCart())}
               aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
               className="relative ml-1 flex h-11 items-center gap-2.5 rounded-lg bg-ink px-4 text-canvas transition-colors hover:bg-verm-contrast hover:text-white focus-ring"
             >
-              <ShoppingBag className="h-[18px] w-[18px]" />
+              <ShoppingCart className="h-[18px] w-[18px]" />
               <span data-tabular className="font-mono text-[13px]">
                 {cartCount}
               </span>
@@ -832,5 +851,153 @@ function Badge({ count }) {
     >
       {count > 99 ? "99+" : count}
     </span>
+  );
+}
+
+const notificationTimeAgo = (iso) => {
+  const diff = Date.now() - new Date(iso).getTime();
+  const sec = Math.round(diff / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+};
+
+// Customer-facing counterpart to components/admin/NotificationsDropdown.jsx
+// — same underlying endpoint (GET/PATCH /api/notifications, keyed by
+// whichever user is signed in, see store/shopApi.js's own comment), same
+// interaction shape, storefront ("Kinetic Editorial") styling instead of
+// the admin theme. Real-time delivery is useUserEventStream (mounted once
+// in Header() above); this poll is just the fallback for a dropped SSE
+// connection.
+function NotificationBell() {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const router = useRouter();
+
+  const { data, isLoading, isError } = useGetNotificationsQuery(
+    { page: 1, limit: 10 },
+    { pollingInterval: 60000 },
+  );
+  const [markRead] = useMarkNotificationReadMutation();
+  const [markAll, { isLoading: marking }] = useMarkAllNotificationsReadMutation();
+
+  const unreadCount = data?.unreadCount ?? 0;
+  const notifications = data?.notifications ?? [];
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const handleClick = async (n) => {
+    setOpen(false);
+    if (!n.readAt) {
+      try {
+        await markRead(n._id).unwrap();
+      } catch {
+        /* non-fatal */
+      }
+    }
+    if (n.url) router.push(n.url);
+  };
+
+  const handleMarkAll = async () => {
+    if (unreadCount === 0) return;
+    try {
+      await markAll().unwrap();
+    } catch {
+      /* non-fatal */
+    }
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label={`${t("header.notifications")}${unreadCount ? ` (${unreadCount})` : ""}`}
+        className="relative grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
+      >
+        <Bell className="h-[20px] w-[20px]" strokeWidth={1.6} />
+        {unreadCount > 0 && <Badge count={unreadCount} />}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.15 }}
+            className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-surface shadow-hover"
+          >
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <p className="text-sm font-bold">{t("header.notifications")}</p>
+              <button
+                onClick={handleMarkAll}
+                disabled={unreadCount === 0 || marking}
+                className="flex items-center gap-1 text-xs text-stone transition-colors hover:text-ink disabled:opacity-40"
+              >
+                <CheckCheck className="h-3.5 w-3.5" />
+                {t("header.markAllRead")}
+              </button>
+            </div>
+
+            <div className="max-h-96 overflow-y-auto">
+              {isLoading ? (
+                <div className="space-y-3 p-4">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="skeleton h-12 w-full rounded-md" />
+                  ))}
+                </div>
+              ) : isError ? (
+                <p className="px-4 py-8 text-center text-sm text-stone">{t("header.notificationsLoadError")}</p>
+              ) : notifications.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-stone">
+                  {t("header.notificationsEmpty")}
+                </div>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {notifications.map((n) => (
+                    <li key={n._id}>
+                      <button
+                        onClick={() => handleClick(n)}
+                        className={cn(
+                          "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-wash",
+                          !n.readAt && "bg-accent/5",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "mt-1.5 h-2 w-2 flex-shrink-0 rounded-full",
+                            n.readAt ? "bg-transparent" : "bg-verm",
+                          )}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className={cn("text-sm", n.readAt ? "text-stone" : "font-medium text-ink")}>
+                            {n.message}
+                          </p>
+                          <p className="mt-0.5 text-xs text-stone">{notificationTimeAgo(n.createdAt)}</p>
+                        </div>
+                        {n.readAt && <Check className="h-3.5 w-3.5 flex-shrink-0 text-stone" />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

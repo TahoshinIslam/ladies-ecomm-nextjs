@@ -64,13 +64,32 @@ export default function OrderTimeline({ order, className }) {
       </div>
       <div className="relative">
         <div className="absolute left-5 top-5 bottom-5 w-0.5 bg-border sm:left-0 sm:top-5 sm:bottom-auto sm:h-0.5 sm:w-full" />
+        {/* Two separate fill bars, not one bar reused across breakpoints:
+            the vertical (mobile) fill animates `height` and the horizontal
+            (sm:+) fill animates `width` — an inline style can't switch which
+            CSS property it targets at a breakpoint, and a single element
+            trying to do both left its `sm:h-0.5` class fighting the mobile
+            `height` inline style, collapsing the desktop progress bar to a
+            2px sliver instead of a horizontal fill. */}
         <motion.div
           initial={{ scaleY: 0 }}
           animate={{ scaleY: 1 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          className="absolute left-5 top-5 w-0.5 origin-top bg-accent sm:left-0 sm:h-0.5 sm:origin-left"
+          className="absolute left-5 top-5 w-0.5 origin-top bg-accent sm:hidden"
           style={{
             height:
+              currentIdx >= 0
+                ? `${(currentIdx / (trackingSteps.length - 1)) * 100}%`
+                : "0%",
+          }}
+        />
+        <motion.div
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: 1 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="absolute left-0 top-5 hidden h-0.5 origin-left bg-accent sm:block"
+          style={{
+            width:
               currentIdx >= 0
                 ? `${(currentIdx / (trackingSteps.length - 1)) * 100}%`
                 : "0%",

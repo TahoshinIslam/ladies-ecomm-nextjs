@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useSelector } from "react-redux";
 import { ThumbsUp, BadgeCheck, Pencil, Trash2, X, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +21,7 @@ import {
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { formatDhakaDate } from "../../lib/date.js";
+import { isApprovedImageSource } from "../../lib/approvedImageSource.js";
 
 const REVIEWS_PER_PAGE = 10;
 
@@ -156,7 +158,11 @@ function ReviewPagination({ page, pages, onChange, disabled }) {
   );
 }
 
-function ReviewItem({ review, isOwn }) {
+// Exported so the account "Reviews" page (views/account/ReviewsHubPage.jsx)
+// can reuse the exact same card — stars/title/comment/byline plus the
+// owner's edit/delete controls — for "reviews you've already left"
+// instead of re-implementing that UI a second time.
+export function ReviewItem({ review, isOwn }) {
   const { t, locale } = useLocale();
   const [editing, setEditing] = useState(false);
   const [rating, setRating] = useState(review.rating);
@@ -222,10 +228,31 @@ function ReviewItem({ review, isOwn }) {
           <p className="mt-2 text-sm leading-relaxed text-foreground/90 whitespace-pre-line">
             {review.comment}
           </p>
-          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {review.user?.name || t("reviews.customerFallback")}
-            {review.isVerifiedPurchase && <> — {t("reviews.verified")}</>}
-          </p>
+          <div className="mt-4 flex items-center gap-2">
+            <div className="relative flex h-7 w-7 flex-none items-center justify-center overflow-hidden rounded-full bg-muted text-[11px] font-bold">
+              {review.user?.avatar && isApprovedImageSource(review.user.avatar) ? (
+                <Image
+                  src={review.user.avatar}
+                  alt=""
+                  fill
+                  sizes="28px"
+                  className="object-cover"
+                />
+              ) : (
+                // Same reasoning as views/admin/UsersPage.jsx — a reviewer's
+                // `avatar` is an arbitrary, unrestricted-origin URL that
+                // proxy.js's production CSP already blocks the browser from
+                // loading directly unless it's res.cloudinary.com/placehold.co;
+                // the initials fallback is what an unapproved-origin avatar
+                // actually renders as today.
+                review.user?.name?.[0]?.toUpperCase() || "?"
+              )}
+            </div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {review.user?.name || t("reviews.customerFallback")}
+              {review.isVerifiedPurchase && <> — {t("reviews.verified")}</>}
+            </p>
+          </div>
         </>
       ) : (
         <div className="space-y-2">

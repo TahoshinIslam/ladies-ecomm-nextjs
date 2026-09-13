@@ -108,13 +108,25 @@ const reviewEndpoints = (b) => ({
       `/reviews/product/${productId}?page=${page}&limit=${limit}`,
     providesTags: (r, e, a) => [{ type: "Review", id: a.productId }],
   }),
+  // Backs the account "Reviews" page: every delivered product a signed-in
+  // shopper can review, plus every review they've already left.
+  getMyReviewProducts: b.query({
+    query: () => "/reviews/mine",
+    providesTags: ["Review"],
+  }),
   createReview: b.mutation({
     query: ({ productId, ...body }) => ({
       url: `/reviews/product/${productId}`,
       method: "POST",
       body,
     }),
+    // The specific-product tag keeps the PDP's own review list/summary
+    // fresh; the bare "Review" tag is what also refreshes
+    // getMyReviewProducts above (moving this product from "reviewable" to
+    // "reviewed") — updateReview/deleteReview/markHelpful below already
+    // invalidate the bare tag, this was the one review mutation that didn't.
     invalidatesTags: (r, e, a) => [
+      "Review",
       { type: "Review", id: a.productId },
       { type: "Product", id: a.productId },
     ],
@@ -244,7 +256,15 @@ const uploadEndpoints = (b) => ({
   }),
 });
 
-// ====== Notifications (admin/employee) ======
+// ====== Notifications ======
+// GET /api/notifications (and the two mutations below) are keyed by
+// requireUser() server-side, not requirePermission()/requireStaff() — any
+// signed-in user's own notifications, never just admin/employee's. Used
+// by both components/admin/NotificationsDropdown.jsx (admin/employee
+// broadcasts — new orders, low stock, ...) and the storefront's own
+// customer-facing notification bell (order-status/delivery updates, see
+// services/notificationService.js's createUserNotification) — one
+// endpoint, scoped to whichever user is currently logged in.
 const notificationEndpoints = (b) => ({
   getNotifications: b.query({
     query: ({ page = 1, limit = 20, unreadOnly = false } = {}) => {
@@ -354,6 +374,7 @@ export const {
   useGetAllOrdersQuery,
   useUpdateOrderStatusMutation,
   useGetProductReviewsQuery,
+  useGetMyReviewProductsQuery,
   useCreateReviewMutation,
   useUpdateReviewMutation,
   useDeleteReviewMutation,

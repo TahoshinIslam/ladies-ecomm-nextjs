@@ -8,7 +8,7 @@ import Cart from "../models/cartModel.js";
 import Settings from "../models/settingsModel.js";
 import User from "../models/userModel.js";
 import Payment from "../models/paymentModel.js";
-import { createAdminNotification } from "./notificationService.js";
+import { createAdminNotification, createUserNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
 import { emitOrderEvent, emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
@@ -18,6 +18,20 @@ import { requireObjectIdFormat } from "../lib/validation.js";
 // uses for total stock — reusing the same number so "low stock" means the
 // same thing in the admin table and in the alert, not two drifting rules.
 const LOW_STOCK_THRESHOLD = 4;
+
+// Customer-facing copy for updateOrderStatus()'s notification, per real
+// status transition — "pending" is the schema default a new order already
+// starts at, never a status something transitions INTO, so it has no
+// entry here (nothing to tell a customer about a state they were already
+// shown at checkout).
+const CUSTOMER_STATUS_MESSAGE = {
+  paid: (n) => `Payment confirmed for order #${n}`,
+  processing: (n) => `Order #${n} is being processed`,
+  shipped: (n) => `Order #${n} has shipped`,
+  delivered: (n) => `Order #${n} was delivered`,
+  cancelled: (n) => `Order #${n} was cancelled`,
+  refunded: (n) => `Order #${n} was refunded`,
+};
 
 // Ported from controllers/orderController.js, retargeted from the old
 // product.sizes/size-string schema to product.variants/variantId — the
@@ -746,6 +760,22 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
       createAdminNotification({
         message: `Order #${orderNumber} marked as ${status}`,
         url: "/admin/orders",
+      }).catch(() => {});
+    }
+
+    // Customer-facing: "order updates live, delivery status" — the
+    // shopper who placed this order gets their own notification-bell
+    // entry (and, if their tab is open, an immediate live update via
+    // useUserEventStream) for every real status transition that has
+    // customer-facing copy above. Same fire-and-forget-but-logged
+    // reasoning as the admin notification just above: never let a
+    // notification failure fail the status update itself.
+    const customerMessage = CUSTOMER_STATUS_MESSAGE[status];
+    if (customerMessage) {
+      createUserNotification({
+        recipient: order.user,
+        message: customerMessage(orderNumber),
+        url: `/orders/${orderId}`,
       }).catch(() => {});
     }
   }

@@ -35,6 +35,48 @@ import {
 import { cn, isDepartmentCategory } from "../../lib/utils.js";
 import { AGE_GROUP_VALUES_LIST, AVAILABILITY_VALUES } from "../../schemas/catalogSchemas.js";
 
+// Auto-generated SKUs for "Generate variants" — an admin typing "BUR-SAU-
+// BLK-FS-NIDA" by hand for every row in a 12-combination batch was the
+// actual complaint ("how can admin manually manage it, it doesn't look
+// systematically correct"): a SKU is a deterministic function of the
+// product and its variant attributes, not something that needs a human to
+// invent per row. `skuSegment` abbreviates one attribute VALUE (e.g.
+// "free-size" -> "FREE"); `productCodeFromName` turns the product's own
+// name into a stable prefix shared by every one of its variants (initials,
+// one letter per significant word — "Saudi-Style Closed Burqa" -> "SSCB").
+// The result is still a plain, editable text input afterward — this only
+// changes the starting value, never removes the admin's ability to
+// override it for a specific row.
+const SKU_STOPWORDS = new Set(["the", "a", "an", "of", "and", "for", "with"]);
+
+export function skuSegment(value) {
+  const cleaned = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return cleaned.slice(0, 4) || "XXX";
+}
+
+export function productCodeFromName(name) {
+  const words = String(name || "")
+    .trim()
+    .split(/[\s-]+/)
+    .filter((w) => w && !SKU_STOPWORDS.has(w.toLowerCase()));
+  if (!words.length) return "SKU";
+  const initials = words
+    .map((w) => w.replace(/[^A-Za-z0-9]/g, "")[0])
+    .filter(Boolean)
+    .join("")
+    .toUpperCase();
+  return initials.slice(0, 6) || "SKU";
+}
+
+// `attributes` in axis order (Color/Fabric/Size, ...) so two variants that
+// only differ in one axis get SKUs that read as obviously related, not
+// arbitrarily reordered.
+export function generateVariantSku(productName, attributes) {
+  const base = productCodeFromName(productName);
+  const segments = Object.values(attributes || {}).map(skuSegment);
+  return [base, ...segments].join("-");
+}
+
 const variantSchema = z.object({
   variantName: z.string().min(1, "Required"),
   sku: z.string().min(1, "Required"),
@@ -179,6 +221,7 @@ export default function ProductFormModal({ product, onClose }) {
   const images = watch("images");
   const variants = watch("variants");
   const basePrice = watch("basePrice");
+  const productName = watch("name");
 
   const subcategories = useMemo(
     () => categories.filter((c) => c.parent === department),
@@ -302,7 +345,7 @@ export default function ProductFormModal({ product, onClose }) {
       existingSignatures.add(sig);
       newVariants.push({
         variantName: nameParts.join(" / "),
-        sku: "",
+        sku: generateVariantSku(productName, attributes),
         attributes,
         price: "",
         discountPrice: "",

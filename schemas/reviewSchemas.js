@@ -23,7 +23,17 @@ export const adminReviewListQuerySchema = z
 export const createReviewSchema = z
   .object({
     rating: z.number().int().min(1, "rating must be at least 1").max(5, "rating must be at most 5"),
-    title: requiredString({ min: 1, max: 120 }).optional().default(""),
+    // No `.default("")` here — real bug this fixes: `requiredString({min:1})
+    // .optional().default("")` re-validates its OWN default value against
+    // the wrapped min:1 check, so an omitted title (the normal case —
+    // ReviewForm.jsx's title field is explicitly labeled optional and
+    // sends `title: undefined` when left blank) was rejected with
+    // "must be at least 1 character" — a review could never actually be
+    // submitted without typing a title, silently defeating the "optional"
+    // label. Plain `.optional()` leaves an absent title as `undefined`,
+    // which the Review document's own title field (not required at the
+    // Mongoose level either) already handles fine.
+    title: requiredString({ min: 1, max: 120 }).optional(),
     comment: requiredString({ min: 1, max: 2000 }),
     images: z.array(urlSchema).max(6, "at most 6 images").optional().default([]),
   })

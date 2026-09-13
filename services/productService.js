@@ -42,7 +42,7 @@ const ALLOWED_FILTER_FIELDS = new Set(["topCategory", "category", "brand", "ageG
 // makes the filter system data-driven: adding a 10th AttributeDefinition
 // needs no change here — any key matching a product's attributes[].key
 // value just works.
-const NON_FILTER_KEYS = new Set(["search", "featured", "discount", "new", "collection", "sort", "limit", "page", "fields"]);
+const NON_FILTER_KEYS = new Set(["search", "featured", "discount", "new", "collection", "sort", "limit", "page", "fields", "priceMin", "priceMax"]);
 
 // A real discount requires discountPrice > 0 AND discountPrice < basePrice
 // — the exact invariant assertDiscountsValid() already enforces at write
@@ -548,7 +548,40 @@ export async function parseProductListQuery(query) {
     if (query[key] !== undefined) out[key] = query[key];
   }
 
-  if (query.basePrice !== undefined && query.basePrice !== "") {
+  // UI-only aliases: the shop page's price-range slider (views/shop/
+  // ShopPageClient.jsx's PriceRange) puts `priceMin`/`priceMax` in the URL,
+  // never a raw `basePrice` — translated here into the exact same
+  // out.basePrice shape the block below already produces, so buildFilter()
+  // never has to know these two names exist. Without this translation, a
+  // price-range selection reached this function as two keys nothing
+  // recognized (`priceMin`/`priceMax` aren't in PRODUCT_LIST_FIXED_KEYS,
+  // aren't a real AttributeDefinition), which fails the whole request as
+  // an unrecognized filter — the actual cause of the price filter
+  // silently "not working": every request that used it 400'd, and
+  // ShopPage.jsx's catch turns any 400 into the generic "Invalid filter"
+  // empty state instead of a filtered product list.
+  if ((query.priceMin !== undefined && query.priceMin !== "") || (query.priceMax !== undefined && query.priceMax !== "")) {
+    if (query.basePrice !== undefined && query.basePrice !== "") {
+      failQuery("priceMin/priceMax cannot be combined with basePrice", "priceMin");
+    }
+    const converted = {};
+    if (query.priceMin !== undefined && query.priceMin !== "") {
+      if (typeof query.priceMin !== "string") failQuery("Invalid priceMin", "priceMin");
+      const { value, error } = validateBoundedPriceValue(query.priceMin);
+      if (error) failQuery(`Invalid priceMin: ${error}`, "priceMin");
+      converted.gte = value;
+    }
+    if (query.priceMax !== undefined && query.priceMax !== "") {
+      if (typeof query.priceMax !== "string") failQuery("Invalid priceMax", "priceMax");
+      const { value, error } = validateBoundedPriceValue(query.priceMax);
+      if (error) failQuery(`Invalid priceMax: ${error}`, "priceMax");
+      converted.lte = value;
+    }
+    if (converted.gte !== undefined && converted.lte !== undefined && converted.gte > converted.lte) {
+      failQuery("priceMin must not exceed priceMax", "priceMin");
+    }
+    out.basePrice = converted;
+  } else if (query.basePrice !== undefined && query.basePrice !== "") {
     const val = query.basePrice;
     if (typeof val === "string") {
       const { values, error } = splitBoundedCsv(val, { maxValues: 10, maxValueLength: 20 });

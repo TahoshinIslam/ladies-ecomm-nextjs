@@ -49,6 +49,13 @@ mock.module("../services/notificationService.js", {
       if (notificationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, notificationDelayMs));
       notificationCalls.push(payload);
     },
+    // orderService.js's updateOrderStatus() (unrelated to the exactly-once
+    // effects this file tests — those are all createOrder()'s post-commit
+    // path) also imports this named export; the mock module needs to
+    // provide SOMETHING for every name the real module under test imports,
+    // or the import itself fails at load time. Not exercised by any test
+    // in this file, so a plain no-op is enough.
+    createUserNotification: async () => {},
     getNotifications: async () => ({ total: 0, unreadCount: 0, page: 1, pages: 1, notifications: [] }),
   },
 });

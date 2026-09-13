@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import Review from "../models/reviewModel.js";
 import Order from "../models/orderModel.js";
+import Product from "../models/productModel.js";
 import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
 import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
@@ -40,6 +41,60 @@ export async function getProductReviews(productId, { page = 1, limit = 10 } = {}
     reviews,
     breakdown,
   };
+}
+
+// Backs the customer account "Reviews" page (account sidebar) — one place
+// to see every product a shopper CAN review (something from a delivered
+// order they haven't rated yet) alongside every review they've ALREADY
+// left, instead of hunting through individual delivered orders on
+// /orders one at a time to find a "Write a review" opportunity.
+export async function getMyReviewProducts(userId) {
+  // Every distinct product across this user's delivered orders — the same
+  // eligibility rule createReview() below already enforces per-product at
+  // submission time, just listed instead of checked one at a time.
+  const deliveredOrders = await Order.find({ user: userId, status: "delivered" })
+    .select("items.product items.snapshot")
+    .lean();
+
+  const productIds = [];
+  const seen = new Set();
+  for (const order of deliveredOrders) {
+    for (const item of order.items) {
+      const id = String(item.product);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      productIds.push(item.product);
+    }
+  }
+  if (!productIds.length) return { reviewable: [], reviewed: [] };
+
+  const [products, myReviews] = await Promise.all([
+    Product.find({ _id: { $in: productIds } }).select("name slug images").lean(),
+    Review.find({ user: userId, product: { $in: productIds } })
+      .populate("user", "name avatar")
+      .populate("adminReply.repliedBy", "name")
+      .lean(),
+  ]);
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+  const reviewByProduct = new Map(myReviews.map((r) => [String(r.product), r]));
+
+  const reviewable = [];
+  const reviewed = [];
+  for (const id of productIds) {
+    const key = String(id);
+    const product = productById.get(key);
+    // A product deactivated/deleted since delivery still shows in "already
+    // reviewed" (the review itself references it, real history — never
+    // silently dropped), but never as a NEW reviewable opportunity for
+    // something that no longer has a real product doc to review.
+    const review = reviewByProduct.get(key);
+    if (review) {
+      reviewed.push({ ...review, product: product || null });
+    } else if (product) {
+      reviewable.push(product);
+    }
+  }
+  return { reviewable, reviewed };
 }
 
 export async function createReview(userId, productId, { rating, title, comment, images = [] }) {

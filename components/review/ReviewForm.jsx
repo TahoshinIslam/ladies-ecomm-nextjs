@@ -10,7 +10,7 @@ import Textarea from "../../components/ui/Textarea.jsx";
 
 import { useCreateReviewMutation } from "../../store/shopApi.js";
 
-export default function ReviewForm({ productId, productName }) {
+export default function ReviewForm({ productId, productName, onSuccess }) {
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [title, setTitle] = useState("");
@@ -44,6 +44,7 @@ export default function ReviewForm({ productId, productName }) {
       setTitle("");
       setComment("");
       setErrors({});
+      onSuccess?.();
     } catch (err) {
       toast.error(err?.data?.message || "Could not submit review");
     }

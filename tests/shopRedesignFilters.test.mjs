@@ -98,6 +98,54 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
     });
   });
 
+  describe("priceMin/priceMax URL params — the shop page's actual price-slider param names (v3-11-b, regression)", () => {
+    // views/shop/ShopPageClient.jsx's PriceRange puts `priceMin`/`priceMax`
+    // in the URL, never a raw `basePrice`. parseProductListQuery() is the
+    // one function that ever sees the raw query-string keys (both the
+    // ShopPage.jsx SSR path and the GET /api/products route go through
+    // it) — every test above this one calls listProducts() directly with
+    // an already-built `{basePrice: {...}}` object, which never exercised
+    // this translation at all and would not have caught a request that
+    // used the real URL param names failing outright.
+    test("parseProductListQuery translates priceMin/priceMax into basePrice, and the result filters by effective price exactly like basePrice would", async () => {
+      const parsed = await parseProductListQuery({ category: dept._id.toString(), priceMin: "500", priceMax: "1300" });
+      assert.deepEqual(parsed.basePrice, { gte: 500, lte: 1300 });
+
+      const result = await listProducts({ ...parsed, limit: 50 }, { isAdmin: true });
+      const ids = result.products.map((p) => String(p._id));
+      assert.ok(ids.includes(String(productDiscounted._id)), "discounted product (effective price 1200) must be included in a 500-1300 range");
+    });
+
+    test("priceMin alone (no priceMax) still resolves and excludes by effective price, not raw basePrice", async () => {
+      const parsed = await parseProductListQuery({ category: dept._id.toString(), priceMin: "1300" });
+      assert.deepEqual(parsed.basePrice, { gte: 1300 });
+      const result = await listProducts({ ...parsed, limit: 50 }, { isAdmin: true });
+      const ids = result.products.map((p) => String(p._id));
+      assert.ok(!ids.includes(String(productDiscounted._id)), "effective price 1200 must not satisfy a >=1300 minimum, even though its basePrice 1500 would");
+    });
+
+    test("priceMin/priceMax combined with a literal basePrice= is rejected (400), never silently arbitrated", async () => {
+      await assert.rejects(
+        () => parseProductListQuery({ priceMin: "100", basePrice: "200" }),
+        (err) => err instanceof HttpError && err.status === 400,
+      );
+    });
+
+    test("priceMin greater than priceMax is rejected (400)", async () => {
+      await assert.rejects(
+        () => parseProductListQuery({ priceMin: "2000", priceMax: "100" }),
+        (err) => err instanceof HttpError && err.status === 400,
+      );
+    });
+
+    test("a non-numeric priceMin is rejected (400), not silently ignored", async () => {
+      await assert.rejects(
+        () => parseProductListQuery({ priceMin: "not-a-number" }),
+        (err) => err instanceof HttpError && err.status === 400,
+      );
+    });
+  });
+
   describe("Availability filter", () => {
     test("availability=in_stock excludes the zero-stock product", async () => {
       const result = await listProducts({ category: dept._id.toString(), availability: "in_stock", limit: 50 }, { isAdmin: true });
