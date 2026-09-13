@@ -141,9 +141,17 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
     assert.ok(html.includes(product.description));
   });
 
-  test("product-detail page for a well-formed but missing id renders the real 404 page", async () => {
+  // The product-detail route has its own loading.jsx (added to fix slow
+  // product-image navigation), so Next.js auto-wraps the page in Suspense:
+  // per Next's own docs (file-conventions/loading.md "Status Codes"), once
+  // that shell starts streaming the response headers are already sent as
+  // 200 and can never become a literal 404 — the documented mitigation is
+  // the noindex meta tag notFound() still injects, not the HTTP status.
+  test("product-detail page for a well-formed but missing id renders the not-found UI with noindex (real 404 status is unreachable once loading.jsx starts streaming — see Next's own Status Codes doc)", async () => {
     const res = await fetch(`${BASE_URL}/product/507f1f77bcf86cd799439011`);
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /name="robots" content="noindex/);
   });
 
   // ---------- Orders (authenticated, ownership-scoped) ----------

@@ -151,10 +151,22 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     assert.match(extractCanonical(html) || "", /\/shop$/);
   });
 
-  test("shop page WITH a query: noindex,follow with canonical pointing back to bare /shop", async () => {
+  test("shop page WITH a bare ?category=<id>: index,follow — a department gets its own indexable landing page", async () => {
     const html = await (await fetch(`${BASE_URL}/shop?category=${burqaDeptId}`)).text();
+    assert.ok(!/name="robots" content="noindex/.test(html), "a bare department category query must be indexable");
+    assert.match(extractCanonical(html) || "", new RegExp(`/shop\\?category=${burqaDeptId}$`));
+  });
+
+  test("shop page WITH any other query (search, or category + another param): noindex,follow with canonical pointing back to bare /shop", async () => {
+    const html = await (await fetch(`${BASE_URL}/shop?search=test`)).text();
     assert.match(html, /name="robots" content="noindex/);
     assert.match(extractCanonical(html) || "", /\/shop$/);
+  });
+
+  test("shop page WITH ?category=<id>&page=2: noindex,follow with canonical pointing back to that category's own page (not the unfiltered catalog)", async () => {
+    const html = await (await fetch(`${BASE_URL}/shop?category=${burqaDeptId}&page=2`)).text();
+    assert.match(html, /name="robots" content="noindex/);
+    assert.match(extractCanonical(html) || "", new RegExp(`/shop\\?category=${burqaDeptId}$`));
   });
 
   // ---------------------------------------------------------- Product
@@ -221,9 +233,19 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     assert.notEqual(cspNonce2, cspNonce1, "a second, separate request must get a genuinely different per-request nonce — proves the JSON-LD addition didn't reuse/cache a stale nonce across requests");
   });
 
-  test("missing/inactive product: a nonexistent slug returns a real 404, never a 200 with empty metadata", async () => {
+  // app/(routes)/product/[idOrSlug]/loading.jsx (added for perceived nav
+  // speed) makes Next.js auto-wrap this route in Suspense, so the response
+  // headers stream as 200 before notFound() ever throws — per Next's own
+  // docs (file-conventions/loading.md "Status Codes"), the HTTP status
+  // cannot become 404 once that shell has started streaming; the
+  // documented, accepted mitigation is the noindex meta tag notFound()
+  // still injects, which is what actually keeps this out of search
+  // results, not the literal status code.
+  test("missing/inactive product: a nonexistent slug renders the not-found UI with noindex, never a 200 with empty/real product metadata", async () => {
     const res = await fetch(`${BASE_URL}/product/this-product-genuinely-does-not-exist-${crypto.randomBytes(4).toString("hex")}`);
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /name="robots" content="noindex/);
   });
 
   // ---------------------------------------------------------- Auth/private pages noindex
