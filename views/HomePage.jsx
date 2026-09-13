@@ -97,6 +97,12 @@ export default async function HomePage() {
     .filter((c) => !c.parent)
     .sort((a, b) => (Number(DEPARTMENT_COPY[a.slug]?.num) || 99) - (Number(DEPARTMENT_COPY[b.slug]?.num) || 99));
 
+  // The tall/wide hero spans below only tessellate cleanly across the
+  // full curated 6-department set (see the grid's own className comment).
+  // A store still filling out its catalog (e.g. only Burqa + Hijab so
+  // far) gets a plain, gapless auto-fit grid instead.
+  const hasFullMosaic = departments.length >= Object.keys(DEPARTMENT_COPY).length;
+
   const burqa = departments.find((d) => d.slug === "burqa");
   const abaya = departments.find((d) => d.slug === "abaya");
   const hijab = departments.find((d) => d.slug === "hijab");
@@ -193,9 +199,28 @@ export default async function HomePage() {
           aside={t("home.departmentsSub")}
           id="dept-h"
         />
-        <div className="mt-12 grid gap-5 lg:grid-cols-3">
+        <div
+          className={cn(
+            "mt-12 grid gap-5",
+            // The tall Burqa / wide Abaya spans below are a curated mosaic
+            // sized for the full 6-department catalog DEPARTMENT_COPY
+            // encodes — with fewer departments (a store still filling out
+            // its catalog), those fixed spans leave real, unfillable empty
+            // grid cells (e.g. just Burqa+Hijab: Burqa's tall span plus one
+            // plain card leaves 3 cells empty next to/under it — a visible
+            // "space on the right" bug, not a display artifact). Below the
+            // full set, fall back to auto-fit tracks: grid collapses any
+            // track nothing is placed in and stretches the real cards to
+            // fill the freed space, so 1-5 departments always fill the row
+            // completely regardless of count.
+            hasFullMosaic
+              ? "lg:grid-cols-3"
+              : "sm:grid-cols-2 lg:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]",
+          )}
+        >
           {departments.map((d) => {
             const copy = DEPARTMENT_COPY[d.slug] || { num: "•", bodyKey: null, tone: "media" };
+            const span = hasFullMosaic ? copy.span : undefined;
             const body = copy.bodyKey ? t(copy.bodyKey) : d.description || "";
             const deptName = departmentName(locale, d.slug, d.name);
             // Admin-set department-card photo (Shop Config → Departments)
@@ -212,9 +237,9 @@ export default async function HomePage() {
                 data-reveal
                 className={cn(
                   "group relative flex flex-col justify-end overflow-hidden rounded-3xl p-8 focus-ring",
-                  copy.span === "tall" && "lg:row-span-2 lg:min-h-[560px]",
-                  copy.span === "wide" && "lg:col-span-2 lg:min-h-[265px]",
-                  !copy.span && "min-h-[275px]",
+                  span === "tall" && "lg:row-span-2 lg:min-h-[560px]",
+                  span === "wide" && "lg:col-span-2 lg:min-h-[265px]",
+                  !span && "min-h-[275px]",
                   copy.tone === "media" && "bg-media",
                   copy.tone === "coral" && "bg-coral",
                   copy.tone === "night" && "bg-[#101012]",
@@ -263,7 +288,7 @@ export default async function HomePage() {
                   <h3
                     className={cn(
                       "mt-2.5 font-semibold leading-none tracking-[-0.03em]",
-                      copy.span === "tall" ? "text-[44px]" : copy.span === "wide" ? "text-[38px]" : "text-[34px]",
+                      span === "tall" ? "text-[44px]" : span === "wide" ? "text-[38px]" : "text-[34px]",
                     )}
                   >
                     {deptName}
