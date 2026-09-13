@@ -50,7 +50,12 @@ export default function GuidedFinderSection({ image }) {
             {t("home.threeQuestions")}
           </div>
         </div>
-        <div className="relative hidden min-h-[340px] overflow-hidden border-l border-line bg-media lg:grid lg:place-items-center">
+        {/* Was `hidden ... lg:grid` (image-and-tags panel invisible below
+            lg) — now shown at every breakpoint. Border moves from the
+            side (dividing the two columns at lg:) to the top (dividing
+            the stacked panels below lg:), since its job is separating
+            this panel from the text above/beside it either way. */}
+        <div className="relative grid min-h-[340px] place-items-center overflow-hidden border-t border-line bg-media lg:border-l lg:border-t-0">
           {image ? (
             // object-top: this box's height is fixed independent of
             // whatever aspect ratio gets uploaded (Shop Config → Guided
