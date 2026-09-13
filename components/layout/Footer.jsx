@@ -85,7 +85,7 @@ export default function Footer({ initialDepartments = [] }) {
     {
       heading: t("footer.shop"),
       links: [
-        { label: t("header.newArrivals"), href: "/shop?sort=-createdAt" },
+        { label: t("header.newArrivals"), href: "/shop?collection=new" },
         ...departments
           .slice(0, 4)
           .map((d) => ({ label: departmentName(locale, d.slug, d.name), href: `/shop?category=${d._id}` })),

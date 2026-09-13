@@ -76,7 +76,26 @@ export default async function HomePage() {
   ]);
   const homepageSettings = publicSettings?.homepage || {};
   const categories = localizeCategoryList(rawCategories, locale);
-  const departments = categories.filter((c) => !c.parent);
+  // Sorted into the deliberate 01-06 hero-grid order DEPARTMENT_COPY
+  // encodes (Burqa tall, Abaya wide, then the four plain default cards) —
+  // NOT the incidental order getCachedCategories() happens to return.
+  // Category.find() there sorts by sortOrder then name (services/
+  // categoryService.js), and every seeded department ties on sortOrder=0,
+  // so without this the grid below falls back to alphabetical order
+  // (Abaya, Burqa, Hijab, Khimar, Modest Sets, Niqab) — CSS grid
+  // auto-placement assigns the tall/wide spans to whichever items land
+  // first, so Abaya (not Burqa) would get the (row1,col1) hero slot,
+  // Burqa's tall span would land wherever auto-placement finds room next
+  // (typically the far column), and Hijab would end up squeezed into
+  // whatever default-sized cell is left over next to it — exactly the
+  // "doesn't fit / stuck at a fixed size next to a huge neighbor" layout
+  // a shopper would see, even though each card's OWN min-height math is
+  // correct in isolation. A department with no entry in DEPARTMENT_COPY
+  // (none expected today, but not fatal if the catalog grows) sorts after
+  // all six known ones, in whatever relative order it already had.
+  const departments = categories
+    .filter((c) => !c.parent)
+    .sort((a, b) => (Number(DEPARTMENT_COPY[a.slug]?.num) || 99) - (Number(DEPARTMENT_COPY[b.slug]?.num) || 99));
 
   const burqa = departments.find((d) => d.slug === "burqa");
   const abaya = departments.find((d) => d.slug === "abaya");
@@ -313,7 +332,7 @@ export default async function HomePage() {
         sub={t("home.justLandedSub")}
         icon="new"
         products={shopNew}
-        viewAllHref="/shop?sort=-createdAt"
+        viewAllHref="/shop?collection=new"
         viewAllLabel={t("home.viewAllLower", { label: t("home.tabNewArrival") })}
       />
 

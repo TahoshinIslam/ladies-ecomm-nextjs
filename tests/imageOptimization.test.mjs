@@ -114,7 +114,6 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
 
   for (const [rel, fieldDesc] of [
     ["views/admin/UsersPageClient.jsx", "user.avatar"],
-    ["components/review/ReviewList.jsx", "review.user.avatar"],
   ]) {
     test(`${rel}: ${fieldDesc} renders via next/image when approved, and never falls back to a raw <img>`, () => {
       const content = read(rel);
@@ -123,6 +122,13 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
       assert.ok(!RAW_IMG_RE.test(stripComments(content)), `${rel} must not contain a raw <img> fallback`);
     });
   }
+
+  test("components/review/ReviewList.jsx no longer renders a reviewer avatar at all (redesigned review card), so it needs neither next/image nor the isApprovedImageSource classifier", () => {
+    const content = stripComments(read("components/review/ReviewList.jsx"));
+    assert.doesNotMatch(content, /from ["']next\/image["']/, "no next/image import should remain once no avatar is rendered");
+    assert.doesNotMatch(content, /isApprovedImageSource/, "no remaining reference to the classifier");
+    assert.ok(!RAW_IMG_RE.test(content), "must not contain a raw <img> fallback");
+  });
 
   for (const rel of ["views/admin/SettingsPage.jsx", "views/admin/ShopConfigPage.jsx"]) {
     test(`${rel} no longer needs the isApprovedImageSource classifier — its image fields are upload-only (ImageDropzone), never a free-text URL an admin could paste an unapproved host into`, () => {

@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 import Review from "../models/reviewModel.js";
 import Order from "../models/orderModel.js";
 import { createAdminNotification } from "./notificationService.js";
@@ -8,7 +10,7 @@ import { requireObjectIdFormat } from "../lib/validation.js";
 export async function getProductReviews(productId, { page = 1, limit = 10 } = {}) {
   const skip = (Number(page) - 1) * Number(limit);
   const filter = { product: productId };
-  const [reviews, total] = await Promise.all([
+  const [reviews, total, breakdownRows] = await Promise.all([
     Review.find(filter)
       .populate("user", "name avatar")
       .populate("adminReply.repliedBy", "name")
@@ -17,8 +19,27 @@ export async function getProductReviews(productId, { page = 1, limit = 10 } = {}
       .limit(Number(limit))
       .lean(),
     Review.countDocuments(filter),
+    // Star-count histogram (1-5) across EVERY review for this product, not
+    // just the current page — powers the "78% / 15% / 4% / 2% / 1%" bars
+    // on the PDP review summary. $match needs a real ObjectId, unlike
+    // .find()/.countDocuments() above, which auto-cast the plain string.
+    Review.aggregate([
+      { $match: { product: new mongoose.Types.ObjectId(productId) } },
+      { $group: { _id: "$rating", count: { $sum: 1 } } },
+    ]),
   ]);
-  return { total, page: Number(page), pages: Math.ceil(total / Number(limit)) || 1, count: reviews.length, reviews };
+  const breakdown = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  for (const row of breakdownRows) {
+    if (row._id >= 1 && row._id <= 5) breakdown[row._id] = row.count;
+  }
+  return {
+    total,
+    page: Number(page),
+    pages: Math.ceil(total / Number(limit)) || 1,
+    count: reviews.length,
+    reviews,
+    breakdown,
+  };
 }
 
 export async function createReview(userId, productId, { rating, title, comment, images = [] }) {

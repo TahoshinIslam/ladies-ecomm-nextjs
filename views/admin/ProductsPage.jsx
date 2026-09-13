@@ -19,7 +19,6 @@ import Badge from "../../components/ui/Badge.jsx";
 import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
 import DataTable from "../../components/admin/DataTable.jsx";
 import TableToolbar from "../../components/admin/TableToolbar.jsx";
-import DropdownMenu, { DropdownMenuItem } from "../../components/ui/DropdownMenu.jsx";
 
 import { useGetProductsQuery, useDeleteProductMutation } from "../../store/productApi.js";
 import { useGetCategoriesQuery } from "../../store/shopApi.js";
@@ -209,17 +208,35 @@ export default function AdminProductsPage() {
       key: "actions",
       header: "",
       align: "right",
-      width: 60,
+      width: 92,
       render: (p) =>
         canManage && (
-          <DropdownMenu triggerLabel={`Actions for ${p.name}`}>
-            <DropdownMenuItem icon={Edit2} onClick={() => setEditing(p)}>
-              Edit
-            </DropdownMenuItem>
-            <DropdownMenuItem icon={Trash2} danger onClick={() => setConfirmDelete(p)}>
-              Deactivate
-            </DropdownMenuItem>
-          </DropdownMenu>
+          // Two directly-visible, labeled icon buttons — a "..." menu hid
+          // Edit/Deactivate behind an extra click and wasn't obvious to a
+          // first-time admin. title= gives a hover tooltip; aria-label
+          // keeps each button's accessible name specific to the row
+          // (rather than a generic "Edit"/"Deactivate" repeated in every
+          // row, which screen-reader users can't tell apart).
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => setEditing(p)}
+              title="Edit"
+              aria-label={`Edit ${p.name}`}
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-ring"
+            >
+              <Edit2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(p)}
+              title="Deactivate"
+              aria-label={`Deactivate ${p.name}`}
+              className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger focus-ring"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
         ),
     },
   ];

@@ -60,11 +60,11 @@ const STATIC_ANNOUNCEMENT_KEYS = ["header.announcementExchange", "header.announc
 // filters.jsx-style consumers) and never translated — only `labelKey`
 // (resolved via t()) is.
 const OCCASION_LINKS = [
-  { labelKey: "header.newArrivals", href: "/shop?sort=-createdAt" },
+  { labelKey: "header.newArrivals", href: "/shop?collection=new" },
   { labelKey: "header.featured", href: "/shop?featured=true" },
   { labelKey: "catalog.occasionEveryday", href: "/shop?occasion=everyday" },
   { labelKey: "header.prayerWear", href: "/shop?occasion=prayer" },
-  { labelKey: "header.eidCollection", href: "/shop?occasion=eid", accent: true },
+  { labelKey: "header.eidCollection", href: "/shop?occasion=eid" },
   { labelKey: "header.formal", href: "/shop?occasion=formal" },
   { labelKey: "header.bridal", href: "/shop?occasion=bridal" },
 ];
@@ -341,7 +341,7 @@ export default function Header({ initialDepartments = [] }) {
             className="hidden items-center gap-[14px] text-[14.5px] font-medium lg:flex xl:gap-[26px]"
           >
             <HeaderNavLink
-              href="/shop?sort=-createdAt"
+              href="/shop?collection=new"
               pathname={pathname}
               searchParams={searchParams}
               className="gap-1.5"
@@ -525,16 +525,15 @@ export default function Header({ initialDepartments = [] }) {
                   </h3>
                   <div className="flex flex-col gap-[11px] text-[15.5px]">
                     {OCCASION_LINKS.map((l) => (
-                      <Link
+                      <HeaderNavLink
                         key={l.labelKey}
                         href={l.href}
-                        className={cn(
-                          "w-fit transition-colors hover:text-verm focus-ring",
-                          l.accent && "text-verm",
-                        )}
+                        pathname={pathname}
+                        searchParams={searchParams}
+                        className="w-fit py-0"
                       >
                         {t(l.labelKey)}
-                      </Link>
+                      </HeaderNavLink>
                     ))}
                   </div>
                 </div>
@@ -657,7 +656,7 @@ export default function Header({ initialDepartments = [] }) {
               </div>
 
               <div className="flex flex-col gap-1 p-4">
-                <Link href="/shop?sort=-createdAt" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
+                <Link href="/shop?collection=new" className="rounded-lg px-3 py-3 text-[17px] font-medium hover:bg-wash focus-ring">
                   {t("header.newArrivals")}
                 </Link>
                 {departments.map((d) => (
@@ -736,9 +735,12 @@ export default function Header({ initialDepartments = [] }) {
  * instant the pathname is /shop, regardless of which query params are
  * actually set. So this checks the path AND, when the href carries a query
  * string, that every one of its params is present with the exact same
- * value in the current URL — "New" (?sort=-createdAt) and "Burqa"
+ * value in the current URL — "New" (?collection=new) and "Burqa"
  * (?category=<id>) can then never both read as active, and switching
- * department correctly kills the previous one's highlight.
+ * department correctly kills the previous one's highlight. Also reused
+ * for the Shop mega-menu's Collections column (Eid/Featured/etc.) — none
+ * of those should ever look "selected" just because they're rendered;
+ * only the one whose query actually matches the current URL lights up.
  */
 function HeaderNavLink({ href, pathname, searchParams, className, children }) {
   const [linkPath, linkQuery] = href.split("?");

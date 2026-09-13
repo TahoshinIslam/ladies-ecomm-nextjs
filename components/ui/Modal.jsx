@@ -80,18 +80,21 @@ export default function Modal({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             onClick={onClose}
-            // No backdrop-blur here (was `backdrop-blur-[3px]`): a
-            // `backdrop-filter` behind a Framer Motion-animated panel is a
-            // known GPU-compositing trigger in Chromium/WebKit for exactly
-            // the bug reported against this modal — any state update
-            // inside the panel (e.g. toggling a checkbox in
-            // ProductFormModal's variant generator) could leave the
-            // compositor painting the panel blank/white while the
-            // underlying DOM and React state stayed completely correct and
-            // interactive (confirmed: form fields, close button, etc. all
-            // still worked via direct DOM queries/clicks — only the paint
-            // was wrong). The blur was purely cosmetic; dropping it removes
-            // the trigger with no functional loss.
+            // No backdrop-blur here (was `backdrop-blur-[3px]`, removed
+            // while chasing the "modal goes blank white" bug reported
+            // against ProductFormModal's variant generator). That turned
+            // out to be a red herring — the real cause (found and fixed in
+            // components/admin/ProductFormModal.jsx's VariantGenerator) was
+            // a `sr-only` checkbox `<input>` inside a non-`relative`
+            // `<label>`: its `position: absolute` resolved against THIS
+            // panel (the nearest positioned ancestor, via its own
+            // `relative` class below), so focusing it made the browser's
+            // default scroll-into-view walk up and shove this panel's
+            // scrollTop to a huge value, clipping all real content out of
+            // its own `overflow-hidden` box — not a paint/compositing bug,
+            // and unrelated to backdrop-blur. Left removed anyway since the
+            // blur was purely cosmetic and there's no reason to re-add a
+            // GPU-compositing cost that was never actually load-bearing.
             className="absolute inset-0 bg-black/50"
           />
           <motion.div

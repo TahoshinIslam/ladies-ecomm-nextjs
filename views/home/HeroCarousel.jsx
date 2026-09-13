@@ -118,7 +118,7 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
               {t("home.heroSubtitle")}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/shop?sort=-createdAt">
+              <Link href="/shop?collection=new">
                 <Button variant="accent" size="xl">
                   {t("home.shopNewArrivals")}
                   <ArrowRight className="h-4 w-4" />
@@ -427,7 +427,7 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
       </div>
 
       <div className="relative mt-3 flex gap-2">
-        <Link href="/shop?sort=-createdAt" className="flex-1">
+        <Link href="/shop?collection=new" className="flex-1">
           <span className="flex h-12 items-center justify-center rounded-[10px] bg-verm-contrast text-sm font-semibold text-white transition-transform active:scale-[0.975]">
             {t("home.shopNewArrivals")}
           </span>
@@ -484,7 +484,7 @@ function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
             {t("home.heroSubtitleShort")}
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link href="/shop?sort=-createdAt">
+            <Link href="/shop?collection=new">
               <Button variant="accent" size="lg">
                 {t("home.shopNewArrivals")}
                 <ArrowRight className="h-4 w-4" />

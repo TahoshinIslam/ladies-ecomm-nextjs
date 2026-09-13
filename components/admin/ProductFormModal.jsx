@@ -167,7 +167,7 @@ export default function ProductFormModal({ product, onClose }) {
     control,
     watch,
     setValue,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm({ resolver: zodResolver(productSchema), defaultValues: defaults });
 
   const { fields: variantFields, append: appendVariant, remove: removeVariant, insert: insertVariant } = useFieldArray({
@@ -214,7 +214,15 @@ export default function ProductFormModal({ product, onClose }) {
     }
     return map;
   });
-  const setColorImages = (value, imgs) => setColorImagesState((m) => ({ ...m, [value]: imgs }));
+  // Per-color image uploads live in this separate useState, not under
+  // react-hook-form's control, so RHF's own `isDirty` never sees them —
+  // tracked here so closing the modal after only uploading an image (no
+  // other field touched) still triggers the unsaved-changes guard below.
+  const [colorImagesTouched, setColorImagesTouched] = useState(false);
+  const setColorImages = (value, imgs) => {
+    setColorImagesState((m) => ({ ...m, [value]: imgs }));
+    setColorImagesTouched(true);
+  };
 
   const duplicateVariant = (index) => {
     const src = variants[index];
@@ -378,8 +386,19 @@ export default function ProductFormModal({ product, onClose }) {
   const previewTitle = watch("metaTitle") || watch("name") || "Product title";
   const previewDesc = watch("metaDescription") || watch("description") || "Product description will appear here…";
 
+  // Guards every way this modal can close (the header X, Escape, a
+  // backdrop click, and the Cancel button all funnel through this) against
+  // silently discarding an in-progress edit — closing after only saving
+  // (onSubmit above) never goes through this, since there's nothing left
+  // to lose by then.
+  const hasUnsavedChanges = isDirty || colorImagesTouched;
+  const handleClose = () => {
+    if (hasUnsavedChanges && !window.confirm("Discard unsaved changes to this product?")) return;
+    onClose();
+  };
+
   return (
-    <Modal open onClose={onClose} title={isEdit ? "Edit product" : "New product"} size="xl">
+    <Modal open onClose={handleClose} title={isEdit ? "Edit product" : "New product"} size="xl">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3 p-5">
         <FormSection title="Basic info" defaultOpen>
           <div className="space-y-4">
@@ -637,7 +656,7 @@ export default function ProductFormModal({ product, onClose }) {
         </FormSection>
 
         <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="button" variant="outline" onClick={handleClose}>Cancel</Button>
           <Button type="submit" loading={creating || updating}>{isEdit ? "Update" : "Create"}</Button>
         </div>
       </form>
@@ -702,10 +721,20 @@ function VariantGenerator({ variantAttrDefs, onGenerate }) {
                   <label
                     key={opt.value}
                     className={cn(
-                      "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                      "relative inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
                       checked ? "border-accent bg-accent/10 text-accent" : "border-border text-muted-foreground hover:border-ink/30",
                     )}
                   >
+                    {/* `sr-only` positions this input absolutely — without
+                        `relative` on this label, the nearest positioned
+                        ancestor is the modal panel itself (several
+                        scroll-clipped containers up), so focusing this
+                        checkbox made the browser's default scroll-into-view
+                        behavior scroll the WHOLE modal panel to a huge,
+                        nonsensical offset, clipping all real content out of
+                        view — the reported "white screen" on selecting a
+                        color/fabric/size. `relative` here keeps that
+                        scroll-into-view calculation local to this small pill. */}
                     <input type="checkbox" className="sr-only" checked={checked} onChange={() => toggleValue(def.key, opt.value)} />
                     {opt.swatchHex && (
                       <span className="h-2.5 w-2.5 rounded-full border border-border" style={{ background: opt.swatchHex }} />

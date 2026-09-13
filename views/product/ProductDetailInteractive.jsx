@@ -46,7 +46,6 @@ import {
   getVariantAxes,
   getAxisOptions,
   resolveVariant,
-  getDefaultVariantSelection,
   repairVariantSelection,
   resolveVariantPricing,
 } from "../../lib/utils.js";
@@ -95,9 +94,17 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   // shade/volumeMl for cosmetics, ...) — never a fixed clothing-only list.
   const candidateAxes = useMemo(() => attrDefs.filter((d) => d.derivedFromVariant).map((d) => d.key), [attrDefs]);
   const axes = useMemo(() => getVariantAxes(variants, candidateAxes), [variants, candidateAxes]);
-  const [selection, setSelection] = useState(() => getDefaultVariantSelection(variants, candidateAxes));
+  // Nothing is pre-selected on load — every axis (Color/Fabric/Size/...)
+  // starts blank so the shopper has to actively choose each one, rather
+  // than getDefaultVariantSelection() silently picking the first in-stock
+  // variant for them (which made every option look already decided).
+  const [selection, setSelection] = useState({});
 
-  const selectedVariant = useMemo(() => resolveVariant(variants, selection, axes), [variants, selection, axes]);
+  const allAxesSelected = axes.every((a) => selection[a]);
+  const selectedVariant = useMemo(
+    () => (allAxesSelected ? resolveVariant(variants, selection, axes) : null),
+    [variants, selection, axes, allAxesSelected],
+  );
   const pricing = resolveVariantPricing(product ?? {}, selectedVariant);
 
   const setAxisValue = (axis, value) => {
@@ -131,7 +138,11 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   // Every variant sold out — distinct from "this specific combination is
   // sold out while others are available."
   const isProductUnavailable = variants.every((v) => (v.stock ?? 0) <= 0);
-  const isSelectionUnavailable = !isProductUnavailable && pricing.stock <= 0;
+  // Only a genuinely out-of-stock, FULLY chosen combination counts as
+  // "unavailable" — an incomplete selection (nothing resolved yet) is a
+  // distinct "needsSelection" state below, never mislabeled as out of stock.
+  const isSelectionUnavailable = !isProductUnavailable && allAxesSelected && pricing.stock <= 0;
+  const needsSelection = !isProductUnavailable && !allAxesSelected;
 
   const missingAxisLabel = axes.find((a) => !selection[a]);
 
@@ -428,11 +439,15 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                   size="lg"
                   onClick={handleAdd}
                   loading={adding}
-                  disabled={isSelectionUnavailable}
+                  disabled={isSelectionUnavailable || needsSelection}
                   className="flex-1"
                 >
                   <ShoppingBag className="h-4 w-4" />
-                  {isSelectionUnavailable ? t("product.outOfStockCombination") : t("product.addToCart")}
+                  {isSelectionUnavailable
+                    ? t("product.outOfStockCombination")
+                    : needsSelection
+                      ? t("product.selectOption", { label: attrLabel(missingAxisLabel) || missingAxisLabel })
+                      : t("product.addToCart")}
                 </Button>
                 <Button
                   size="lg"
@@ -468,22 +483,18 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
 
       {/* Reviews */}
       <section className="mt-16">
-        <div className="mb-6 flex items-end justify-between">
-          <div>
-            <h2 className="font-heading text-2xl font-bold">
-              {t("product.customerReviews")}
-            </h2>
-            {product.numReviews != null && (
-              <div className="mt-1 flex items-center gap-2">
-                <Rating value={product.rating} size={14} showValue />
-                <span className="text-sm text-muted-foreground">
-                  {t("product.reviewsCount", { count: product.numReviews }).replace(/[()]/g, "")}
-                </span>
-              </div>
-            )}
-          </div>
+        <div className="mb-6 flex items-end justify-between border-b border-border pb-4">
+          <h2 className="font-heading text-2xl font-bold">
+            {t("product.customerReviews")}
+          </h2>
+          <Link
+            href="/orders"
+            className="text-xs font-bold uppercase tracking-wider underline underline-offset-4 hover:text-accent"
+          >
+            {t("product.writeReview")}
+          </Link>
         </div>
-        <ReviewList productId={product._id} />
+        <ReviewList productId={product._id} rating={product.rating} numReviews={product.numReviews} />
         <p className="mt-4 text-xs text-muted-foreground">
           {t("product.reviewEligibilityPre")}{" "}
           <Link href="/orders" className="text-accent hover:underline">
@@ -535,11 +546,15 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
           <Button
             onClick={handleAdd}
             loading={adding}
-            disabled={isSelectionUnavailable}
+            disabled={isSelectionUnavailable || needsSelection}
             className="flex-none"
           >
             <ShoppingBag className="h-4 w-4" />
-            {isSelectionUnavailable ? t("product.outOfStock") : t("product.addToCart")}
+            {isSelectionUnavailable
+              ? t("product.outOfStock")
+              : needsSelection
+                ? t("product.selectOption", { label: attrLabel(missingAxisLabel) || missingAxisLabel })
+                : t("product.addToCart")}
           </Button>
         </div>
       )}
@@ -548,8 +563,61 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
 }
 
 function VariantAxisRow({ label, options, displayOptions, selected, onSelect, swatch }) {
+  const { t } = useLocale();
   const labelFor = (value) => displayOptions.find((o) => o.value === value)?.label || value;
   const hexFor = (value) => displayOptions.find((o) => o.value === value)?.swatchHex;
+
+  // Swatch axes (color/shade) render as a row of circular color chips —
+  // the selected one gets a ring, not a filled pill — with the currently
+  // chosen value named in the header ("COLOR — BLACK") and the total
+  // option count on the right, instead of every value repeating its own
+  // text label inside a button.
+  if (swatch) {
+    return (
+      <div className="mt-6">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <div className="text-sm font-bold uppercase tracking-wider">
+            {label}
+            {selected && <span className="font-normal text-muted-foreground"> — {labelFor(selected)}</span>}
+          </div>
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t("product.optionCount", { count: options.length })}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {options.map((opt) => {
+            const active = selected === opt.value;
+            const hex = hexFor(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={opt.disabled}
+                onClick={() => onSelect(opt.value)}
+                title={labelFor(opt.value)}
+                aria-label={labelFor(opt.value)}
+                aria-pressed={active}
+                className={cn(
+                  "relative grid h-10 w-10 flex-none place-items-center rounded-full transition-all",
+                  active ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : "ring-1 ring-border hover:ring-foreground/50",
+                  opt.disabled && "cursor-not-allowed opacity-40"
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-[26px] w-[26px] rounded-full border border-black/10"
+                  style={{ backgroundColor: hex || "transparent" }}
+                />
+                {opt.disabled && (
+                  <span aria-hidden="true" className="absolute h-[1.5px] w-8 rotate-45 bg-foreground/40" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-6">
@@ -557,7 +625,6 @@ function VariantAxisRow({ label, options, displayOptions, selected, onSelect, sw
       <div className="flex flex-wrap gap-2">
         {options.map((opt) => {
           const active = selected === opt.value;
-          const hex = swatch ? hexFor(opt.value) : null;
           return (
             <button
               key={opt.value}
@@ -572,13 +639,6 @@ function VariantAxisRow({ label, options, displayOptions, selected, onSelect, sw
                 opt.disabled && "cursor-not-allowed border-border bg-muted/30 text-muted-foreground/50 line-through"
               )}
             >
-              {hex && (
-                <span
-                  aria-hidden="true"
-                  className="h-4 w-4 flex-none rounded-full border border-border"
-                  style={{ backgroundColor: hex }}
-                />
-              )}
               {labelFor(opt.value)}
             </button>
           );

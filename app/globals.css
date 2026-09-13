@@ -358,6 +358,63 @@
   }
 }
 
+/* Two overlapping <input type="range"> thumbs (components/product/
+   PriceHistogramSlider.jsx) stacked on one invisible track. Without this,
+   plain range inputs stack normally and the later one in the DOM (the max
+   thumb) captures pointer events across its ENTIRE width, not just its own
+   thumb — the min input sitting underneath becomes almost undraggable.
+   Turning off pointer-events on the input itself and re-enabling it only
+   on the thumb pseudo-element lets a pointer under either thumb always
+   reach that thumb's own input, regardless of DOM order. */
+@utility price-range-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+
+  &::-webkit-slider-runnable-track {
+    -webkit-appearance: none;
+    background: transparent;
+    height: 2px;
+  }
+  &::-moz-range-track {
+    background: transparent;
+    height: 2px;
+    border: none;
+  }
+
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: auto;
+    width: 18px;
+    height: 18px;
+    margin-top: -8px;
+    border-radius: 9999px;
+    background: var(--color-accent);
+    border: 2px solid var(--color-background);
+    box-shadow: 0 1px 3px var(--hair);
+    cursor: pointer;
+  }
+  &::-moz-range-thumb {
+    pointer-events: auto;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: var(--color-accent);
+    border: 2px solid var(--color-background);
+    box-shadow: 0 1px 3px var(--hair);
+    cursor: pointer;
+  }
+  &:focus-visible::-webkit-slider-thumb {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  &:focus-visible::-moz-range-thumb {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
 /* The board's page shell: 1480px, with padding that opens up with the viewport. */
 @utility container-x {
   width: 100%;
