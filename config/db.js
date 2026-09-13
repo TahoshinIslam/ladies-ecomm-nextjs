@@ -41,7 +41,11 @@ function extractDbInfo(uri) {
   }
 }
 
-const SAFE_LOCAL_DB_NAME_PATTERN = /(_dev|_test|_preview)$/i;
+// "_ci" covers CI runners (this repo's own GitHub Actions workflow connects
+// as "tahos_test_ci") — an ephemeral, non-production database just like
+// "_dev"/"_test"/"_preview", so it belongs in the same allowlist rather
+// than tripping this guard on every CI run.
+const SAFE_LOCAL_DB_NAME_PATTERN = /(_dev|_test|_preview|_ci)$/i;
 
 function isLocalHostname(hostname) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
@@ -135,7 +139,7 @@ const connectDB = async () => {
       if (!dbName || !SAFE_LOCAL_DB_NAME_PATTERN.test(dbName)) {
         throw new Error(
           `${devVarName}'s database name ("${dbName || "unknown"}") doesn't look like a safe local/` +
-            'development database (expected a name ending in "_dev", "_test", or "_preview") — refusing to use it.',
+            'development database (expected a name ending in "_dev", "_test", "_preview", or "_ci") — refusing to use it.',
         );
       }
       if (hostname && !isLocalHostname(hostname) && process.env.ALLOW_REMOTE_DEV_DB !== "true") {
