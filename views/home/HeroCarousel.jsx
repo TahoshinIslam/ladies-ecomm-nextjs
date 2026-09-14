@@ -237,6 +237,29 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
         {t("home.heroTitle")} {t("home.heroTitleAccent")}
       </motion.h1>
 
+      {/* The reference orders copy → CTAs → image (with the department
+          name/tagline folded into the image's own floating badge, not a
+          separate text row below it) — this previously had the subtitle
+          missing entirely on mobile and the buttons placed after the
+          image instead of before it. */}
+      <p className="relative mt-2 max-w-[38ch] text-[15px] leading-[1.5] text-stone">
+        {t("home.heroSubtitleShort")}
+      </p>
+
+      <div className="relative mt-3 flex gap-2">
+        <Link href="/shop?collection=new" className="flex-1">
+          <span className="flex h-12 items-center justify-center rounded-[10px] bg-verm-contrast text-sm font-semibold text-white transition-transform active:scale-[0.975]">
+            {t("home.shopNewArrivals")}
+          </span>
+        </Link>
+        <button
+          onClick={() => dispatch(setFinderOpen(true))}
+          className="flex h-12 items-center justify-center whitespace-nowrap rounded-[10px] border border-ink px-4 text-sm font-semibold transition-transform active:scale-[0.975]"
+        >
+          {t("home.helpMeChoose")}
+        </button>
+      </div>
+
       <motion.div
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -252,7 +275,7 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
         // side gutter as the eyebrow/heading/buttons above and below it
         // (no edge-to-edge bleed) while giving the photo enough width that
         // cover only needs a modest crop to fill it.
-        className="relative mt-3 aspect-5/4 max-h-[420px]"
+        className="relative mt-4 aspect-5/4 max-h-[420px]"
       >
         <div className="absolute inset-0 overflow-hidden rounded-2xl bg-media">
           {slide.image ? (
@@ -277,51 +300,26 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
             <>
               <div aria-hidden="true" className="absolute inset-0 hatch" />
               <div aria-hidden="true" className="absolute inset-0 glow" />
-              <div className="absolute inset-x-[10%] bottom-[14%] top-[12%] grid place-items-center">
-                <div
-                  aria-hidden="true"
-                  className="absolute inset-x-[6%] -bottom-[4%] h-[18%] contact-shadow"
-                />
-                <span className="px-6 text-center font-mono text-[9.5px] uppercase leading-[1.7] tracking-[0.08em] text-stone">
-                  {slide.name}
-                </span>
-              </div>
             </>
           )}
+          {/* Floating badge — same treatment as the desktop hero's stage,
+              carrying the department name/tagline that used to live in a
+              separate row below the image. */}
+          <div className="absolute bottom-3 left-3 rounded-lg bg-surface px-3.5 py-2.5 shadow-md">
+            <div className="text-[14px] font-semibold">{slide.name}</div>
+            <div className="text-[12px] text-stone">{slide.tagline}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onTogglePause}
+            aria-pressed={paused}
+            aria-label={paused ? t("home.resumeRotation") : t("home.pauseRotation")}
+            className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full border border-line bg-surface text-ink transition-colors hover:border-ink focus-ring"
+          >
+            {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+          </button>
         </div>
       </motion.div>
-
-      <div className="relative mt-3 flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <div className="mt-0.5 truncate text-[15px] font-semibold tracking-[-0.02em]">
-            {slide.name}
-          </div>
-          <div className="text-[12.5px] text-stone">{slide.tagline}</div>
-        </div>
-        <button
-          type="button"
-          onClick={onTogglePause}
-          aria-pressed={paused}
-          aria-label={paused ? t("home.resumeRotation") : t("home.pauseRotation")}
-          className="grid h-9 w-9 flex-none place-items-center rounded-full border border-line text-ink transition-colors hover:border-ink focus-ring"
-        >
-          {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-        </button>
-      </div>
-
-      <div className="relative mt-3 flex gap-2">
-        <Link href="/shop?collection=new" className="flex-1">
-          <span className="flex h-12 items-center justify-center rounded-[10px] bg-verm-contrast text-sm font-semibold text-white transition-transform active:scale-[0.975]">
-            {t("home.shopNewArrivals")}
-          </span>
-        </Link>
-        <button
-          onClick={() => dispatch(setFinderOpen(true))}
-          className="flex h-12 items-center justify-center whitespace-nowrap rounded-[10px] border border-ink px-4 text-sm font-semibold transition-transform active:scale-[0.975]"
-        >
-          {t("home.helpMeChoose")}
-        </button>
-      </div>
     </section>
   );
 }

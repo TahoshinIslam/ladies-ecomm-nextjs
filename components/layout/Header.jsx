@@ -318,6 +318,13 @@ export default function Header({ initialDepartments = [] }) {
           </button>
         </div>
 
+        {/* A real, always-visible, typeable search bar under the logo row
+            — matching the reference's mobile header — not just the bottom
+            tab bar's search icon. Same real field/data as desktop. */}
+        <div className="px-5 pb-3 md:hidden">
+          <HeaderSearchField />
+        </div>
+
         <div
           className={cn(
             "mx-auto hidden max-w-[1480px] items-center gap-4 px-5 transition-[height] duration-[240ms] md:flex sm:px-8 lg:gap-6 lg:px-14 xl:gap-10",
