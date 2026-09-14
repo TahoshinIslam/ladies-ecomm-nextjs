@@ -85,17 +85,31 @@ export default function AdminSidebar({ items, collapsed, onToggleCollapsed, user
         </button>
       </div>
 
-      {/* Nav */}
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-        {items.map((item) => (
-          <SidebarNavItem
-            key={item.to}
-            item={item}
-            active={isNavItemActive(item, pathname)}
-            collapsed={collapsed}
-            pillTransition={pillTransition}
-          />
-        ))}
+      {/* Nav — grouped into sections (General/Catalog/Sales/Community/
+          Store, see adminNav.js) with a small eyebrow label between each,
+          instead of one undifferentiated list. */}
+      <nav className="min-h-0 flex-1 overflow-y-auto p-3">
+        {items.map((item, i) => {
+          const isNewGroup = item.group && item.group !== items[i - 1]?.group;
+          return (
+            <div key={item.to}>
+              {isNewGroup && !collapsed && (
+                <div className={cn("eyebrow px-3 pb-1.5", i > 0 && "pt-4")}>{item.group}</div>
+              )}
+              {isNewGroup && collapsed && i > 0 && (
+                <div className="mx-2 my-2 border-t border-border" />
+              )}
+              <div className="pb-1">
+                <SidebarNavItem
+                  item={item}
+                  active={isNavItemActive(item, pathname)}
+                  collapsed={collapsed}
+                  pillTransition={pillTransition}
+                />
+              </div>
+            </div>
+          );
+        })}
       </nav>
 
       {/* Account + logout */}

@@ -71,7 +71,7 @@ describe("Variant attributes generalize beyond color/size/fabric (cosmetics test
         description: "A test lipstick with a shade-only variant axis.",
         category: leaf._id,
         basePrice: 10,
-        images: ["https://placehold.co/400x400?text=lipstick"],
+        images: ["https://placehold.co/400x400.png?text=lipstick"],
         variants: [
           { variantName: "Ruby Red", sku: `TEST-LIP-${Date.now()}-A`, attributes: { [shadeDef.key]: "ruby-red" }, stock: 5 },
           { variantName: "Coral", sku: `TEST-LIP-${Date.now()}-B`, attributes: { [shadeDef.key]: "coral" }, stock: 5 },
@@ -107,7 +107,7 @@ describe("Variant attributes generalize beyond color/size/fabric (cosmetics test
       description: "A test foundation with a single shade variant.",
       category: leaf._id,
       basePrice: 20,
-      images: ["https://placehold.co/400x400?text=foundation"],
+      images: ["https://placehold.co/400x400.png?text=foundation"],
       variants: [{ variantName: "Ivory", sku: `TEST-FND-${Date.now()}`, attributes: { [shadeDef.key]: "ivory" }, stock: 5 }],
     });
     const user = await createTestUser();

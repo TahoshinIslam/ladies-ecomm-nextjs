@@ -9,7 +9,7 @@ const variants = {
   default: "bg-media text-stone",
   primary: "bg-ink text-canvas",
   accent: "bg-verm-contrast text-white",
-  lime: "bg-lime text-[#101012]",
+  lime: "bg-lime text-ink",
   success: "border border-success/30 bg-success/15 text-success",
   warning: "border border-warning/30 bg-warning/15 text-warning",
   danger: "border border-danger/30 bg-danger/15 text-danger",

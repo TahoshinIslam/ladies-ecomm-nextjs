@@ -487,12 +487,15 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
         </div>
       </FilterSheetMobile>
 
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+      {/* Leo's shop layout: a plain 250px sidebar (no card/border wrapper —
+          just sticky text and checkboxes on the page background) beside
+          the grid, 40px gap. */}
+      <div className="grid gap-10 lg:grid-cols-[250px_1fr]">
         {/* Desktop sticky sidebar */}
         <aside className="hidden lg:block">
           <div
             className={cn(
-              "sticky top-20 overflow-y-auto rounded-lg border border-border bg-background p-5 transition-opacity",
+              "sticky top-24 overflow-y-auto transition-opacity",
               isPending && "pointer-events-none opacity-50",
             )}
             aria-busy={isPending}

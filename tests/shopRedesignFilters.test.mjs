@@ -35,7 +35,7 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
     const base = {
       description: "Fixture product for shop redesign tests.",
       category: leafA._id,
-      images: ["https://placehold.co/400x400?text=test"],
+      images: ["https://placehold.co/400x400.png?text=test"],
     };
 
     productDiscounted = await Product.create({

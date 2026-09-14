@@ -258,7 +258,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
         description: "Phase 11 atomicity fixture — safe to delete.",
         category: leaf._id.toString(),
         basePrice: 100,
-        images: ["https://placehold.co/400x400?text=test"],
+        images: ["https://placehold.co/400x400.png?text=test"],
         variants: [{ variantName: "Default", sku: `AWAIT-${Date.now()}`, stock: 1 }],
       });
 
@@ -301,7 +301,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
         description: "Phase 11 atomicity fixture — safe to delete.",
         category: leaf._id.toString(),
         basePrice: 100,
-        images: ["https://placehold.co/400x400?text=test"],
+        images: ["https://placehold.co/400x400.png?text=test"],
         variants: [{ variantName: "Default", sku: `BESTEFFORT-${Date.now()}`, stock: 1 }],
       });
     } finally {

@@ -54,7 +54,7 @@ describe("services/productService.js — listGroupings() aggregation rewrite", {
       category: category._id,
       basePrice: 1000,
       isActive,
-      images: ["https://placehold.co/400x400?text=test"],
+      images: ["https://placehold.co/400x400.png?text=test"],
       variants: [{ variantName: "Default", sku: `TGP-${suffix}`, stock }],
     });
     createdProductIds.push(product._id);

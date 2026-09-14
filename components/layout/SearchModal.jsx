@@ -27,7 +27,7 @@ function Highlight({ text, query }) {
   return (
     <>
       {text.slice(0, i)}
-      <mark className="rounded-[3px] bg-lime px-0.5 text-[#101012]">
+      <mark className="rounded-[3px] bg-lime px-0.5 text-ink">
         {text.slice(i, i + query.length)}
       </mark>
       {text.slice(i + query.length)}

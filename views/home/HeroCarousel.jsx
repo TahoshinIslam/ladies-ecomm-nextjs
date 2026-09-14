@@ -221,7 +221,7 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-        className="relative flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-stone"
+        className="eyebrow relative flex items-center gap-2"
       >
         <span className="h-px w-4 bg-verm" />
         {t("home.heroEyebrow")}
@@ -232,10 +232,9 @@ function MobileHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
-        className="relative mt-2 text-[32px] font-semibold leading-[0.98] tracking-[-0.035em]"
+        className="font-heading relative mt-2 text-[32px] font-extrabold leading-[0.98] tracking-[-0.02em]"
       >
-        {t("home.heroTitle")}{" "}
-        <span className="font-serif font-normal italic">{t("home.heroTitleAccent")}</span>
+        {t("home.heroTitle")} {t("home.heroTitleAccent")}
       </motion.h1>
 
       <motion.div
@@ -351,18 +350,15 @@ function TabletHero({ slide, dispatch, paused, onTogglePause, onInteractionPause
 
       <div className="container-x relative py-16">
         <div className="max-w-[520px]">
-          <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.16em] text-stone">
+          <div className="eyebrow flex items-center gap-3">
             <span className="h-px w-5 bg-verm" />
             {t("home.heroEyebrow")}
           </div>
           <h1
             id="hero-h-tablet"
-            className="mt-4 text-[46px] font-semibold leading-[0.98] tracking-[-0.04em]"
+            className="font-heading mt-4 text-[46px] font-extrabold leading-[0.98] tracking-[-0.02em]"
           >
-            {t("home.heroTitle")}{" "}
-            <span className="font-serif font-normal italic tracking-[-0.01em]">
-              {t("home.heroTitleAccent")}
-            </span>
+            {t("home.heroTitle")} {t("home.heroTitleAccent")}
           </h1>
           <p className="mt-4 max-w-[46ch] text-lg leading-[1.5] text-stone">
             {t("home.heroSubtitleShort")}

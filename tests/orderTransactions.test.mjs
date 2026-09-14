@@ -146,7 +146,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       description: "Created by orderTransactions.test.mjs — safe to delete.",
       category: category._id,
       basePrice: 1000,
-      images: ["https://placehold.co/400x400?text=test"],
+      images: ["https://placehold.co/400x400.png?text=test"],
       variants: [
         { variantName: "Small", sku: "TMV-S", stock: 5, price: 800 },
         { variantName: "Large", sku: "TMV-L", stock: 5, price: 1200 },

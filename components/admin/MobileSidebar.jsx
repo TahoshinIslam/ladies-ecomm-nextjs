@@ -127,30 +127,35 @@ export default function MobileSidebar({ open, onClose, items, triggerRef, user }
               </button>
             </div>
 
-            <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-              {items.map((item) => {
+            <nav className="min-h-0 flex-1 overflow-y-auto p-3">
+              {items.map((item, i) => {
                 const Icon = item.icon;
                 const active = isNavItemActive(item, pathname);
+                const isNewGroup = item.group && item.group !== items[i - 1]?.group;
                 return (
-                  <Link
-                    key={item.to}
-                    href={item.to}
-                    onClick={onClose}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "relative flex items-center gap-3 rounded-lg px-3 py-3 text-[15px] font-medium transition-colors focus-ring",
-                      active ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  <div key={item.to}>
+                    {isNewGroup && (
+                      <div className={cn("eyebrow px-3 pb-1.5", i > 0 && "pt-4")}>{item.group}</div>
                     )}
-                  >
-                    {active && (
-                      <span aria-hidden="true" className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-accent" />
-                    )}
-                    <Icon className="h-4 w-4 flex-none" />
-                    <span className="truncate">{item.label}</span>
-                    {item.highlight && (
-                      <span aria-hidden="true" className="ml-auto inline-flex h-1.5 w-1.5 flex-none rounded-full bg-accent" />
-                    )}
-                  </Link>
+                    <Link
+                      href={item.to}
+                      onClick={onClose}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "relative flex items-center gap-3 rounded-lg px-3 py-3 text-[15px] font-medium transition-colors focus-ring",
+                        active ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      {active && (
+                        <span aria-hidden="true" className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-accent" />
+                      )}
+                      <Icon className="h-4 w-4 flex-none" />
+                      <span className="truncate">{item.label}</span>
+                      {item.highlight && (
+                        <span aria-hidden="true" className="ml-auto inline-flex h-1.5 w-1.5 flex-none rounded-full bg-accent" />
+                      )}
+                    </Link>
+                  </div>
                 );
               })}
             </nav>

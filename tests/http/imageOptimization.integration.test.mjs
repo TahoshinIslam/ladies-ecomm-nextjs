@@ -64,7 +64,7 @@ describe("Phase 9 — real HTTP: next/image produces responsive, optimized marku
   const createdIds = [];
   let product;
   const productName = `__img_test_${crypto.randomBytes(4).toString("hex")}`;
-  const FIXTURE_IMAGE = "https://placehold.co/800x1000?text=phase9";
+  const FIXTURE_IMAGE = "https://placehold.co/800x1000.png?text=phase9";
 
   before(async () => {
     ({ default: Product } = await import("../../models/productModel.js"));

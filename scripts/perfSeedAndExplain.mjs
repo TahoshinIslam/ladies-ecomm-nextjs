@@ -80,7 +80,13 @@ for (let i = 0; i < 300; i++) {
     topCategory: dept._id,
     basePrice: 500 + rand(5000),
     isActive: rand(10) > 0, // ~90% active
-    images: ["https://placehold.co/400x400?text=perf"],
+    // `.png`, not the bare extension-less URL: placehold.co's default
+    // response is an SVG, which next/image's optimizer refuses to
+    // optimize (a deliberate, tested security invariant — see
+    // tests/imageOptimization.test.mjs's "dangerouslyAllowSVG remains
+    // absent" check). See scripts/seedCatalog.mjs's IMG() helper, which
+    // this should have matched from the start.
+    images: ["https://placehold.co/400x400.png?text=perf"],
     variants: [{ variantName: "Default", sku: `PERF-${i}`, stock: rand(50) }],
   });
 }

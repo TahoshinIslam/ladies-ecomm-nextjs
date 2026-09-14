@@ -23,18 +23,22 @@ import { PERMISSIONS, hasPermission } from "../../lib/permissions.js";
 // the .view tier (an employee with only products.view can see the list;
 // products.manage is checked separately, inline on the page, before
 // create/edit/delete).
+// `group` gives the sidebar deliberate sections (Leo's own eyebrow-label
+// pattern separates them) instead of one undifferentiated 11-item list —
+// purely a presentation grouping, so it changes nothing about routing,
+// permissions, or `isNavItemActive`/`filterAdminNav` below.
 export const ADMIN_NAV = [
-  { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true, perm: PERMISSIONS.DASHBOARD_VIEW },
-  { to: "/admin/products", label: "Products", icon: Package, perm: PERMISSIONS.PRODUCTS_VIEW },
-  { to: "/admin/product-config", label: "Product Config", icon: SlidersHorizontal, perm: PERMISSIONS.CATEGORIES_MANAGE },
-  { to: "/admin/orders", label: "Orders", icon: ShoppingCart, perm: PERMISSIONS.ORDERS_VIEW },
-  { to: "/admin/users", label: "Users", icon: Users, perm: PERMISSIONS.USERS_MANAGE },
-  { to: "/admin/categories", label: "Categories", icon: Folder, perm: PERMISSIONS.CATEGORIES_MANAGE },
-  { to: "/admin/coupons", label: "Coupons", icon: Tag, perm: PERMISSIONS.COUPONS_MANAGE },
-  { to: "/admin/reviews", label: "Reviews", icon: Star, perm: PERMISSIONS.REVIEWS_MANAGE },
-  { to: "/admin/themes", label: "Themes", icon: Palette, highlight: true, perm: PERMISSIONS.THEMES_MANAGE },
-  { to: "/admin/shop-config", label: "Shop Config", icon: Store, perm: PERMISSIONS.SETTINGS_MANAGE },
-  { to: "/admin/settings", label: "Settings", icon: Settings, perm: PERMISSIONS.SETTINGS_MANAGE },
+  { to: "/admin", label: "Overview", icon: LayoutDashboard, end: true, perm: PERMISSIONS.DASHBOARD_VIEW, group: "General" },
+  { to: "/admin/products", label: "Products", icon: Package, perm: PERMISSIONS.PRODUCTS_VIEW, group: "Catalog" },
+  { to: "/admin/product-config", label: "Product Config", icon: SlidersHorizontal, perm: PERMISSIONS.CATEGORIES_MANAGE, group: "Catalog" },
+  { to: "/admin/categories", label: "Categories", icon: Folder, perm: PERMISSIONS.CATEGORIES_MANAGE, group: "Catalog" },
+  { to: "/admin/orders", label: "Orders", icon: ShoppingCart, perm: PERMISSIONS.ORDERS_VIEW, group: "Sales" },
+  { to: "/admin/coupons", label: "Coupons", icon: Tag, perm: PERMISSIONS.COUPONS_MANAGE, group: "Sales" },
+  { to: "/admin/users", label: "Users", icon: Users, perm: PERMISSIONS.USERS_MANAGE, group: "Community" },
+  { to: "/admin/reviews", label: "Reviews", icon: Star, perm: PERMISSIONS.REVIEWS_MANAGE, group: "Community" },
+  { to: "/admin/themes", label: "Themes", icon: Palette, highlight: true, perm: PERMISSIONS.THEMES_MANAGE, group: "Store" },
+  { to: "/admin/shop-config", label: "Shop Config", icon: Store, perm: PERMISSIONS.SETTINGS_MANAGE, group: "Store" },
+  { to: "/admin/settings", label: "Settings", icon: Settings, perm: PERMISSIONS.SETTINGS_MANAGE, group: "Store" },
 ];
 
 // Exact route matches; nested routes (e.g. a future /admin/orders/[id])

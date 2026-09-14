@@ -202,7 +202,10 @@ export default async function HomePage() {
                   span === "wide" && "col-span-2",
                   copy.tone === "media" && "bg-media",
                   copy.tone === "coral" && "bg-coral",
-                  copy.tone === "night" && "bg-[#101012]",
+                  // Fixed hex, not the `ink` token: this "night" tile is
+                  // deliberately always-dark regardless of site theme —
+                  // `ink` itself flips to near-white in dark mode.
+                  copy.tone === "night" && "bg-[#181a18]",
                 )}
               >
                 {deptImage ? (

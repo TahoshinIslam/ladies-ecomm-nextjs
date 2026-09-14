@@ -75,7 +75,7 @@ describe("related-products and batch endpoints (real MongoDB, via HTTP)", { skip
       description: "Created by tests/http/relatedProducts.integration.test.mjs — removed in `after`.",
       category: activeProducts[0].category?._id || activeProducts[0].category,
       basePrice: 50,
-      images: ["https://placehold.co/400x400?text=test"],
+      images: ["https://placehold.co/400x400.png?text=test"],
       variants: [{ variantName: "Default", sku: "TEST-TEMP-SKU", stock: 5 }],
       isActive: false,
     });

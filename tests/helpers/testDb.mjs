@@ -173,7 +173,7 @@ export async function createTestProduct({ stock = 10, basePrice = 1000 } = {}) {
     description: "Created by the Phase 1 test suite — safe to delete.",
     category: category._id,
     basePrice,
-    images: ["https://placehold.co/400x400?text=test"],
+    images: ["https://placehold.co/400x400.png?text=test"],
     variants: [{ variantName: "Default", sku: `TEST-${suffix}`, stock }],
   });
 }

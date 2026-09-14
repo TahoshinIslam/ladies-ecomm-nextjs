@@ -34,14 +34,14 @@ export default function GlobalError({ error, retry }) {
           textAlign: "center",
           fontFamily:
             "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-          color: "#18181b",
-          background: "#f3f0e8",
+          color: "#181a18",
+          background: "#fafaf7",
         }}
       >
         <h1 style={{ margin: 0, fontSize: "clamp(24px,4vw,34px)", fontWeight: 600 }}>
           TAHOS. is temporarily unavailable
         </h1>
-        <p style={{ margin: 0, maxWidth: "44ch", fontSize: "15px", lineHeight: 1.6, color: "#57534e" }}>
+        <p style={{ margin: 0, maxWidth: "44ch", fontSize: "15px", lineHeight: 1.6, color: "#626760" }}>
           Something went wrong loading the app. Please try again in a moment.
         </p>
         <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
@@ -53,8 +53,8 @@ export default function GlobalError({ error, retry }) {
               padding: "0 20px",
               borderRadius: "10px",
               border: "none",
-              background: "#18181b",
-              color: "#fff",
+              background: "#244a3a",
+              color: "#fafaf7",
               fontSize: "14px",
               fontWeight: 600,
               cursor: "pointer",
@@ -78,8 +78,8 @@ export default function GlobalError({ error, retry }) {
               alignItems: "center",
               padding: "0 20px",
               borderRadius: "10px",
-              border: "1px solid #d6d3d1",
-              color: "#18181b",
+              border: "1px solid #e3e6df",
+              color: "#181a18",
               fontSize: "14px",
               fontWeight: 600,
               textDecoration: "none",

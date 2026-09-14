@@ -138,7 +138,7 @@ describe("Phase 8 — real cache hit/invalidation behavior (real MongoDB, via HT
       category: burqaLeafId,
       topCategory: burqaDeptId,
       basePrice: 5000,
-      images: ["https://placehold.co/400x400?text=test"],
+      images: ["https://placehold.co/400x400.png?text=test"],
       variants: [{ variantName: "Default", sku: `CACHE-${suffix}`, stock: 10 }],
       isActive: true,
       ...overrides,
