@@ -1,12 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Banknote, RefreshCw, Sparkles, Gem } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import Button from "../components/ui/Button.jsx";
+import ProductCard from "../components/product/ProductCard.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
 import ProductShowcaseSection from "./home/ProductShowcaseSection.jsx";
 import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
-import NewsletterPoster from "./home/NewsletterPoster.jsx";
 import SectionHead from "./home/SectionHead.jsx";
 
 import connectDB from "../config/db.js";
@@ -19,15 +19,8 @@ import { localizeProductList, localizeCategoryList } from "../lib/i18n/localize.
 import { departmentName } from "../lib/i18n/catalog.js";
 import { cn, resolveImage } from "../lib/utils.js";
 
-const TRUST = [
-  { icon: Banknote, titleKey: "home.trustCod", bodyKey: "home.trustCodBody" },
-  { icon: RefreshCw, titleKey: "home.trustExchange", bodyKey: "home.trustExchangeBody" },
-  { icon: Gem, titleKey: "home.trustFabric", bodyKey: "home.trustFabricBody" },
-  { icon: Sparkles, titleKey: "home.trustCoverage", bodyKey: "home.trustCoverageBody" },
-];
-
 const DEPARTMENT_COPY = {
-  burqa: { num: "01", bodyKey: "catalog.deptBurqaBody", tone: "media", span: "tall" },
+  burqa: { num: "01", bodyKey: "catalog.deptBurqaBody", tone: "media" },
   abaya: { num: "02", bodyKey: "catalog.deptAbayaBody", tone: "media", span: "wide" },
   hijab: { num: "03", bodyKey: "catalog.deptHijabBody", tone: "coral" },
   niqab: { num: "04", bodyKey: "catalog.deptNiqabBody", tone: "night" },
@@ -130,13 +123,20 @@ export default async function HomePage() {
   // clothes" department id to scope by (every department is its own root
   // now), so both are unscoped across the whole catalog, using the shop's
   // own canonical `collection=` values.
-  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, shopNew, shopFeatured] = await Promise.all([
+  const [heroBurqa, heroAbaya, heroHijab, heroKhimar, shopNew, shopFeatured, collectionItems] = await Promise.all([
     burqa ? fetchProducts({ limit: 1, category: burqa._id, sort: "-rating" }) : Promise.resolve([]),
     abaya ? fetchProducts({ limit: 1, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
     hijab ? fetchProducts({ limit: 1, category: hijab._id, sort: "-rating" }) : Promise.resolve([]),
     khimar ? fetchProducts({ limit: 1, category: khimar._id, sort: "-rating" }) : Promise.resolve([]),
     fetchProducts({ limit: 8, collection: "new" }),
-    fetchProducts({ limit: 8, collection: "featured" }),
+    // Wider limit than the other showcases: this list is filtered client-
+    // side by the "Trending now" category tabs (ProductShowcaseSection),
+    // so it needs enough spread across departments for each tab to show a
+    // real grid rather than one or two items.
+    fetchProducts({ limit: 24, collection: "featured" }),
+    // Feeds the Collection feature panel below — a real 3-product spotlight
+    // for the Abaya department, not placeholder cards.
+    abaya ? fetchProducts({ limit: 3, category: abaya._id, sort: "-rating" }) : Promise.resolve([]),
   ]);
 
   // An admin-set carousel image (Shop Config → Carousel) overrides the
@@ -160,37 +160,6 @@ export default async function HomePage() {
     <>
       <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} />
 
-      {/* Trust (desktop only) */}
-      <section
-        aria-label={t("home.serviceBenefits")}
-        className="hidden border-y border-line bg-surface lg:block"
-      >
-        <div className="container-x grid sm:grid-cols-2 lg:grid-cols-4">
-          {TRUST.map((item, i) => (
-            <div
-              key={item.titleKey}
-              className={cn(
-                "flex items-start gap-3.5 py-[26px] pr-[30px]",
-                i < TRUST.length - 1 && "lg:border-r lg:border-line",
-              )}
-            >
-              <span
-                aria-hidden="true"
-                className="grid h-[34px] w-[34px] flex-none place-items-center rounded-lg border border-line text-verm"
-              >
-                <item.icon className="h-[17px] w-[17px]" strokeWidth={1.6} />
-              </span>
-              <div>
-                <div className="text-[14.5px] font-semibold">{t(item.titleKey)}</div>
-                <div className="mt-1 text-[13.5px] leading-[1.45] text-stone">
-                  {t(item.bodyKey)}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* Departments */}
       <section id="departments" aria-labelledby="dept-h" className="container-x pt-32">
         <SectionHead
@@ -201,27 +170,20 @@ export default async function HomePage() {
         />
         <div
           className={cn(
-            "mt-12 grid gap-5",
-            // The tall Burqa / wide Abaya spans below are a curated mosaic
-            // sized for the full 6-department catalog DEPARTMENT_COPY
-            // encodes — with fewer departments (a store still filling out
-            // its catalog), those fixed spans leave real, unfillable empty
-            // grid cells (e.g. just Burqa+Hijab: Burqa's tall span plus one
-            // plain card leaves 3 cells empty next to/under it — a visible
-            // "space on the right" bug, not a display artifact). Below the
-            // full set, fall back to auto-fit tracks: grid collapses any
-            // track nothing is placed in and stretches the real cards to
-            // fill the freed space, so 1-5 departments always fill the row
-            // completely regardless of count.
+            "mt-12 grid grid-cols-2 gap-4",
+            // Leo's category grid: 6 equal-height columns, first tile wide
+            // (span 2) — a single uniform row, not a tall/wide mosaic. Below
+            // the full curated set (a store still filling out its catalog),
+            // fall back to auto-fit tracks so 1-5 departments still fill the
+            // row completely instead of leaving empty grid cells.
             hasFullMosaic
-              ? "lg:grid-cols-3"
-              : "sm:grid-cols-2 lg:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]",
+              ? "lg:grid-cols-6 lg:auto-rows-[220px]"
+              : "sm:grid-cols-3 lg:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] lg:auto-rows-[220px]",
           )}
         >
           {departments.map((d) => {
             const copy = DEPARTMENT_COPY[d.slug] || { num: "•", bodyKey: null, tone: "media" };
             const span = hasFullMosaic ? copy.span : undefined;
-            const body = copy.bodyKey ? t(copy.bodyKey) : d.description || "";
             const deptName = departmentName(locale, d.slug, d.name);
             // Admin-set department-card photo (Shop Config → Departments)
             // takes priority; "media"-tone departments fall back to their
@@ -236,92 +198,34 @@ export default async function HomePage() {
                 href={`/shop?category=${d._id}`}
                 data-reveal
                 className={cn(
-                  "group relative flex flex-col justify-end overflow-hidden rounded-3xl p-8 focus-ring",
-                  span === "tall" && "lg:row-span-2 lg:min-h-[560px]",
-                  span === "wide" && "lg:col-span-2 lg:min-h-[265px]",
-                  !span && "min-h-[275px]",
+                  "group relative flex min-h-[190px] flex-col justify-end overflow-hidden rounded-xl p-4 focus-ring",
+                  span === "wide" && "col-span-2",
                   copy.tone === "media" && "bg-media",
                   copy.tone === "coral" && "bg-coral",
                   copy.tone === "night" && "bg-[#101012]",
                 )}
               >
                 {deptImage ? (
-                  <>
-                    <Image
-                      src={resolveImage(deptImage, 700)}
-                      alt=""
-                      fill
-                      sizes="(max-width: 1024px) 100vw, 33vw"
-                      // object-top, not the object-cover default (center):
-                      // these cards' heights are fixed per span (275-560px)
-                      // independent of whatever aspect ratio an admin
-                      // uploads, so object-cover almost always has to crop
-                      // some height. Centered cropping took equally off top
-                      // and bottom, cutting into a model's face/head — the
-                      // one part of a fashion photo that must never be
-                      // cropped. Anchoring to the top means any necessary
-                      // crop always comes off the bottom instead, so every
-                      // uploaded photo frames gracefully without an admin
-                      // needing to hand-check each one against every card's
-                      // specific aspect ratio.
-                      className="object-cover object-top"
-                    />
-                    <div aria-hidden="true" className="absolute inset-0 scrim" />
-                  </>
+                  <Image
+                    src={resolveImage(deptImage, 700)}
+                    alt=""
+                    fill
+                    sizes="(max-width: 1024px) 100vw, 33vw"
+                    className="object-cover object-top transition-transform duration-300 group-hover:scale-[1.04]"
+                  />
                 ) : copy.tone === "media" ? (
-                  <>
-                    <div aria-hidden="true" className="absolute inset-0 hatch" />
-                    <div aria-hidden="true" className="absolute inset-0 scrim" />
-                  </>
-                ) : (
-                  copy.tone === "night" && (
-                    <div
-                      aria-hidden="true"
-                      className="absolute inset-0 bg-[radial-gradient(90%_70%_at_70%_20%,rgba(212,255,69,0.14),transparent_60%)]"
-                    />
-                  )
-                )}
+                  <div aria-hidden="true" className="absolute inset-0 hatch" />
+                ) : null}
+                {/* Leo's category tile: one bold white label over a bottom
+                    gradient scrim — no eyebrow number, no body copy, no
+                    "explore" link. The department name and photo carry it. */}
                 <div
-                  className={cn(
-                    "relative",
-                    copy.tone === "coral" && "text-[#101012]",
-                    copy.tone === "night" && "text-[#F5F2EA]",
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "font-mono text-[11px] uppercase tracking-[0.14em]",
-                      copy.tone === "night" ? "text-lime" : "text-verm",
-                      copy.tone === "coral" && "text-[#101012]",
-                    )}
-                  >
-                    {copy.num}
-                  </div>
-                  <h3
-                    className={cn(
-                      "mt-2.5 font-semibold leading-none tracking-[-0.03em]",
-                      span === "tall" ? "text-[44px]" : span === "wide" ? "text-[38px]" : "text-[34px]",
-                    )}
-                  >
-                    {deptName}
-                  </h3>
-                  <p
-                    className={cn(
-                      "mt-2.5 max-w-[32ch] text-base leading-[1.45]",
-                      copy.tone === "night"
-                        ? "text-[rgba(245,242,234,0.66)]"
-                        : copy.tone === "coral"
-                          ? "opacity-70"
-                          : "text-stone",
-                    )}
-                  >
-                    {body}
-                  </p>
-                  <span className="mt-4 inline-flex items-center gap-2 text-[14.5px] font-semibold">
-                    {t("home.explore", { name: deptName })}
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                  </span>
-                </div>
+                  aria-hidden="true"
+                  className="absolute inset-0 bg-gradient-to-t from-ink/65 via-ink/0 to-transparent"
+                />
+                <h3 className="relative font-heading text-[19px] font-bold leading-none text-[#fafaf7]">
+                  {deptName}
+                </h3>
               </Link>
             );
           })}
@@ -373,8 +277,9 @@ export default async function HomePage() {
         viewAllLabel={t("home.viewAllLower", { label: t("home.tabNewArrival") })}
       />
 
-      {/* Featured — a real, standalone section (previously one of four
-          tabs behind New Arrivals; now its own place on the page). */}
+      {/* Featured / "Trending now" — a real, standalone section with
+          Leo's functional category-tab pattern layered on top (filters
+          the already-fetched grid client-side, no extra request per tab). */}
       <ProductShowcaseSection
         sectionId="featured"
         headingId="featured-h"
@@ -383,9 +288,38 @@ export default async function HomePage() {
         sub={t("home.featuredSub")}
         icon="featured"
         products={shopFeatured}
+        departments={departments}
         viewAllHref="/shop?collection=featured"
         viewAllLabel={t("home.viewAllLower", { label: t("home.tabFeatured") })}
       />
+
+      {/* Collection feature panel — Leo's split composition: a solid
+          accent-green panel (copy + CTA) beside a real 3-product spotlight,
+          in one bordered block. Only renders when the Abaya department has
+          products to show — no placeholder cards. */}
+      {abaya && collectionItems.length > 0 && (
+        <section aria-labelledby="collection-h" className="container-x pt-32">
+          <div className="grid overflow-hidden rounded-3xl border border-line lg:grid-cols-[minmax(280px,340px)_1fr]">
+            <div className="flex flex-col justify-center bg-verm px-8 py-12 sm:px-10">
+              <div className="eyebrow text-lime">{t("home.collectionEyebrow")}</div>
+              <h2 id="collection-h" className="mt-3 text-[28px] font-semibold leading-[1.1] tracking-[-0.02em] text-accent-foreground">
+                {t("home.collectionTitle", { name: departmentName(locale, abaya.slug, abaya.name) })}
+              </h2>
+              <p className="mt-3 max-w-[32ch] text-[14.5px] leading-relaxed text-accent-foreground/85">
+                {t("home.collectionBody", { name: departmentName(locale, abaya.slug, abaya.name) })}
+              </p>
+              <Link href={`/shop?category=${abaya._id}`} className="mt-6">
+                <Button variant="promo">{t("home.collectionCta")}</Button>
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 gap-5 p-6 sm:grid-cols-3 sm:p-8">
+              {collectionItems.map((p, i) => (
+                <ProductCard key={p._id} product={p} index={i} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Fabric story */}
       <section aria-labelledby="fabric-h" className="container-x pt-32">
@@ -475,65 +409,40 @@ export default async function HomePage() {
 
       <GuidedFinderSection image={guidedFinderImage} />
 
-      {/* Campaign */}
+      {/* Campaign — real, admin-configurable content (Shop Config →
+          Campaign), kept; restyled from the old dark diagonal-line/italic-
+          serif treatment to Leo's plain, restrained panel language (solid
+          ink surface, no decorative texture) since Leo has no equivalent
+          section of its own to copy directly. */}
       <section id="campaign" aria-labelledby="camp-h" className="container-x pt-32">
-        <div className="relative overflow-hidden rounded-[26px] bg-[#101012] text-[#F5F2EA]">
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 bg-[repeating-linear-gradient(115deg,rgba(245,242,234,0.05)_0_1px,transparent_1px_14px)]"
-          />
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 bg-[radial-gradient(55%_90%_at_22%_35%,rgba(255,61,33,0.16),transparent_65%)]"
-          />
-
-          <div className="relative max-w-[640px] px-8 py-16 sm:px-14">
-            <div className="flex items-center gap-3 font-mono text-[11.5px] uppercase tracking-[0.16em] text-[rgba(245,242,234,0.6)]">
-              <span className="h-px w-[22px] bg-verm" />
-              {t("home.ourApproach")}
-            </div>
-            {homepageSettings.campaign?.enabled && homepageSettings.campaign?.title ? (
-              <h2
-                id="camp-h"
-                className="mt-6 text-[clamp(36px,3.6vw,58px)] font-semibold leading-[0.98] tracking-[-0.03em] text-balance"
-              >
-                {homepageSettings.campaign.title}
-              </h2>
-            ) : (
-              <h2
-                id="camp-h"
-                className="mt-6 text-[clamp(36px,3.6vw,58px)] font-semibold leading-[0.98] tracking-[-0.03em] text-balance"
-              >
-                {t("home.campaignTitle")}{" "}
-                <span className="font-serif font-normal italic">{t("home.campaignTitleAccent")}</span>
-              </h2>
-            )}
-            <p className="mt-5 text-lg leading-[1.5] text-[rgba(245,242,234,0.7)] text-pretty">
+        <div className="rounded-3xl bg-ink px-8 py-14 text-canvas sm:px-14">
+          <div className="max-w-[640px]">
+            <div className="eyebrow text-canvas/60">{t("home.ourApproach")}</div>
+            <h2 className="font-heading mt-4 text-[clamp(30px,3vw,44px)] font-extrabold leading-[1.05] tracking-[-0.02em] text-balance">
+              {homepageSettings.campaign?.enabled && homepageSettings.campaign?.title
+                ? homepageSettings.campaign.title
+                : `${t("home.campaignTitle")} ${t("home.campaignTitleAccent")}`}
+            </h2>
+            <p className="mt-4 text-lg leading-[1.5] text-canvas/75 text-pretty">
               {homepageSettings.campaign?.enabled && homepageSettings.campaign?.message
                 ? homepageSettings.campaign.message
                 : t("home.campaignBody")}
             </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3.5">
-              <Link
-                href={
-                  homepageSettings.campaign?.enabled && homepageSettings.campaign?.ctaHref
-                    ? homepageSettings.campaign.ctaHref
-                    : "/shop"
-                }
-              >
-                <span className="inline-flex h-[52px] items-center gap-2.5 rounded-[9px] bg-[#F5F2EA] px-6 text-[15.5px] font-semibold text-[#101012] transition-colors hover:bg-verm-contrast hover:text-white">
-                  {homepageSettings.campaign?.enabled && homepageSettings.campaign?.ctaLabel
-                    ? homepageSettings.campaign.ctaLabel
-                    : t("home.shopTheCollection")}
-                  <ArrowRight className="h-4 w-4" />
-                </span>
-              </Link>
-            </div>
+            <Link href={
+              homepageSettings.campaign?.enabled && homepageSettings.campaign?.ctaHref
+                ? homepageSettings.campaign.ctaHref
+                : "/shop"
+            } className="mt-7 inline-block">
+              <Button variant="promo">
+                {homepageSettings.campaign?.enabled && homepageSettings.campaign?.ctaLabel
+                  ? homepageSettings.campaign.ctaLabel
+                  : t("home.shopTheCollection")}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
           </div>
         </div>
       </section>
-
-      <NewsletterPoster />
     </>
   );
 }

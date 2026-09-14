@@ -5,74 +5,74 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ---------------------------------------------------------------------------
-   Kinetic Editorial — raw palette
+   Leo Store design system — raw palette
    Source of truth for both themes. Utilities below reference these by var(),
    so a [data-theme] swap re-themes the whole app without recompiling.
+   Variable NAMES are kept as-is (hundreds of components reference them
+   through the @theme inline block below and Tailwind utilities like
+   bg-canvas/text-ink/border-line) so the whole app re-skins from this one
+   file; only the VALUES change to the Leo token set (warm off-white ground,
+   deep forest-green accent, restrained borders/shadows).
 --------------------------------------------------------------------------- */
 :root {
-  --canvas: #f3f0e8;
-  --surface: #fffdf8;
-  --elev: #ffffff;
-  --ink: #101012;
-  --stone: #67645e;
-  --line: #d8d3c9;
-  --media: #e9e6de;
+  --canvas: #fafaf7;   /* Leo --page — warm off-white */
+  --surface: #ffffff;  /* Leo --surface */
+  --elev: #ffffff;     /* Leo has one white surface tier; elevation comes from border+shadow, not a second tint */
+  --ink: #181a18;      /* Leo --ink — primary text, ~15.9:1 on --canvas */
+  --stone: #626760;    /* Leo --ink-soft — secondary text, ~5.0:1 on --canvas */
+  --line: #e3e6df;     /* Leo --border */
+  --media: #f2f2ec;    /* Leo --surface-sunken — image plates, wells, skeletons */
   --shine: #ffffff;
-  /* Phase 10 checkpoint — WCAG 1.4.3 contrast fix: the original #ff3d21
-     rendered as body/link TEXT directly on --canvas/--surface only
-     reached ~3.1-3.5:1 (fails the 4.5:1 normal-text minimum) in LIGHT
-     mode specifically — dark mode's use of the same value against its
-     much darker backgrounds already passed at ~5.2-5.6:1, so only light
-     mode's value changes here (dark mode keeps the original, see the
-     [data-theme="dark"] block below). This is the same red hue/
-     saturation, just darkened in lightness (56.5% -> 42.5%), not a
-     palette redesign. See --verm-contrast below for the SEPARATE,
-     different problem of white text ON a verm-colored background. */
-  --verm: #d81b00;
-  /* A second, deliberately different token: white text sitting ON a
-     solid verm background (Button.jsx's `accent` variant, Badge.jsx's
-     `accent` variant, and several inline badges/CTAs) needs the
-     BACKGROUND itself dark enough for 4.5:1 against white — a need that
-     doesn't depend on the surrounding page theme the way plain text-on-
-     page-background does. The original #ff3d21 only reached 3.53:1
-     against white in either theme. This single value satisfies both
-     that (5.15:1) and, incidentally, --verm's light-mode fix above (they
-     happen to be the same corrected shade) — used identically in both
-     themes below. */
-  --verm-contrast: #d81b00;
-  --lime: #d4ff45;
-  --coral: #ffd9d1;
-  --lav: #ded9ff;
+  /* Brand accent: deep forest green, replacing the old vermillion. --verm is
+     used both as text/icon/border accent AND (via --verm-contrast) as a
+     button/badge fill that needs to hold contrast against white text —
+     Leo's own tokens confirm #244A3A holds 4.5:1+ against --on-accent
+     (#FAFAF7 / white), so both tokens share this value in light mode. */
+  --verm: #244a3a;          /* Leo --accent */
+  --verm-contrast: #244a3a; /* solid accent-fill background (buttons/badges) */
+  --lime: #e7f0b2;   /* Leo --promo (chartreuse) — sparing promo highlight, dark text only */
+  --coral: #eaf0e8;  /* repurposed: Leo --accent-soft (soft green fill), used for decorative tone panels */
+  --lav: #d3e0ce;    /* repurposed: Leo --accent-soft-border */
 
-  --stripe: rgba(16, 16, 18, 0.06);
-  --wash: rgba(16, 16, 18, 0.035);
-  --hair: rgba(16, 16, 18, 0.12);
+  --stripe: rgba(24, 26, 24, 0.06);
+  --wash: rgba(24, 26, 24, 0.035);
+  --hair: rgba(24, 26, 24, 0.12);
 
   --scrim: linear-gradient(
     180deg,
-    rgba(243, 240, 232, 0) 0%,
-    rgba(243, 240, 232, 0.92) 78%
+    rgba(250, 250, 247, 0) 0%,
+    rgba(250, 250, 247, 0.92) 78%
   );
   --contact: radial-gradient(
     ellipse 50% 16% at 50% 96%,
-    rgba(16, 16, 18, 0.22),
-    rgba(16, 16, 18, 0) 70%
+    rgba(24, 26, 24, 0.16),
+    rgba(24, 26, 24, 0) 70%
   );
   --glow: radial-gradient(
     120% 90% at 62% 24%,
     rgba(255, 255, 255, 0.85),
-    rgba(233, 230, 222, 0) 62%
+    rgba(242, 242, 236, 0) 62%
   );
 
-  --shadow-soft: 0 30px 70px -30px rgba(16, 16, 18, 0.3);
-  --shadow-hover: 0 40px 90px -34px rgba(16, 16, 18, 0.38);
-  --shadow-card: 0 1px 2px rgba(16, 16, 18, 0.05), 0 8px 24px -16px rgba(16, 16, 18, 0.25);
-  --shadow-sheet: 0 -10px 44px -14px rgba(16, 16, 18, 0.24);
+  /* Restrained, border-first elevation per the Leo system — structure over
+     shadow. These replace the old 30-90px dramatic blur with Leo's
+     shadow-sm/md/lg scale. */
+  --shadow-soft: 0 8px 24px -12px rgba(24, 26, 24, 0.1);
+  --shadow-hover: 0 12px 32px -12px rgba(24, 26, 24, 0.14);
+  --shadow-card: 0 1px 2px rgba(24, 26, 24, 0.05), 0 2px 6px rgba(24, 26, 24, 0.06);
+  --shadow-sheet: 0 -8px 24px -10px rgba(24, 26, 24, 0.12);
 
-  /* Feedback colors — not in the reference board, tuned to sit beside --verm */
-  --danger: #d92d20;
-  --success: #12805c;
-  --warning: #b25e09;
+  /* Feedback colors — Leo semantics, kept distinct from --verm */
+  --danger: #c0392b;
+  --success: #2f7a44;
+  --warning: #b8791a;
+
+  /* Default corner radius for admin-theme-driven surfaces (OverviewCharts,
+     etc.) when no admin theme override is published — Leo's card radius. */
+  --radius: 12px;
+
+  /* Leo --star — rating-stars gold, distinct from the brand accent */
+  --star: #c08a2e;
 
   --ease-in: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out: cubic-bezier(0.7, 0, 0.84, 0);
@@ -90,36 +90,37 @@
   color-scheme: light;
 }
 
+/* Leo's own system is light-only (see the design system readme's caveats),
+   so this dark palette is a derived counterpart: same warm-neutral +
+   forest-green language, remapped onto a dark ground so the app's existing
+   dark-mode toggle and admin theme-override feature keep working. */
 [data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #0b0b0d;
-  --surface: #141416;
-  --elev: #1b1b1f;
-  --ink: #f5f2ea;
-  --stone: #a9a59c;
-  --line: #2c2c31;
-  --media: #191a1d;
-  --shine: #f5f2ea;
-  --coral: #4a2e28;
-  --lav: #2e2b45;
-  /* Explicit override, not an omission: dark mode's original #ff3d21
-     already passes 4.5:1 as TEXT against this theme's much darker
-     canvas/surface (~5.2-5.6:1) — freezing it here keeps that,
-     independent of :root's light-mode-specific darkening above.
-     --verm-contrast (the white-on-verm-background case) still uses the
-     same darker shade as light mode, since that pairing doesn't depend
-     on the page background at all. */
-  --verm: #ff3d21;
-  --verm-contrast: #d81b00;
+  --canvas: #14150f;
+  --surface: #1b1c15;
+  --elev: #22241b;
+  --ink: #f3f1e9;
+  --stone: #a6aa9c;
+  --line: #2e3126;
+  --media: #23251c;
+  --shine: #f3f1e9;
+  --coral: #1e2a20; /* dark accent-soft fill */
+  --lav: #232a1e;
+  /* --verm needs to read as TEXT/icon/border against a near-black canvas, so
+     it lightens here; --verm-contrast is the separate "white text ON a
+     solid accent fill" pairing (buttons/badges), which stays the same deep
+     green in both themes since that pairing doesn't depend on page bg. */
+  --verm: #5ca37e;
+  --verm-contrast: #244a3a;
 
-  --stripe: rgba(245, 242, 234, 0.07);
-  --wash: rgba(245, 242, 234, 0.04);
-  --hair: rgba(245, 242, 234, 0.14);
+  --stripe: rgba(243, 241, 233, 0.07);
+  --wash: rgba(243, 241, 233, 0.04);
+  --hair: rgba(243, 241, 233, 0.14);
 
   --scrim: linear-gradient(
     180deg,
-    rgba(11, 11, 13, 0) 0%,
-    rgba(11, 11, 13, 0.94) 76%
+    rgba(20, 21, 15, 0) 0%,
+    rgba(20, 21, 15, 0.94) 76%
   );
   --contact: radial-gradient(
     ellipse 52% 15% at 50% 96%,
@@ -128,18 +129,18 @@
   );
   --glow: radial-gradient(
     120% 90% at 62% 22%,
-    rgba(255, 255, 255, 0.1),
-    rgba(25, 26, 29, 0) 60%
+    rgba(255, 255, 255, 0.08),
+    rgba(35, 37, 28, 0) 60%
   );
 
-  --shadow-soft: 0 30px 80px -28px rgba(0, 0, 0, 0.75);
-  --shadow-hover: 0 40px 96px -30px rgba(0, 0, 0, 0.85);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px -16px rgba(0, 0, 0, 0.7);
-  --shadow-sheet: 0 -10px 50px -12px rgba(0, 0, 0, 0.7);
+  --shadow-soft: 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+  --shadow-hover: 0 12px 32px -12px rgba(0, 0, 0, 0.65);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.45);
+  --shadow-sheet: 0 -8px 24px -10px rgba(0, 0, 0, 0.5);
 
-  --danger: #f0574a;
-  --success: #3fbf95;
-  --warning: #e0952f;
+  --danger: #e0574a;
+  --success: #4fbf85;
+  --warning: #d99a3f;
 }
 
 /* ---------------------------------------------------------------------------
@@ -180,15 +181,21 @@
   --color-primary: var(--ink);
   --color-primary-foreground: var(--canvas);
   --color-accent: var(--verm);
-  --color-accent-foreground: #ffffff;
+  --color-accent-foreground: #fafaf7; /* Leo --on-accent */
 
+  --color-star: var(--star);
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-warning: var(--warning);
 
-  --font-sans: var(--font-instrument-sans), -apple-system, "Helvetica Neue",
-    Helvetica, Arial, sans-serif;
-  --font-serif: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  /* Leo type system: Inter for body/UI/forms, Manrope for headings + the
+     wordmark. --font-serif keeps its name (referenced by the font-heading
+     utility and a few decorative-accent usages below) but now carries
+     Manrope, not an actual serif — Leo has no serif in its type system. */
+  --font-sans: var(--font-inter), -apple-system, "Helvetica Neue", Helvetica,
+    Arial, sans-serif;
+  --font-serif: var(--font-manrope), -apple-system, "Helvetica Neue", Helvetica,
+    Arial, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
   --shadow-soft: var(--shadow-soft);
@@ -297,7 +304,7 @@
 @utility focus-ring {
   &:focus-visible {
     outline: 2px solid var(--verm);
-    outline-offset: 3px;
+    outline-offset: 2px;
     border-radius: 4px;
   }
 }
@@ -423,11 +430,10 @@
   padding-inline: clamp(20px, 4vw, 56px);
 }
 
-/* Headings are the sans at tight tracking; the serif is an accent, applied
-   per-instance with `font-serif italic`, never as the default heading face. */
+/* Leo headings: Manrope (carried in --font-serif, see above), tight tracking. */
 @utility font-heading {
-  font-family: var(--font-sans);
-  letter-spacing: -0.03em;
+  font-family: var(--font-serif);
+  letter-spacing: -0.02em;
 }
 
 /* Loading placeholder — a sweep across the media plate, 1.4s, off if reduced. */
@@ -451,11 +457,14 @@
   }
 }
 
-/* Editorial eyebrow: mono, uppercase, wide tracking. Used ~20x on the board. */
+/* Leo eyebrow/overline label: body font, uppercase, tracked +0.06em —
+   reserved for tiny overline labels only (NEW IN, FREE RETURNS), never
+   full headlines. Was mono in the old editorial system; Leo uses no mono. */
 @utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  letter-spacing: 0.16em;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--stone);
 }
@@ -520,7 +529,7 @@
 
   :focus-visible {
     outline: 2px solid var(--verm);
-    outline-offset: 3px;
+    outline-offset: 2px;
     border-radius: 4px;
   }
 

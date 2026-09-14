@@ -24,6 +24,10 @@ const variants = {
   danger: "bg-danger text-white hover:opacity-90",
   success: "bg-success text-white hover:opacity-90",
   link: "h-auto bg-transparent p-0 text-verm underline-offset-4 hover:underline",
+  // Leo's promo variant: the chartreuse highlight, dark text only — for a
+  // single CTA sitting on a solid accent-colored panel (e.g. the homepage
+  // Collection feature), where a plain accent-colored button would vanish.
+  promo: "bg-lime text-[#181a18] hover:opacity-90",
 };
 
 const sizes = {

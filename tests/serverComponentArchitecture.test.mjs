@@ -29,10 +29,16 @@ const SERVER_PAGE_SHELLS = [
 // hero rotation, product tabs, order actions/SSE, the shop filter shell,
 // the product-detail interactive body, the admin charts, the newsletter
 // form, the guided-finder button).
+//
+// views/home/NewsletterPoster.jsx (formerly listed here) was retired
+// during the Leo Store visual migration: its standalone dark-block
+// section had no equivalent in the reference design, and its email
+// capture is now the compact form embedded in components/layout/
+// Footer.jsx's newsletter column instead, matching the reference's own
+// footer-only newsletter placement.
 const CLIENT_ISLANDS = [
   "views/home/HeroCarousel.jsx",
   "views/home/ProductShowcaseSection.jsx",
-  "views/home/NewsletterPoster.jsx",
   "views/home/GuidedFinderSection.jsx",
   "views/shop/ShopPageClient.jsx",
   "views/product/ProductDetailInteractive.jsx",

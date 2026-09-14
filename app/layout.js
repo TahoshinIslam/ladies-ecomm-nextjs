@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { Instrument_Sans, Instrument_Serif } from "next/font/google";
+import { Inter, Manrope } from "next/font/google";
 
 import AppProviders from "@/context/ThemeProvider.jsx";
 import { DEFAULT_LOCALE, LOCALE_COOKIE, isValidLocale } from "@/lib/i18n/config.js";
@@ -7,19 +7,20 @@ import { getT } from "@/lib/i18n/server.js";
 import { getSiteOrigin } from "@/lib/seo.js";
 import "./globals.css";
 
-const instrumentSans = Instrument_Sans({
-  variable: "--font-instrument-sans",
+// Leo Store design system: Inter for body/UI/forms, Manrope for headings +
+// the wordmark (see app/globals.css --font-sans/--font-serif).
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: ["400", "500", "600"],
   style: ["normal", "italic"],
   display: "swap",
 });
 
-const instrumentSerif = Instrument_Serif({
-  variable: "--font-instrument-serif",
+const manrope = Manrope({
+  variable: "--font-manrope",
   subsets: ["latin"],
-  weight: ["400"],
-  style: ["normal", "italic"],
+  weight: ["500", "600", "700", "800"],
   display: "swap",
 });
 
@@ -80,8 +81,8 @@ export async function generateMetadata() {
 
 export const viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#F3F0E8" },
-    { media: "(prefers-color-scheme: dark)", color: "#0B0B0D" },
+    { media: "(prefers-color-scheme: light)", color: "#FAFAF7" },
+    { media: "(prefers-color-scheme: dark)", color: "#14150F" },
   ],
 };
 
@@ -98,7 +99,7 @@ export default async function RootLayout({ children }) {
     <html
       lang={locale}
       data-theme={theme}
-      className={`${instrumentSans.variable} ${instrumentSerif.variable} h-full`}
+      className={`${inter.variable} ${manrope.variable} h-full`}
       suppressHydrationWarning
     >
       <body className="min-h-full">

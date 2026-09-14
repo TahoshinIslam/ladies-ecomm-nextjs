@@ -62,11 +62,25 @@ describe("Phase 10 — no positive tabIndex anywhere in scanned source", () => {
   test("no interactive control is permanently removed from the tab order via tabIndex={-1} gated on a mouse-only hover state", () => {
     // The specific regression this guards: ProductCard.jsx's Quick Add
     // button used to be tabIndex={hovered ? 0 : -1} — keyboard-only users
-    // could never reach it. Visibility must be CSS-driven
-    // (group-hover/group-focus-within), not tabIndex-driven.
+    // could never reach it. The Leo Store visual migration went further
+    // than a CSS-driven-visibility fix: the card's action button (Add to
+    // cart / Choose options / Notify me) is now persistent in the card's
+    // footer at all times, matching the reference design's always-visible
+    // card CTA — never hidden behind hover or focus at all, for any input
+    // method, so there's no opacity/tabIndex gating left to check for.
     const content = stripComments(read("components/product/ProductCard.jsx"));
     assert.ok(!/tabIndex=\{hovered/.test(content));
-    assert.match(content, /group-focus-within:opacity-100/);
+    const quickAddIndex = content.indexOf("onClick={handleQuickAdd}");
+    assert.ok(quickAddIndex >= 0, "the quick-add/choose-options button must exist");
+    // Its enclosing <button> must carry no opacity/hover-visibility gating
+    // at all — unlike the secondary compare toggle (which legitimately
+    // stays hover/focus-revealed), this is the card's one persistent CTA,
+    // rendered plainly in the card footer rather than wrapped in a
+    // group-hover-only container.
+    const buttonStart = content.lastIndexOf("<button", quickAddIndex);
+    const buttonEnd = content.indexOf("</button>", quickAddIndex);
+    const quickAddButton = content.slice(buttonStart, buttonEnd);
+    assert.ok(!/opacity-0/.test(quickAddButton), "the persistent action button must not be hidden by default");
   });
 });
 

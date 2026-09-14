@@ -92,173 +92,87 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
         onFocus={() => setInteractionPaused(true)}
         onBlur={() => setInteractionPaused(false)}
       >
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -top-[8%] right-[-4%] select-none text-[min(30vw,420px)] font-bold leading-[0.8] tracking-[-0.06em] text-ink opacity-[0.045]"
-        >
-          TAHOS
-        </div>
-
-        <div className="container-x grid min-h-[calc(86vh-130px)] items-center gap-8 pb-24 pt-16 lg:grid-cols-12">
-          <div className="relative z-[2] lg:col-span-5">
-            <div className="flex items-center gap-3 font-mono text-[11.5px] uppercase tracking-[0.16em] text-stone">
-              <span className="h-px w-[22px] bg-verm" />
-              {t("home.heroEyebrow")}
-            </div>
+        <div className="container-x grid min-h-0 items-center gap-12 py-20 lg:grid-cols-2">
+          <div className="relative z-[2]">
+            <div className="eyebrow">{t("home.heroEyebrow")}</div>
             <h1
               id="hero-h"
-              className="mt-5 text-[clamp(56px,6.4vw,98px)] font-semibold leading-[0.9] tracking-[-0.045em] text-balance"
+              className="font-heading mt-4 text-[clamp(44px,4.6vw,64px)] font-extrabold leading-[0.98] tracking-[-0.02em] text-balance"
             >
-              {t("home.heroTitle")}{" "}
-              <span className="font-serif font-normal italic tracking-[-0.01em]">
-                {t("home.heroTitleAccent")}
-              </span>
+              {t("home.heroTitle")} {t("home.heroTitleAccent")}
             </h1>
-            <p className="mt-6 max-w-[42ch] text-xl leading-[1.5] text-stone text-pretty">
+            <p className="mt-5 max-w-[42ch] text-lg leading-[1.5] text-stone text-pretty">
               {t("home.heroSubtitle")}
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-7 flex flex-wrap gap-3">
               <Link href="/shop?collection=new">
-                <Button variant="accent" size="xl">
+                <Button variant="accent" size="lg">
                   {t("home.shopNewArrivals")}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
               <Button
                 variant="outline"
-                size="xl"
+                size="lg"
                 onClick={() => dispatch(setFinderOpen(true))}
               >
                 {t("home.helpMeChoose")}
               </Button>
             </div>
-            <div className="mt-8 flex flex-wrap gap-x-[18px] gap-y-2 font-mono text-[11.5px] uppercase tracking-[0.08em] text-stone">
-              <span>{t("home.cashOnDelivery")}</span>
-              <span className="opacity-40">·</span>
-              <span>{t("home.easyExchanges")}</span>
-              <span className="opacity-40">·</span>
-              <span>{t("home.premiumFabrics")}</span>
-            </div>
           </div>
 
-          {/* Hero stage */}
-          <div className="relative lg:col-span-7">
-            <div className="absolute right-0 top-0 font-mono text-xs tracking-[0.14em] text-stone">
-              0{hero + 1} / 0{DEPARTMENT_ROTATION_SLUGS.length}
-            </div>
-            <div className="relative ml-auto aspect-5/4 w-full max-w-[760px]">
-              <div
-                aria-hidden="true"
-                className="absolute inset-x-[4%] bottom-[8%] top-[6%] overflow-hidden rounded-3xl bg-media"
-              >
-                {slide.image ? (
-                  // Deliberately plain `loading="lazy"` (the next/image
-                  // default), never "eager": this decorative desktop-only
-                  // backdrop sits inside a `hidden lg:block` section, and
-                  // per Next's own docs (the CSS-toggled light/dark-image
-                  // pattern), lazy + a hidden ancestor is what actually
-                  // stops the browser from fetching it at all on
-                  // mobile/tablet — "eager" would force the fetch
-                  // unconditionally regardless of which breakpoint is
-                  // active. See the crisp foreground image below for the
-                  // full reasoning; this backdrop carries no
-                  // fetchPriority since it's decorative, not this route's
-                  // LCP candidate.
-                  <Image
-                    src={resolveImage(slide.image, 700)}
-                    alt=""
-                    fill
-                    sizes="50vw"
-                    className="scale-125 object-cover opacity-90 blur-2xl"
-                  />
-                ) : (
-                  <div className="absolute inset-0 hatch" />
-                )}
-                <div className="absolute inset-0 glow" />
-                <div className="absolute inset-0 bg-elev/20" />
-              </div>
-
-              <motion.div
-                key={hero}
-                initial={{ opacity: 0, x: 34 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute inset-x-[12%] bottom-[14%] top-[16%]"
-              >
-                <div
-                  aria-hidden="true"
-                  className="absolute inset-x-[4%] -bottom-[2%] h-[22%] contact-shadow"
+          {/* Hero stage — a single, near-full-bleed rounded image per slide
+              (Leo's leo-hero-media: aspect 4:3, radius-xl) with a solid
+              white floating badge card in the bottom-left corner,
+              replacing the old blurred-backdrop-plus-inset-floating-card
+              treatment. The underlying department rotation is a real
+              feature (Leo's own hero is a single static banner) — only its
+              presentation changed. */}
+          <div className="relative">
+            <motion.div
+              key={hero}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+              className="relative aspect-4/3 w-full overflow-hidden rounded-3xl bg-media"
+            >
+              {slide.image ? (
+                <Image
+                  src={resolveImage(slide.image, 900)}
+                  alt={slide.name}
+                  fill
+                  sizes="50vw"
+                  fetchPriority="high"
+                  className="object-cover object-center"
                 />
-                <div className="absolute inset-0 overflow-hidden rounded-2xl border border-hair bg-wash">
-                  {slide.image ? (
-                    // This file renders THREE breakpoint variants of the
-                    // same hero photo (desktop here, plus MobileHero/
-                    // TabletHero below) inside CSS-media-query-toggled
-                    // sections (`hidden lg:block` / `md:hidden` / `hidden
-                    // md:block lg:hidden`) — never more than one is
-                    // actually visible at once, but a naive `loading=
-                    // "eager"` on all three would force the browser to
-                    // fetch all three regardless of which is visible.
-                    // Per Next's own docs (the CSS-toggled light/dark-
-                    // image guidance: "You cannot use ... loading='eager'
-                    // because that would cause both images to load.
-                    // Instead, you can use fetchPriority='high'"), the
-                    // fix is the default `loading="lazy"` on every
-                    // variant — a lazy image inside a `display:none`
-                    // ancestor is never fetched at all, while the one
-                    // variant whose section is actually visible is
-                    // "near-viewport" from the very first paint and loads
-                    // immediately regardless of the lazy attribute. All
-                    // three variants below independently carry
-                    // `fetchPriority="high"`, since each is the genuine
-                    // LCP candidate for ITS OWN breakpoint, and marking
-                    // all three high causes no real contention — only the
-                    // one that's actually visible ever fetches.
-                    <Image
-                      src={resolveImage(slide.image, 900)}
-                      alt={slide.name}
-                      fill
-                      sizes="50vw"
-                      fetchPriority="high"
-                      // object-cover (not object-contain): contain was
-                      // leaving visible gaps on the left/right of this
-                      // group photo where its aspect ratio didn't exactly
-                      // match the box, showing the bg-wash fill color
-                      // through them. cover + object-center fills the box
-                      // completely; the wrapper's own `overflow-hidden`
-                      // (unchanged, just above) crops anything that
-                      // extends past the rounded corners. scale-[1.02] is
-                      // a deliberately tiny zoom — just enough to eat the
-                      // final subpixel sliver some browsers leave at the
-                      // very edge with cover, without cropping any more of
-                      // the models than that.
-                      className="scale-[1.02] object-cover object-center"
-                    />
-                  ) : (
-                    <div className="grid h-full w-full place-items-center">
-                      <span className="px-6 text-center font-mono text-xs uppercase leading-[1.7] tracking-[0.1em] text-stone">
-                        {slide.name}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <div className="absolute left-[26%] top-[30%] hidden items-center gap-2.5 lg:flex">
-                  <span className="h-[11px] w-[11px] rounded-full bg-verm shadow-[0_0_0_5px_rgba(255,61,33,0.18)]" />
-                  <span className="whitespace-nowrap rounded-lg border border-line bg-elev px-2.5 py-[7px] text-[12.5px] font-medium">
-                    {slide.tagline}
+              ) : (
+                <>
+                  <div aria-hidden="true" className="absolute inset-0 hatch" />
+                  <span className="absolute inset-0 grid place-items-center px-6 text-center text-sm uppercase tracking-[0.1em] text-stone">
+                    {slide.name}
                   </span>
-                </div>
-              </motion.div>
-            </div>
+                </>
+              )}
+              <div className="absolute bottom-4 left-4 rounded-lg bg-surface px-4 py-3 shadow-md">
+                <div className="text-[15px] font-semibold">{slide.name}</div>
+                <div className="text-[13px] text-stone">{slide.tagline}</div>
+              </div>
+            </motion.div>
 
-            <div className="mt-2 flex flex-wrap items-end justify-between gap-6">
-              <div>
-                <div className="mt-1.5 text-[23px] font-semibold tracking-[-0.02em]">
-                  {slide.name}
-                </div>
-                <div className="mt-1.5 text-[14.5px] text-stone">
-                  {slide.tagline}
-                </div>
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <div role="group" aria-label={t("home.chooseDepartment")} className="flex gap-2">
+                {DEPARTMENT_ROTATION_SLUGS.map((slug, i) => (
+                  <button
+                    key={slug}
+                    onClick={() => setHero(i)}
+                    aria-label={t("home.showDepartment", { name: departments.find((d) => d.slug === slug)?.name || slug })}
+                    aria-pressed={i === hero}
+                    className={cn(
+                      "h-2 rounded-full transition-[width,background-color] focus-ring",
+                      i === hero ? "w-6 bg-verm" : "w-2 bg-line hover:bg-stone",
+                    )}
+                  />
+                ))}
               </div>
               <button
                 type="button"
@@ -269,36 +183,6 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
               >
                 {userPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
               </button>
-              <div role="group" aria-label={t("home.chooseDepartment")} className="flex gap-2">
-                {DEPARTMENT_ROTATION_SLUGS.map((slug, i) => (
-                  <button
-                    key={slug}
-                    onClick={() => setHero(i)}
-                    aria-label={t("home.showDepartment", { name: departments.find((d) => d.slug === slug)?.name || slug })}
-                    aria-pressed={i === hero}
-                    className={cn(
-                      "relative h-[66px] w-[66px] overflow-hidden rounded-[10px] border bg-media transition-colors focus-ring",
-                      i === hero ? "border-ink" : "border-line hover:border-ink",
-                    )}
-                  >
-                    {heroImageBySlug[slug] ? (
-                      <Image
-                        src={resolveImage(heroImageBySlug[slug], 132)}
-                        alt=""
-                        fill
-                        sizes="66px"
-                        loading="lazy"
-                        className="object-contain"
-                      />
-                    ) : (
-                      <span aria-hidden="true" className="absolute inset-0 hatch" />
-                    )}
-                    <span className="absolute left-1.5 top-1 font-mono text-[9.5px] text-stone">
-                      0{i + 1}
-                    </span>
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         </div>

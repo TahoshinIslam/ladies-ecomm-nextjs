@@ -6,6 +6,8 @@ import Image from "next/image";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { AnimatePresence, motion } from "framer-motion";
+import Wordmark from "../brand/Wordmark.jsx";
+import HeaderSearchField from "./HeaderSearchField.jsx";
 import {
   Bell,
   Check,
@@ -18,7 +20,6 @@ import {
   Moon,
   Package,
   Scale,
-  Search,
   ShoppingCart,
   Sun,
   User as UserIcon,
@@ -260,33 +261,23 @@ export default function Header({ initialDepartments = [] }) {
     router.push("/");
   };
 
+  // A single joined line in Leo's solid-accent-bar announcement pattern
+  // (one centered strip, not a left-aligned multi-item marquee) — folds in
+  // the same real, admin-configurable content the old rail showed.
+  const announcementLine = theme?.features?.announcementBar
+    || [...ANNOUNCEMENTS.map((a) => a.text), t("header.shipsWithinBangladesh")].join(" · ");
+
   return (
     <>
-      {/* Announcement rail — desktop/tablet only. On a narrow phone screen
-          three items plus "Ships within..." force a horizontal scroll just
-          to read the strip; dropped entirely below md rather than trying to
-          make a horizontally-scrolling marquee work on a small screen. */}
+      {/* Announcement — Leo's solid-accent, single centered line. Desktop/
+          tablet only: on a narrow phone this much copy would wrap or force
+          a horizontal scroll just to read it. */}
       <div
         role="region"
-        aria-label={t("header.shipsWithinBangladesh")}
-        className="sticky top-0 z-[120] hidden overflow-x-auto border-b border-line bg-surface no-scrollbar md:block"
+        aria-label={announcementLine}
+        className="sticky top-0 z-[120] hidden bg-verm px-5 py-[7px] text-center text-[13px] tracking-[0.01em] text-white md:block"
       >
-        <div className="mx-auto flex max-w-[1480px] items-center gap-[22px] whitespace-nowrap px-5 py-[9px] font-mono text-[11.5px] uppercase tracking-[0.09em] text-stone sm:px-8 lg:px-14">
-          {theme?.features?.announcementBar ? (
-            <span className="text-verm">{theme.features.announcementBar}</span>
-          ) : (
-            ANNOUNCEMENTS.map((a, i) => (
-              <span key={a.text} className="flex items-center gap-[22px]">
-                <span className={a.accent ? "text-verm" : undefined}>{a.text}</span>
-                {i < ANNOUNCEMENTS.length - 1 && (
-                  <span className="opacity-40">·</span>
-                )}
-              </span>
-            ))
-          )}
-          <div className="flex-1" />
-          <span className="hidden md:inline">{t("header.shipsWithinBangladesh")}</span>
-        </div>
+        {announcementLine}
       </div>
 
       <header
@@ -305,11 +296,8 @@ export default function Header({ initialDepartments = [] }) {
             in MobileNav's bottom tabs instead, matching the board's phone
             shell exactly. Tablet and up keep the bar below, unchanged. */}
         <div className="flex h-[58px] items-center gap-3 px-5 md:hidden">
-          <Link
-            href="/"
-            className="flex-none text-[20px] font-semibold tracking-[-0.045em] text-ink focus-ring"
-          >
-            {shopName}
+          <Link href="/" className="flex-none focus-ring" aria-label={shopName}>
+            <Wordmark name={shopName} className="text-[20px]" />
           </Link>
           <div className="flex-1" />
           <button
@@ -346,78 +334,14 @@ export default function Header({ initialDepartments = [] }) {
             <Menu className="h-5 w-5" />
           </button>
 
-          <Link
-            href="/"
-            className="flex-none text-[23px] font-semibold tracking-[-0.045em] text-ink focus-ring"
-          >
-            {shopName}
+          <Link href="/" className="flex-none focus-ring" aria-label={shopName}>
+            <Wordmark name={shopName} className="text-[23px]" />
           </Link>
 
-          {/* Primary nav */}
-          <nav
-            aria-label="Primary"
-            className="hidden items-center gap-[14px] text-[14.5px] font-medium lg:flex xl:gap-[26px]"
-          >
-            <HeaderNavLink
-              href="/shop?collection=new"
-              pathname={pathname}
-              searchParams={searchParams}
-              className="gap-1.5"
-            >
-              {t("navigation.new")}
-              <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-lime" />
-            </HeaderNavLink>
-
-            <MegaTrigger
-              label={t("navigation.shop")}
-              open={menu === "shop"}
-              onOpen={() => openMenu("shop")}
-              onToggle={() => setMenu(menu === "shop" ? null : "shop")}
-            />
-
-            {departments.slice(0, 3).map((d) => (
-              <HeaderNavLink
-                key={d._id}
-                href={`/shop?category=${d._id}`}
-                pathname={pathname}
-                searchParams={searchParams}
-              >
-                {departmentName(locale, d.slug, d.name)}
-              </HeaderNavLink>
-            ))}
-
-            <MegaTrigger
-              label={t("navigation.occasions")}
-              open={menu === "occasions"}
-              onOpen={() => openMenu("occasions")}
-              onToggle={() => setMenu(menu === "occasions" ? null : "occasions")}
-            />
-
-            <HeaderNavLink
-              href="/journal"
-              pathname={pathname}
-              searchParams={searchParams}
-              className="hidden xl:flex"
-            >
-              {t("navigation.journal")}
-            </HeaderNavLink>
-          </nav>
-
-          <div className="flex-1" />
-
-          {/* Search */}
-          <button
-            onClick={() => dispatch(toggleSearch())}
-            aria-label={t("header.searchPlaceholder")}
-            title={t("header.searchShortcut")}
-            className="flex h-11 items-center justify-center gap-2.5 rounded-lg border border-line px-3 text-stone transition-colors hover:border-ink hover:text-ink focus-ring md:w-[210px] md:justify-start"
-          >
-            <Search className="h-[18px] w-[18px] flex-none" />
-            <span className="hidden text-[14px] md:inline">{t("navigation.search")}</span>
-            <span className="ml-auto hidden font-mono text-[11px] text-stone lg:inline">
-              ⌘K
-            </span>
-          </button>
+          {/* Prominent, genuinely typeable inline search — Leo's actual
+              interaction, not a button styled to look like one. Real data,
+              real keyboard nav (see HeaderSearchField.jsx). */}
+          <HeaderSearchField />
 
           <div className="flex items-center gap-0.5">
             <LanguageSwitcher />
@@ -533,6 +457,60 @@ export default function Header({ initialDepartments = [] }) {
             </button>
           </div>
         </div>
+
+        {/* Category nav — Leo puts category navigation in its own row below
+            the logo/search/cart row, not folded into it. */}
+        <nav
+          aria-label="Categories"
+          className="hidden border-t border-line lg:block"
+        >
+          <div className="mx-auto flex max-w-[1480px] items-center gap-[22px] px-5 text-[14.5px] font-medium sm:px-8 lg:h-11 lg:px-14 xl:gap-[30px]">
+            <HeaderNavLink
+              href="/shop?collection=new"
+              pathname={pathname}
+              searchParams={searchParams}
+              className="gap-1.5"
+            >
+              {t("navigation.new")}
+              <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-lime" />
+            </HeaderNavLink>
+
+            <MegaTrigger
+              label={t("navigation.shop")}
+              open={menu === "shop"}
+              onOpen={() => openMenu("shop")}
+              onToggle={() => setMenu(menu === "shop" ? null : "shop")}
+            />
+
+            {departments.map((d) => (
+              <HeaderNavLink
+                key={d._id}
+                href={`/shop?category=${d._id}`}
+                pathname={pathname}
+                searchParams={searchParams}
+                className="hidden xl:flex"
+              >
+                {departmentName(locale, d.slug, d.name)}
+              </HeaderNavLink>
+            ))}
+
+            <MegaTrigger
+              label={t("navigation.occasions")}
+              open={menu === "occasions"}
+              onOpen={() => openMenu("occasions")}
+              onToggle={() => setMenu(menu === "occasions" ? null : "occasions")}
+            />
+
+            <HeaderNavLink
+              href="/journal"
+              pathname={pathname}
+              searchParams={searchParams}
+              className="hidden xl:flex"
+            >
+              {t("navigation.journal")}
+            </HeaderNavLink>
+          </div>
+        </nav>
 
         {/* Mega menus */}
         <AnimatePresence>
@@ -673,9 +651,7 @@ export default function Header({ initialDepartments = [] }) {
               className="flex h-full w-[min(340px,86%)] flex-col overflow-y-auto bg-surface"
             >
               <div className="flex items-center justify-between border-b border-line px-5 py-4">
-                <span className="text-[21px] font-semibold tracking-[-0.045em]">
-                  {shopName}
-                </span>
+                <Wordmark name={shopName} className="text-[21px]" />
                 <button
                   onClick={() => dispatch(setMobileMenuOpen(false))}
                   aria-label={t("header.closeMenu")}

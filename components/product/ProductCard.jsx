@@ -276,128 +276,112 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               <Scale className="h-[17px] w-[17px]" strokeWidth={1.7} />
             </button>
           </div>
-
-          {/* Quick add / restock notice */}
-          {isUnavailable ? (
-            <div className="absolute inset-x-2.5 bottom-2.5">
-              <button
-                onClick={handleNotify}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-elev text-sm font-semibold text-ink transition-colors hover:border-ink focus-ring active:scale-[0.985]"
-              >
-                <BellRing className="h-4 w-4" strokeWidth={1.8} />
-                {t("product.notifyIfReturns")}
-              </button>
-            </div>
-          ) : (
-            // CSS-driven visibility (group-hover/group-focus-within),
-            // never tabIndex-gated: the button previously only entered
-            // the tab order while `hovered` (a mouse-only state) was
-            // true, making it permanently unreachable by keyboard. It
-            // stays a real, always-focusable button; only its visibility
-            // reacts to hover/focus-within the card.
-            <div
-              className={cn(
-                "absolute inset-x-2.5 bottom-2.5 opacity-0 transition-[opacity,transform] duration-200 translate-y-2",
-                "group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100",
-              )}
-            >
-              <button
-                onClick={handleQuickAdd}
-                className="h-11 w-full rounded-lg bg-ink text-sm font-semibold text-canvas transition-colors hover:bg-verm-contrast hover:text-white focus-ring active:scale-[0.985]"
-              >
-                {t("product.quickAdd")}
-              </button>
-            </div>
-          )}
         </div>
 
-        <Link href={href} className="mt-3.5 flex items-start justify-between gap-3.5 focus-ring rounded-md">
-          <div className="min-w-0">
-            {categoryName && (
-              <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-stone">
-                {categoryName}
-              </div>
-            )}
-            {/* The grid stays 2-column all the way to `md` (see the grid
-                classes on the card container), so each card is only
-                ~150-170px wide on a phone — at the original 17.5px/
-                font-semibold size, an ordinary 2-3 word name ("Relaxed
-                Straight Jeans") didn't fit two words per line and wrapped
-                one word per line instead, reading as a broken vertical
-                stack. Smaller on narrow screens, back to the original size
-                once the grid gives cards more room. */}
-            <h3 className="mt-1.5 text-[14px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink md:text-[17.5px] md:leading-[1.25] md:tracking-[-0.015em]">
-              {product.name}
-            </h3>
-            {
-              // Always a rating row, never conditional on rating > 0 — a
-              // card that simply omitted it when unrated looked broken
-              // sitting next to cards that had one (most of this catalog's
-              // real seed data has zero reviews yet). Accessible either
-              // way: the numeric rating and review count (or "no reviews
-              // yet") are real text, not conveyed by star icon/color alone;
-              // the star itself is decorative (aria-hidden).
-              <p className="mt-1 flex items-center gap-1 text-[12.5px] text-stone">
-                <Star
-                  aria-hidden="true"
-                  className={cn("h-3 w-3", product.rating > 0 ? "fill-current text-verm" : "text-stone/50")}
-                />
-                {product.rating > 0
-                  ? t("product.ratingWithCount", {
-                      rating: product.rating.toFixed(1),
-                      count: product.numReviews ?? 0,
-                    })
-                  : t("product.noReviewsYet")}
-              </p>
-            }
-            <div className="mt-1.5 text-[13.5px] text-stone">
-              {[fabric, colorCount > 1 && t("product.colorsCount", { count: colorCount }), product.brand?.name]
-                .filter(Boolean)
-                .join(" · ")}
+        {/* Leo's card body is one left-aligned column — brand/category,
+            name, star-row rating, then price with its compare-at price
+            inline on the SAME line (not split into a right-floated price
+            block) — matching components/commerce/ProductCard.jsx's
+            leo-card__body/leo-card__foot structure. */}
+        <Link href={href} className="mt-3.5 block min-w-0 focus-ring rounded-md">
+          {(categoryName || product.brand?.name) && (
+            <div className="text-[11px] uppercase tracking-[0.08em] text-stone">
+              {product.brand?.name || categoryName}
             </div>
-            {(colorValues.length > 0 || sizeValues.length > 0) && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                {colorValues.length > 0 && (
-                  <span className="flex items-center gap-1">
-                    {colorValues.slice(0, VISIBLE_SWATCHES).map((v) => (
-                      <span
-                        key={v}
-                        aria-hidden="true"
-                        title={v}
-                        className="h-3.5 w-3.5 flex-none rounded-full border border-line"
-                        style={{ backgroundColor: hexForColor(v) || "#d4d4d4" }}
-                      />
-                    ))}
-                    {colorValues.length > VISIBLE_SWATCHES && (
-                      <span className="font-mono text-[10px] text-stone">
-                        +{colorValues.length - VISIBLE_SWATCHES}
-                      </span>
+          )}
+          <h3 className="mt-1 text-[14px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink md:text-[15.5px] md:leading-[1.25]">
+            {product.name}
+          </h3>
+          {
+            // Always a rating row, never conditional on rating > 0 — a card
+            // that simply omitted it when unrated looked broken sitting
+            // next to cards that had one. Five stars (filled up to the
+            // rounded rating, matching Leo's star-row), plus the real
+            // count as text — never color/fill alone.
+            <div className="mt-1 flex items-center gap-1">
+              <span className="flex items-center gap-0.5" aria-hidden="true">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Star
+                    key={i}
+                    className={cn(
+                      "h-3 w-3",
+                      i < Math.round(product.rating || 0) ? "fill-current text-star" : "text-line",
                     )}
-                  </span>
-                )}
-                {sizeValues.length > 0 && (
-                  <span className="font-mono text-[10.5px] uppercase tracking-[0.04em] text-stone">
-                    {sizeLabel}: {sizeValues.slice(0, VISIBLE_SIZES).map((v) => attrValue(locale, "size", v)).join(" · ")}
-                    {sizeValues.length > VISIBLE_SIZES ? "…" : ""}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-none flex-col items-end">
-            <span data-tabular className="text-[16.5px] font-semibold text-ink">
+                  />
+                ))}
+              </span>
+              <span className="text-[12px] text-stone">
+                {product.rating > 0 ? `(${product.numReviews ?? 0})` : t("product.noReviewsYet")}
+              </span>
+            </div>
+          }
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span data-tabular className="text-[15.5px] font-semibold text-ink">
               {settings.formatPrice(price)}
             </span>
             {discounted && (
-              <span
-                data-tabular
-                className="text-[13px] text-stone line-through"
-              >
+              <span data-tabular className="text-[13px] text-stone line-through">
                 {settings.formatPrice(product.basePrice)}
               </span>
             )}
           </div>
+          {(fabric || colorCount > 1) && (
+            <div className="mt-1 text-[12.5px] text-stone">
+              {[fabric, colorCount > 1 && t("product.colorsCount", { count: colorCount })]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          )}
+          {(colorValues.length > 0 || sizeValues.length > 0) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              {colorValues.length > 0 && (
+                <span className="flex items-center gap-1">
+                  {colorValues.slice(0, VISIBLE_SWATCHES).map((v) => (
+                    <span
+                      key={v}
+                      aria-hidden="true"
+                      title={v}
+                      className="h-3.5 w-3.5 flex-none rounded-full border border-line"
+                      style={{ backgroundColor: hexForColor(v) || "#d4d4d4" }}
+                    />
+                  ))}
+                  {colorValues.length > VISIBLE_SWATCHES && (
+                    <span className="text-[10px] text-stone">
+                      +{colorValues.length - VISIBLE_SWATCHES}
+                    </span>
+                  )}
+                </span>
+              )}
+              {sizeValues.length > 0 && (
+                <span className="text-[10.5px] uppercase tracking-[0.04em] text-stone">
+                  {sizeLabel}: {sizeValues.slice(0, VISIBLE_SIZES).map((v) => attrValue(locale, "size", v)).join(" · ")}
+                  {sizeValues.length > VISIBLE_SIZES ? "…" : ""}
+                </span>
+              )}
+            </div>
+          )}
         </Link>
+
+        {/* Persistent footer action — Leo's card always shows its one CTA
+            (Add to cart / Choose options / Sold out), not a hover-only
+            reveal over the image. Real handlers, unchanged: the same
+            QuickAddSheet / notify-me flow the old hover button used. */}
+        {isUnavailable ? (
+          <button
+            onClick={handleNotify}
+            className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface text-[13.5px] font-semibold text-ink transition-colors hover:border-ink focus-ring active:scale-[0.985]"
+          >
+            <BellRing className="h-4 w-4" strokeWidth={1.8} />
+            {t("product.notifyIfReturns")}
+          </button>
+        ) : (
+          <button
+            onClick={handleQuickAdd}
+            className="mt-3 h-10 w-full rounded-lg border border-line bg-surface text-[13.5px] font-semibold text-ink transition-colors hover:border-ink hover:bg-wash focus-ring active:scale-[0.985]"
+          >
+            {product.variants?.length > 1 ? t("quickAddSheet.chooseOptions") : t("product.quickAdd")}
+          </button>
+        )}
     </motion.article>
   );
 }
