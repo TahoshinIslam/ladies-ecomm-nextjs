@@ -35,6 +35,16 @@ const categorySchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // A lucide-react icon name (e.g. "utensils-crossed"), used only for a
+    // top-level department's row in the mega-menu category flyout
+    // (components/layout/CategoryMegaMenu.jsx maps this string to the
+    // actual icon component — never rendered as raw HTML). Empty for every
+    // non-top-level category; the flyout falls back to a generic icon when
+    // a department has none set.
+    icon: {
+      type: String,
+      default: "",
+    },
     description: {
       type: String,
       default: "",

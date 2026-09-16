@@ -252,7 +252,17 @@ productSchema.pre("validate", async function () {
     this.slug = `${base}-${this._id.toString().slice(-6)}`;
   }
 
-  // Walk category.parent to denormalize the top-level ancestor.
+  // Walk category.parent ONE level to denormalize the immediate parent —
+  // deliberately not a full walk-to-root. services/productService.js's
+  // expandCategoryScope() is the other half of this design: browsing a
+  // whole division (e.g. "Food", 3 levels deep) expands `?category=` into
+  // that division's own direct children (its real departments/mid-tier
+  // categories) precisely because THOSE ids, not the division's own id,
+  // are what a 3rd-level product's topCategory denormalizes to here. A
+  // full walk-to-root would collapse every product under a division to
+  // the SAME topCategory value, breaking that expansion's premise (see
+  // tests/listGroupingsAggregation.test.mjs's mid-tier case, which pins
+  // this exact one-level behavior).
   if (this.isModified("category") || !this.topCategory) {
     const category = await Category.findById(this.category).lean();
     this.topCategory = category?.parent ?? category?._id ?? this.category;

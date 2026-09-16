@@ -306,7 +306,13 @@ const categoryBrandEndpoints = (b) => ({
     query: (id) => ({ url: `/categories/${id}`, method: "DELETE" }),
     invalidatesTags: ["Category"],
   }),
-  getBrands: b.query({ query: () => "/brands", providesTags: ["Brand"] }),
+  // `{ category: topCategoryId }` scopes the returned brands to that
+  // category's real products (see services/productService.js's
+  // listBrandsForCategory()) — used by the storefront's Brand filter
+  // facet so it never shows an unrelated department's brands. Called with
+  // no args, this keeps its original unscoped shape (every active brand),
+  // which the admin product form's brand dropdown still relies on.
+  getBrands: b.query({ query: (params = {}) => `/brands?${buildQueryString(params)}`, providesTags: ["Brand"] }),
   createBrand: b.mutation({
     query: (body) => ({ url: "/brands", method: "POST", body }),
     invalidatesTags: ["Brand"],

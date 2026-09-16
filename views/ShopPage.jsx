@@ -1,8 +1,10 @@
 import { headers } from "next/headers";
 
 import ShopPageClient from "./shop/ShopPageClient.jsx";
+import CategoryLanding from "./shop/CategoryLanding.jsx";
 import connectDB from "../config/db.js";
-import { listProducts, parseProductListQuery } from "../services/productService.js";
+import { listProducts, parseProductListQuery, FASHION_DEPARTMENT_SLUGS } from "../services/productService.js";
+import { isLeafCategory } from "../services/categoryService.js";
 import { assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../lib/validation.js";
 import { parseQueryParams, HttpError } from "../lib/http.js";
 import { serializeForClient } from "../lib/serialize.js";
@@ -11,6 +13,7 @@ import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import { getServerLocale, getT } from "../lib/i18n/server.js";
 import { localizeCategory } from "../lib/i18n/localize.js";
 import { absoluteUrl, safeJsonLd } from "../lib/seo.js";
+import { isObjectIdFormat } from "../lib/validation.js";
 import EmptyState from "../components/ui/EmptyState.jsx";
 import { AlertCircle } from "lucide-react";
 
@@ -42,17 +45,55 @@ export default async function ShopPage({ searchParams }) {
   const rawSearchParams = await searchParams;
   const usp = toURLSearchParams(rawSearchParams);
 
+  // Realtime-durability-class fix: the cached branch below now
+  // guarantees its own DB readiness (lib/serverDataCache.js's withDb()),
+  // but the uncached listProducts() fallback (an ineligible-for-cache
+  // query — free-text search, dynamic facets) does not go through that
+  // wrapper — establish readiness explicitly here rather than relying on
+  // some earlier, unrelated request having already connected on this warm
+  // instance. Also needed up front for the category-landing branch below,
+  // which reads Category directly.
+  await connectDB();
+
+  // A category that itself has children (e.g. "Cosmetics", or "Food") is a
+  // browsing waypoint, not a leaf shoppers file real products under —
+  // showing the full filter+grid UI for it would be either empty or a
+  // meaningless mix of its sub-categories' attributes (Cosmetics has no
+  // brand/price range of its own; "Face Wash" does). Land on a real tile
+  // grid of its direct children instead — the same drill-down a shopper
+  // gets clicking through the category mega-menu — and only render the
+  // product grid once `?category=` actually names a genuine leaf. A
+  // `style=` param (the mega-menu's own leaf-level link) always means the
+  // shopper has already drilled down that far, so it skips this branch
+  // even if `category` alone would otherwise be non-leaf.
+  //
+  // The original 9 fashion departments (FASHION_DEPARTMENT_SLUGS) are
+  // EXEMPT from this even though each is technically non-leaf too (Burqa
+  // has real style children like "Closed-style Burqa") — unlike a
+  // marketplace division's departments, every one of a fashion
+  // department's styles is still the same real, filterable product type
+  // (all are burqas), so the established grid-with-a-Style-filter
+  // experience is correct there; forcing an extra tile-click first would
+  // only have made real, working navigation (color/size/fabric filters,
+  // real product counts) worse.
+  const categoryParam = typeof rawSearchParams?.category === "string" ? rawSearchParams.category : null;
+  const hasStyleParam = typeof rawSearchParams?.style === "string" && rawSearchParams.style !== "";
+  if (categoryParam && isObjectIdFormat(categoryParam) && !hasStyleParam) {
+    const categories = await getCachedCategories();
+    const requestedCategory = categories.find((c) => String(c._id) === categoryParam);
+    const isFashionDept =
+      requestedCategory && !requestedCategory.parent && FASHION_DEPARTMENT_SLUGS.includes(requestedCategory.slug);
+    if (!isFashionDept) {
+      const isLeaf = await isLeafCategory(categoryParam);
+      if (!isLeaf) {
+        return <CategoryLanding categoryId={categoryParam} />;
+      }
+    }
+  }
+
   let result;
   let invalid = false;
   try {
-    // Realtime-durability-class fix: the cached branch below now
-    // guarantees its own DB readiness (lib/serverDataCache.js's
-    // withDb()), but the uncached listProducts() fallback (an
-    // ineligible-for-cache query — free-text search, dynamic facets)
-    // does not go through that wrapper — establish readiness explicitly
-    // here rather than relying on some earlier, unrelated request having
-    // already connected on this warm instance.
-    await connectDB();
     assertNoDuplicateQueryKeys(usp);
     assertNoDangerousQueryKeys(usp);
     const rawQuery = parseQueryParams(usp);

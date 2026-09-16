@@ -3,14 +3,11 @@ import mongoose from "mongoose";
 import Product from "../models/productModel.js";
 import Category from "../models/categoryModel.js";
 import AttributeDefinition from "../models/attributeDefinitionModel.js";
-// Not referenced directly — imported so mongoose.model("brands", ...) is
-// registered before .populate("brand") runs (Mongoose needs the schema
-// registered somewhere in the process, and nothing else in this route's
-// module graph otherwise loads it).
-import "../models/brandModel.js";
+import Brand from "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
 import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
+import { FASHION_DEPARTMENT_SLUGS, STOREFRONT_DEPARTMENT_SLUGS } from "../lib/storefrontDepartments.js";
 import { isLeafCategory } from "./categoryService.js";
 import { resolveAttributesForCategory } from "./attributeService.js";
 import {
@@ -78,28 +75,33 @@ export function getNewArrivalCutoff(now = Date.now()) {
   return new Date(now - NEW_ARRIVAL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 }
 
-// The storefront (non-admin reads) is scoped to these departments and their
-// subcategories. Admin reads are never scoped (an admin manages the whole
-// catalog, including any pre-existing product outside this scope). This is
-// a clothing-only shop — every department here is a real, top-level
-// (parent: null) Category; narrow this list again to soft-launch a subset.
-export const STOREFRONT_DEPARTMENT_SLUGS = [
-  "burqa",
-  "hijab",
-  "niqab",
-  "abaya",
-  "khimar",
-  "modest-sets",
-  "t-shirt",
-  "shirts",
-  "jeans",
-];
+// Re-exported for existing importers (views/ShopPage.jsx, tests) — the
+// actual lists now live in lib/storefrontDepartments.js, a plain
+// framework-agnostic module both this server-side file AND the client
+// component views/shop/ShopPageClient.jsx import from, so there is exactly
+// ONE place that names the real seeded taxonomy. Two independently
+// hand-maintained copies (one here, one duplicated in ShopPageClient.jsx)
+// is exactly what silently broke the client's Category filter after the
+// marketplace-expansion divisions were added: only this server copy got
+// updated, leaving every marketplace category page (Cosmetics, Jewelry,
+// Food, ...) still showing just the original 9 fashion departments in its
+// sidebar and pill row.
+export { FASHION_DEPARTMENT_SLUGS, STOREFRONT_DEPARTMENT_SLUGS };
 
-// Every product's `topCategory` is already denormalized to its department
-// id (see productModel.js's pre-validate hook; resolveLeafCategory below
-// guarantees a product can only ever be assigned a *subcategory*, never a
-// bare department) — so these department ids alone are a complete, correct
-// scope filter with no need to also resolve their child categories.
+// Every product's `topCategory` is denormalized to its category's
+// IMMEDIATE parent (productModel.js's pre-validate hook — deliberately one
+// level, not a walk-to-root; see that hook's own comment). For every
+// department in STOREFRONT_DEPARTMENT_SLUGS that is genuinely 2 levels
+// deep (division -> leaf, the original clothing catalog's shape), that
+// immediate parent IS the division's own id, so the division ids alone
+// used to be a complete scope filter. But a division with real 3-level
+// depth (division -> department -> style, e.g. Food -> Meat & Fish ->
+// Fish) denormalizes its leaf products' topCategory to the MID-TIER
+// department id (Meat & Fish), never the division's own id — so scoping
+// by division ids alone silently excludes every product filed under such
+// a division (this is exactly what expandCategoryScope()'s "isDivision"
+// expansion produces when browsing the division: the mid-tier ids, not
+// the division id). This function's scope must include both tiers.
 //
 // A plain, uncached query here re-runs on every single non-admin
 // listProducts() call. The home page's showcase section fires several
@@ -112,6 +114,25 @@ export const STOREFRONT_DEPARTMENT_SLUGS = [
 // redundant load without weakening correctness — a department renamed
 // mid-window is visible again within TTL_MS, the same tradeoff every
 // other cached read in this app already makes.
+// Factored out of getStorefrontDepartmentIds() so the "division ids + their
+// direct children" logic can be exercised directly against disposable test
+// fixtures — getStorefrontDepartmentIds() itself is hardwired to the real
+// STOREFRONT_DEPARTMENT_SLUGS allowlist and its own cache, neither of which
+// a hermetic test should depend on or mutate.
+export async function resolveScopeIdsForSlugs(slugs) {
+  const departments = await Category.find({ slug: { $in: slugs } }).select("_id").lean();
+  const divisionIds = departments.map((d) => d._id);
+  // Include each division's direct children too — the mid-tier id a
+  // 3-level division's leaf products actually denormalize to (see
+  // getStorefrontDepartmentIds()'s own comment). A no-op extra query for a
+  // division that's only 2 levels deep (its "children" here are real
+  // leaves, harmless to include — they're simply never a product's
+  // topCategory in that shape, so adding them to the allowlist matches
+  // nothing new).
+  const children = await Category.find({ parent: { $in: divisionIds } }).select("_id").lean();
+  return [...divisionIds, ...children.map((c) => c._id)].map((id) => id.toString());
+}
+
 const STOREFRONT_DEPT_IDS_TTL_MS = 60_000;
 let storefrontDeptIdsCache = { ids: null, expiresAt: 0, inFlight: null };
 
@@ -123,11 +144,8 @@ export async function getStorefrontDepartmentIds() {
   if (storefrontDeptIdsCache.inFlight) {
     return storefrontDeptIdsCache.inFlight;
   }
-  storefrontDeptIdsCache.inFlight = Category.find({ slug: { $in: STOREFRONT_DEPARTMENT_SLUGS } })
-    .select("_id")
-    .lean()
-    .then((departments) => {
-      const ids = departments.map((d) => d._id.toString());
+  storefrontDeptIdsCache.inFlight = resolveScopeIdsForSlugs(STOREFRONT_DEPARTMENT_SLUGS)
+    .then((ids) => {
       storefrontDeptIdsCache = { ids, expiresAt: Date.now() + STOREFRONT_DEPT_IDS_TTL_MS, inFlight: null };
       return ids;
     })
@@ -672,7 +690,7 @@ export async function parseProductListQuery(query) {
 // result, half the latency on every single product-list request that
 // names a category, which matters since this runs unconditionally in
 // listProducts()'s pipeline below.
-async function expandCategoryScope(categoryId) {
+export async function expandCategoryScope(categoryId) {
   const [result] = await Category.aggregate([
     { $match: { parent: new mongoose.Types.ObjectId(categoryId) } },
     { $lookup: { from: Category.collection.name, localField: "_id", foreignField: "parent", as: "grandchildren" } },
@@ -941,6 +959,30 @@ export async function listGroupings(categoryId) {
       };
     })
     .filter((g) => g.count > 0);
+}
+
+// The Brand filter facet, scoped to whichever category is currently being
+// browsed — real brands with at least one real, active product in scope,
+// never the entire catalog's brand list. Before this, GET /api/brands
+// returned every brand unconditionally regardless of `?category=`, so
+// browsing e.g. Jewelry/Earrings showed the same 5 Cosmetics brands
+// (CeraVe, COSRX, ...) in the sidebar even though none of them have a
+// single earring. `categoryId` uses the exact same expansion
+// expandCategoryScope() already applies to the product grid's own
+// `?category=` filter (a division like "Cosmetics" expands to its real
+// department children; a plain department id is used as-is), so the
+// brands shown always match what the grid itself would actually return.
+export async function listBrandsForCategory(categoryId) {
+  if (!categoryId) return Brand.find({ isActive: true }).sort("name").lean();
+  requireObjectIdFormat(categoryId, "category");
+  const scopeIds = (await expandCategoryScope(categoryId)).map((id) => new mongoose.Types.ObjectId(id));
+  const brandIds = await Product.distinct("brand", {
+    isActive: true,
+    topCategory: { $in: scopeIds },
+    brand: { $ne: null },
+  });
+  if (!brandIds.length) return [];
+  return Brand.find({ _id: { $in: brandIds }, isActive: true }).sort("name").lean();
 }
 
 // Related = same leaf category ranks above same-department-only, and within

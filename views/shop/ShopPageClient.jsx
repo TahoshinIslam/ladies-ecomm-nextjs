@@ -30,24 +30,20 @@ import { cn, responsiveBatchSize, visibleBufferCount } from "../../lib/utils.js"
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
+import { STOREFRONT_DEPARTMENT_SLUGS as STOREFRONT_DEPARTMENT_SLUGS_LIST } from "../../lib/storefrontDepartments.js";
 
 // The top-nav departments the storefront shows — root categories only
-// (`!c.parent`, see `departments` below), matching
-// services/productService.js's own STOREFRONT_DEPARTMENT_SLUGS exactly.
+// (`!c.parent`, see `departments` below). Imported from the same plain,
+// framework-agnostic module services/productService.js's server-side
+// scoping uses (lib/storefrontDepartments.js) — this used to be an
+// independently hand-maintained copy here that silently fell out of sync
+// when the 11 marketplace divisions were added server-side, leaving every
+// marketplace category page (Cosmetics, Jewelry, Food, ...) showing only
+// the original 9 fashion departments in its Category filter and pill row.
 // A real allowlist, not just "any root category": a stray root category
 // (e.g. leftover test/fixture data) must never silently appear in the
 // storefront nav.
-const STOREFRONT_DEPARTMENT_SLUGS = new Set([
-  "burqa",
-  "hijab",
-  "niqab",
-  "abaya",
-  "khimar",
-  "modest-sets",
-  "t-shirt",
-  "shirts",
-  "jeans",
-]);
+const STOREFRONT_DEPARTMENT_SLUGS = new Set(STOREFRONT_DEPARTMENT_SLUGS_LIST);
 
 // `value` is the stable filter/query value (see section 7 of the
 // localization audit — never translated); `labelKey` is resolved via t()
@@ -179,7 +175,6 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   const [revealedExtra, setRevealedExtra] = useState(0);
   const visibleBuffered = visibleBufferCount(breakpoint, revealedExtra, Math.min(products.length, PAGE_SIZE));
 
-  const { data: brandsData } = useGetBrandsQuery();
   const { data: catsData, isLoading: catsLoading } = useGetCategoriesQuery();
   // Unfiltered sample of catalog used only to draw the price histogram so the
   // bars represent the whole catalog, not the currently-filtered subset.
@@ -190,6 +185,12 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
     [catsData],
   );
   const selectedDept = sp.get("category") || "";
+  // Scoped to the department being browsed (see services/productService.js's
+  // listBrandsForCategory()) so this never shows an unrelated department's
+  // brands (e.g. Cosmetics' CeraVe/COSRX while browsing Jewelry). With no
+  // department selected (browsing "All"), stays unscoped — every real
+  // brand across the whole catalog is genuinely in scope there.
+  const { data: brandsData } = useGetBrandsQuery(selectedDept ? { category: selectedDept } : undefined);
 
   const { data: groupingsData, isLoading: groupingsLoading } = useGetProductGroupingsQuery(
     selectedDept ? { category: selectedDept } : undefined,
