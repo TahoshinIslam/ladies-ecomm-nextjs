@@ -48,10 +48,11 @@ export default async function OrdersPage() {
   const orders = serializeForClient(rawOrders);
 
   return (
-    <div className="container-x py-10">
+    <div>
       <Breadcrumb
         items={[
           { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("navigation.account"), href: "/dashboard" },
           { label: t("navigation.orders"), icon: Package },
         ]}
       />

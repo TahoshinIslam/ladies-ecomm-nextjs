@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, User as UserIcon, MapPin, Lock, Star } from "lucide-react";
+import { LayoutDashboard, User as UserIcon, MapPin, Lock, Package, Star } from "lucide-react";
 
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { cn } from "../../lib/utils.js";
@@ -10,6 +10,7 @@ import { cn } from "../../lib/utils.js";
 const ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, labelKey: "navigation.dashboard" },
   { href: "/profile", icon: UserIcon, labelKey: "account.navProfile" },
+  { href: "/orders", icon: Package, labelKey: "navigation.orders" },
   { href: "/profile/addresses", icon: MapPin, labelKey: "account.navAddresses" },
   { href: "/profile/password", icon: Lock, labelKey: "account.navPassword" },
   { href: "/reviews", icon: Star, labelKey: "account.navReviews" },

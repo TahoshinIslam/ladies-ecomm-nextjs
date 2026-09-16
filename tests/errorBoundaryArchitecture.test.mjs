@@ -101,20 +101,22 @@ describe("Phase 10 — no test-only error-triggering backdoor was added", () => 
 });
 
 describe("Phase 10 — loading boundaries never sit above a known auth/authorization or notFound() gate", () => {
-  // Historical, documented finding (see app/(routes)/orders/[id]/page.jsx
-  // and app/admin/layout.jsx's own comments): a <Suspense>/loading.jsx
-  // boundary above a notFound()/redirect() call lets the fallback shell
-  // flush first (status 200), then swap in the real not-found/redirect
-  // UI client-side — leaving the WRONG 200 status on the actual HTTP
-  // response. This suite proves that constraint still holds after Phase
-  // 10's changes.
+  // Historical, documented finding (see
+  // app/(routes)/(account)/orders/[id]/page.jsx and app/admin/layout.jsx's
+  // own comments): a <Suspense>/loading.jsx boundary above a
+  // notFound()/redirect() call lets the fallback shell flush first (status
+  // 200), then swap in the real not-found/redirect UI client-side —
+  // leaving the WRONG 200 status on the actual HTTP response. This suite
+  // proves that constraint still holds after Phase 10's changes. (Orders
+  // moved under the "(account)" route group so it shares the account
+  // sidebar with Dashboard/Profile — same URL, same page.jsx content.)
   test("no loading.jsx exists for the orders/[id] or admin route segments", () => {
-    assert.ok(!exists("app/(routes)/orders/[id]/loading.jsx"));
+    assert.ok(!exists("app/(routes)/(account)/orders/[id]/loading.jsx"));
     assert.ok(!exists("app/admin/loading.jsx"));
   });
 
-  test("app/(routes)/orders/[id]/page.jsx still renders its page directly, with no <Suspense> wrapping it", () => {
-    const content = stripComments(read("app/(routes)/orders/[id]/page.jsx"));
+  test("app/(routes)/(account)/orders/[id]/page.jsx still renders its page directly, with no <Suspense> wrapping it", () => {
+    const content = stripComments(read("app/(routes)/(account)/orders/[id]/page.jsx"));
     assert.ok(!/<Suspense/.test(content), "orders/[id]/page.jsx must not introduce a Suspense boundary above its notFound()-calling body");
   });
 

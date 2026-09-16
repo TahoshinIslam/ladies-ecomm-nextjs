@@ -72,10 +72,11 @@ export default async function OrderDetailPage({ params }) {
   const canCancel = ["pending", "paid", "processing"].includes(order.status);
 
   return (
-    <div className="container-x py-10">
+    <div>
       <Breadcrumb
         items={[
           { label: t("navigation.home"), href: "/", icon: Home },
+          { label: t("navigation.account"), href: "/dashboard" },
           { label: t("navigation.orders"), href: "/orders", icon: Package },
           { label: `#${order._id.slice(-8).toUpperCase()}` },
         ]}
