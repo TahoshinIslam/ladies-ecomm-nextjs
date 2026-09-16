@@ -166,6 +166,10 @@ describe("Phase 8 — mutation invalidation calls occur after the mutating write
     "app/api/orders/[id]/cancel/route.js",
     "app/api/orders/[id]/status/route.js",
     "app/api/payments/cod/[orderId]/route.js",
+    "app/api/promotions/route.js",
+    "app/api/promotions/[id]/route.js",
+    "app/api/promotions/[id]/duplicate/route.js",
+    "app/api/promotions/reorder/route.js",
   ];
 
   for (const file of ROUTE_INVALIDATION_FILES) {

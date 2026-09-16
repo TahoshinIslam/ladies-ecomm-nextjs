@@ -189,6 +189,34 @@ const couponEndpoints = (b) => ({
   }),
 });
 
+// ====== Promotions (admin) ======
+const promotionEndpoints = (b) => ({
+  listPromotions: b.query({
+    query: (params = {}) => `/promotions?${buildQueryString(params)}`,
+    providesTags: ["Promotion"],
+  }),
+  createPromotion: b.mutation({
+    query: (body) => ({ url: "/promotions", method: "POST", body }),
+    invalidatesTags: ["Promotion"],
+  }),
+  updatePromotion: b.mutation({
+    query: ({ id, ...body }) => ({ url: `/promotions/${id}`, method: "PUT", body }),
+    invalidatesTags: ["Promotion"],
+  }),
+  deletePromotion: b.mutation({
+    query: (id) => ({ url: `/promotions/${id}`, method: "DELETE" }),
+    invalidatesTags: ["Promotion"],
+  }),
+  duplicatePromotion: b.mutation({
+    query: (id) => ({ url: `/promotions/${id}/duplicate`, method: "POST" }),
+    invalidatesTags: ["Promotion"],
+  }),
+  reorderPromotions: b.mutation({
+    query: (body) => ({ url: "/promotions/reorder", method: "POST", body }),
+    invalidatesTags: ["Promotion"],
+  }),
+});
+
 // ====== Addresses ======
 const addressEndpoints = (b) => ({
   getMyAddresses: b.query({
@@ -354,6 +382,7 @@ export const shopApi = apiSlice.injectEndpoints({
     ...orderEndpoints(b),
     ...reviewEndpoints(b),
     ...couponEndpoints(b),
+    ...promotionEndpoints(b),
     ...addressEndpoints(b),
     ...paymentEndpoints(b),
     ...uploadEndpoints(b),
@@ -390,6 +419,12 @@ export const {
   useValidateCouponMutation,
   useListCouponsQuery,
   useCreateCouponMutation,
+  useListPromotionsQuery,
+  useCreatePromotionMutation,
+  useUpdatePromotionMutation,
+  useDeletePromotionMutation,
+  useDuplicatePromotionMutation,
+  useReorderPromotionsMutation,
   useUpdateCouponMutation,
   useDeleteCouponMutation,
   useGetMyAddressesQuery,

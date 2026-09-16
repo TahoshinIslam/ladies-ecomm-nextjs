@@ -55,13 +55,16 @@ import Settings from "../models/settingsModel.js";
 import Theme from "../models/themeModel.js";
 import User from "../models/userModel.js";
 import Wishlist from "../models/wishlistModel.js";
+import Promotion from "../models/promotionModel.js";
 
 // Phase 12 closure — every active Mongoose model in models/*.js, covering
-// all 19 real production collections (previously only 7 were audited by
-// this script; the other 12 were only ever cross-checked once, indirectly,
+// all real production collections (previously only 7 were audited by
+// this script; the rest were only ever cross-checked once, indirectly,
 // via a Preview backup/restore drill). tests/auditIndexesCoverage.test.mjs
 // enforces that this list stays exactly in sync with models/*.js — a new
 // model file added later without updating this array fails that test.
+// Promotion added by the admin-promotions feature (see
+// models/promotionModel.js's own compound eligibility/scheduling indexes).
 const MODELS = [
   Session,
   RateLimit,
@@ -82,6 +85,7 @@ const MODELS = [
   Theme,
   User,
   Wishlist,
+  Promotion,
 ];
 
 function redact(value) {

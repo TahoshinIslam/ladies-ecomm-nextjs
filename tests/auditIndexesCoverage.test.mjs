@@ -62,7 +62,7 @@ describe("scripts/auditIndexes.mjs — static source safety (no live DB needed)"
       .readdirSync(MODELS_DIR)
       .filter((f) => f.endsWith("Model.js"))
       .map((f) => path.basename(f));
-    assert.equal(modelFiles.length, 19, `expected exactly 19 model files, found ${modelFiles.length}: ${modelFiles.join(", ")}`);
+    assert.equal(modelFiles.length, 20, `expected exactly 20 model files, found ${modelFiles.length}: ${modelFiles.join(", ")}`);
 
     for (const file of modelFiles) {
       const importPath = `../models/${file}`;
@@ -103,7 +103,7 @@ describe("scripts/auditIndexes.mjs — real behavior against a disposable test d
     const result = await runAudit();
     const output = (result.stdout || "") + (result.stderr || "");
     assert.equal(result.code ?? 0, 0, `dry-run must exit 0 when every declared index is present:\n${output}`);
-    for (const modelName of ["sessions", "rate_limit_counters", "orders", "payments", "couponusages", "products", "reviews", "addresses", "attributedefinitions", "brands", "carts", "categories", "coupons", "notifications", "Event", "settings", "themes", "users", "wishlists"]) {
+    for (const modelName of ["sessions", "rate_limit_counters", "orders", "payments", "couponusages", "products", "reviews", "addresses", "attributedefinitions", "brands", "carts", "categories", "coupons", "notifications", "Event", "settings", "themes", "users", "wishlists", "promotions"]) {
       assert.match(output, new RegExp(`${modelName}: \\d+ declared`), `expected a report line for ${modelName}`);
     }
   });

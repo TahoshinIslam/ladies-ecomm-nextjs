@@ -1,12 +1,21 @@
 "use client";
 
-// Full-width rotating carousel — no text/heading overlay (removed per
-// feedback), just real department photography sliding with left/right
-// arrow controls and dot indicators, closer to the reference layout's own
-// banner carousel. A bare panel (no outer <section>/container of its own)
-// — HomePage.jsx places it inside a shared container alongside the
-// always-expanded CategorySidebar, filling whatever width remains next to
-// it. Each slide is itself a link to that department's shop page.
+// Full-width rotating carousel — no text/heading overlay, just imagery
+// sliding with left/right arrow controls and dot indicators. A bare panel
+// (no outer <section>/container of its own) — HomePage.jsx places it
+// inside a shared container alongside the always-expanded CategorySidebar,
+// filling whatever width remains next to it.
+//
+// Admin-promotions feature: this component's data source is now the public
+// Promotions service (`promotions` prop — carousel-eligible banners for
+// `placement: "home_hero"`, already schedule/audience-filtered and
+// target-resolved server-side by services/promotionService.js) instead of
+// always being the hardcoded department rotation. When no admin-created
+// carousel promotion is currently eligible, it falls back to that original
+// department-rotation behavior unchanged — see this file's own
+// buildFallbackSlides() — so the homepage never regresses to a broken/empty
+// hero just because no admin campaign exists yet (Migration Strategy 2 from
+// the admin-promotions feature spec).
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -19,8 +28,41 @@ import { resolveImage, isPlaceholderStub } from "../../lib/utils.js";
 const ROTATION_SLUGS = ["burqa", "abaya", "hijab", "khimar"];
 const AUTO_ADVANCE_MS = 6000;
 
-export default function HeroCarousel({ departments, heroImageBySlug }) {
-  const { t } = useLocale();
+function buildFallbackSlides(departments, heroImageBySlug) {
+  return ROTATION_SLUGS.map((slug) => {
+    const dept = departments.find((d) => d.slug === slug);
+    if (!dept) return null;
+    const raw = heroImageBySlug?.[slug];
+    // Every seeded product in this environment is currently a placehold.co
+    // text-label stub (e.g. "Abaya" spelled out across a gray box), not an
+    // actual photo — isPlaceholderStub() rejects those so the slide falls
+    // back to the app's own hatch pattern instead of rendering that stub
+    // at hero scale.
+    const image = raw && !isPlaceholderStub(raw) ? raw : null;
+    return {
+      key: slug,
+      desktopImage: image,
+      mobileImage: image,
+      href: `/shop?category=${dept._id}`,
+      alt: "",
+      clickable: true,
+    };
+  }).filter(Boolean);
+}
+
+function buildPromotionSlides(promotions, locale) {
+  return promotions.map((p) => ({
+    key: p.id,
+    desktopImage: p.desktopImage,
+    mobileImage: p.mobileImage || p.desktopImage,
+    href: p.href,
+    alt: (locale === "bn" ? p.imageAltBn : p.imageAlt) || (locale === "bn" ? p.titleBn : p.title) || "",
+    clickable: p.clickable,
+  }));
+}
+
+export default function HeroCarousel({ departments, heroImageBySlug, promotions }) {
+  const { t, locale } = useLocale();
   const [index, setIndex] = useState(0);
   const [userPaused, setUserPaused] = useState(false);
   const [interactionPaused, setInteractionPaused] = useState(false);
@@ -29,18 +71,10 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
   );
   const paused = userPaused || interactionPaused || reducedMotion;
 
-  const slides = ROTATION_SLUGS.map((slug) => {
-    const dept = departments.find((d) => d.slug === slug);
-    const raw = heroImageBySlug?.[slug];
-    // Every seeded product in this environment is currently a placehold.co
-    // text-label stub (e.g. "Abaya" spelled out across a gray box), not an
-    // actual photo — isPlaceholderStub() rejects those so the slide falls
-    // back to the app's own hatch pattern instead of rendering that stub
-    // at hero scale. An admin-set carousel image (Shop Config → Carousel)
-    // is real photography and is used as-is.
-    const image = raw && !isPlaceholderStub(raw) ? raw : null;
-    return dept ? { slug, dept, image } : null;
-  }).filter(Boolean);
+  const slides =
+    promotions && promotions.length > 0
+      ? buildPromotionSlides(promotions, locale)
+      : buildFallbackSlides(departments, heroImageBySlug);
 
   const active = slides[index] ?? slides[0];
 
@@ -64,6 +98,11 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
 
   if (!active) return null;
 
+  const Wrapper = active.clickable ? Link : "div";
+  const wrapperProps = active.clickable
+    ? { href: active.href, "aria-label": active.alt || undefined }
+    : { "aria-hidden": !active.alt || undefined };
+
   return (
     <div
       aria-roledescription="carousel"
@@ -75,7 +114,7 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
     >
       <AnimatePresence initial={false} mode="wait">
         <motion.div
-          key={active.slug}
+          key={active.key}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -84,22 +123,49 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
           aria-roledescription="slide"
           aria-label={`${index + 1} / ${slides.length}`}
         >
-          <Link href={`/shop?category=${active.dept._id}`} className="absolute inset-0 block focus-ring">
-            {active.image ? (
-              <Image
-                src={resolveImage(active.image, 1600)}
-                alt=""
-                fill
-                sizes="(max-width: 1024px) 100vw, 70vw"
-                fetchPriority="high"
-                className="object-cover object-top"
-              />
+          {/* Not nested inside another link/button — a plain <div> when the
+              slide has no safe/resolved target (targetType "none", or a
+              stale target the server already omitted upstream) so the
+              whole banner is never a dead or invalid link. */}
+          <Wrapper className="absolute inset-0 block focus-ring" {...wrapperProps}>
+            {active.desktopImage ? (
+              <>
+                {/* Two breakpoint-scoped <Image> elements (desktop/mobile
+                    creative can differ — an admin may upload a distinct
+                    mobile asset) rather than one `sizes`-only responsive
+                    image. `fetchPriority="high"` is unconditional here,
+                    matching this codebase's own established hero-carousel
+                    convention (see tests/imageOptimization.test.mjs's own
+                    comment): AnimatePresence's `mode="wait"` above ensures
+                    only ONE slide is ever mounted at a time, so "the
+                    active slide's image(s)" and "the one genuine LCP
+                    candidate for this render" are the same thing — this is
+                    not the many-cards-at-once shape (ProductCard.jsx) that
+                    actually needs an index-conditional `priority && index
+                    === 0` guard. */}
+                <Image
+                  src={resolveImage(active.desktopImage, 1600)}
+                  alt=""
+                  fill
+                  sizes="(max-width: 640px) 0px, 70vw"
+                  fetchPriority="high"
+                  className="hidden object-cover object-top sm:block"
+                />
+                <Image
+                  src={resolveImage(active.mobileImage || active.desktopImage, 900)}
+                  alt=""
+                  fill
+                  sizes="(max-width: 640px) 100vw, 0px"
+                  fetchPriority="high"
+                  className="object-cover object-top sm:hidden"
+                />
+              </>
             ) : (
               <div aria-hidden="true" className="absolute inset-0 hatch grid place-items-center">
                 <ShoppingBag className="h-16 w-16 text-ink/10" strokeWidth={1.2} />
               </div>
             )}
-          </Link>
+          </Wrapper>
         </motion.div>
       </AnimatePresence>
 
@@ -128,7 +194,7 @@ export default function HeroCarousel({ departments, heroImageBySlug }) {
           <div className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5">
             {slides.map((s, i) => (
               <button
-                key={s.slug}
+                key={s.key}
                 type="button"
                 onClick={() => setIndex(i)}
                 aria-label={`${i + 1} / ${slides.length}`}

@@ -11,7 +11,14 @@ import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
 import SectionHead from "./home/SectionHead.jsx";
 
 import connectDB from "../config/db.js";
-import { getCachedCategories, getCachedProductList, getCachedPublicSettings } from "../lib/serverDataCache.js";
+import { getServerPageUser } from "../lib/serverPageAuth.js";
+import { filterByAudience } from "../services/promotionService.js";
+import {
+  getCachedCategories,
+  getCachedProductList,
+  getCachedPublicSettings,
+  getCachedEligiblePromotions,
+} from "../lib/serverDataCache.js";
 import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import { listProducts } from "../services/productService.js";
 import { serializeForClient } from "../lib/serialize.js";
@@ -72,12 +79,19 @@ export default async function HomePage() {
   // whole render rather than relying on Promise.all ordering or a sibling
   // call having already connected.
   await connectDB();
-  const [t, locale, rawCategories, publicSettings] = await Promise.all([
+  const [t, locale, rawCategories, publicSettings, user, carouselPromotionsBase] = await Promise.all([
     getT(),
     getServerLocale(),
     getCachedCategories(),
     getCachedPublicSettings(),
+    // Audience filtering must NOT be part of the shared cached read (see
+    // services/promotionService.js's own comment) — this session lookup
+    // and the filterByAudience() call below both run fresh on every
+    // request, never inside getCachedEligiblePromotions()'s cache.
+    getServerPageUser(),
+    getCachedEligiblePromotions("carousel", "home_hero", "home"),
   ]);
+  const carouselPromotions = filterByAudience(carouselPromotionsBase, Boolean(user));
   const homepageSettings = publicSettings?.homepage || {};
   const categories = localizeCategoryList(rawCategories, locale);
   const departments = categories
@@ -190,7 +204,7 @@ export default async function HomePage() {
         <div className="mx-auto flex max-w-[1620px] items-stretch gap-6 lg:h-[460px]">
           <CategorySidebar categories={categories} />
           <div className="min-w-0 flex-1">
-            <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} />
+            <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} promotions={carouselPromotions} />
           </div>
         </div>
       </section>

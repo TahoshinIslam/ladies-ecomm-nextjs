@@ -10,6 +10,7 @@ import {
   Folder,
   SlidersHorizontal,
   Store,
+  Megaphone,
 } from "lucide-react";
 
 import { PERMISSIONS, hasPermission } from "../../lib/permissions.js";
@@ -34,6 +35,7 @@ export const ADMIN_NAV = [
   { to: "/admin/categories", label: "Categories", icon: Folder, perm: PERMISSIONS.CATEGORIES_MANAGE, group: "Catalog" },
   { to: "/admin/orders", label: "Orders", icon: ShoppingCart, perm: PERMISSIONS.ORDERS_VIEW, group: "Sales" },
   { to: "/admin/coupons", label: "Coupons", icon: Tag, perm: PERMISSIONS.COUPONS_MANAGE, group: "Sales" },
+  { to: "/admin/promotions", label: "Promotions", icon: Megaphone, perm: PERMISSIONS.PROMOTIONS_MANAGE, group: "Sales" },
   { to: "/admin/users", label: "Users", icon: Users, perm: PERMISSIONS.USERS_MANAGE, group: "Community" },
   { to: "/admin/reviews", label: "Reviews", icon: Star, perm: PERMISSIONS.REVIEWS_MANAGE, group: "Community" },
   { to: "/admin/themes", label: "Themes", icon: Palette, highlight: true, perm: PERMISSIONS.THEMES_MANAGE, group: "Store" },

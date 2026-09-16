@@ -23,6 +23,12 @@ const SearchModal = dynamic(() => import("@/components/layout/SearchModal.jsx"),
 const CompareTray = dynamic(() => import("@/components/product/CompareTray.jsx"), { ssr: false });
 const QuickAddSheet = dynamic(() => import("@/components/product/QuickAddSheet.jsx"), { ssr: false });
 const ProductFinder = dynamic(() => import("@/components/product/ProductFinder.jsx"), { ssr: false });
+// Admin-promotions feature — same "code isn't in the critical initial
+// bundle" treatment as the overlays above. Unlike them, CampaignPopup has
+// no Redux state of its own to preserve across navigation (it re-derives
+// eligibility per pathname itself), but it's mounted the same way for the
+// same bundling reason.
+const CampaignPopup = dynamic(() => import("@/components/layout/CampaignPopup.jsx"), { ssr: false });
 
 /**
  * Storefront chrome. Everything customer-facing renders inside this; /admin
@@ -57,6 +63,7 @@ export default function StorefrontLayout({ children, initialDepartments }) {
       <QuickAddSheet />
       <ProductFinder />
       <CompareTray />
+      <CampaignPopup />
       <MobileNav />
       <Suspense fallback={null}>
         <ScrollToTop />

@@ -92,6 +92,7 @@ export const apiSlice = createApi({
     "Review",
     "Address",
     "Coupon",
+    "Promotion",
     "Payment",
     "Theme",
     "Notification",

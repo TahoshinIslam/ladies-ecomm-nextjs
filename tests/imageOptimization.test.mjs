@@ -285,16 +285,22 @@ describe("Phase 9 — loading priority is scoped to genuine LCP images only", ()
   // a single card (index 0) is exactly the point being proved below.
   const UNCONDITIONAL_HIGH_RE = /fetchPriority="high"/g;
 
-  test("home hero: the single responsive slide image is fetchPriority high, and never loading=\"eager\"", () => {
-    // The hero carousel renders one <Image> per active slide (a single,
-    // fully responsive full-bleed banner — no separate desktop/tablet/
-    // mobile breakpoint variants hidden via CSS), so exactly one
-    // fetchPriority="high" is expected, never three. `loading="eager"`
-    // is still disallowed: Next's own docs recommend fetchPriority="high"
-    // over loading="eager" for a real LCP candidate.
+  test("home hero: the active slide's desktop+mobile images are fetchPriority high, and never loading=\"eager\"", () => {
+    // Admin-promotions feature — the hero carousel now renders TWO
+    // <Image> elements per active slide (desktop + mobile, shown/hidden
+    // via a CSS breakpoint, `sizes` alone is no longer enough) rather than
+    // one fully-responsive image, because an admin-created promotion can
+    // upload a genuinely different creative per breakpoint. Both carry an
+    // unconditional fetchPriority="high" — still safe, for the same
+    // reason it was safe when there was only one: AnimatePresence's
+    // `mode="wait"` ensures only ONE slide (and therefore at most one of
+    // these two Images, the other being `hidden`) is ever actually
+    // fetched by the browser at a time. `loading="eager"` is still
+    // disallowed: Next's own docs recommend fetchPriority="high" over
+    // loading="eager" for a real LCP candidate.
     const content = stripComments(read("views/home/HeroCarousel.jsx"));
     const highMatches = [...content.matchAll(UNCONDITIONAL_HIGH_RE)];
-    assert.equal(highMatches.length, 1, "expected exactly one fetchPriority=\"high\" image — the single responsive hero slide");
+    assert.equal(highMatches.length, 2, "expected exactly two fetchPriority=\"high\" images — the active slide's desktop and mobile variants");
     assert.ok(!content.includes('loading="eager"'), "the hero image may be fetchPriority high, but never loading=\"eager\"");
   });
 

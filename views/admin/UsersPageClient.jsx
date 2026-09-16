@@ -67,6 +67,7 @@ const PERMISSION_GROUPS = [
     perms: [
       { value: PERMISSIONS.COUPONS_MANAGE, label: "Manage coupons" },
       { value: PERMISSIONS.THEMES_MANAGE, label: "Manage themes" },
+      { value: PERMISSIONS.PROMOTIONS_MANAGE, label: "Manage promotions (carousel & popups)" },
     ],
   },
   {
