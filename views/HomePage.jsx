@@ -5,6 +5,7 @@ import { ArrowRight, Banknote, Gem, RefreshCw, Sparkles } from "lucide-react";
 import Button from "../components/ui/Button.jsx";
 import NewsletterForm from "../components/layout/NewsletterForm.jsx";
 import CategorySidebar from "../components/layout/CategorySidebar.jsx";
+import CategoryCard from "../components/product/CategoryCard.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
 import ProductShowcaseSection from "./home/ProductShowcaseSection.jsx";
 import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
@@ -26,13 +27,7 @@ import { getT, getServerLocale } from "../lib/i18n/server.js";
 import { localizeProductList, localizeCategoryList } from "../lib/i18n/localize.js";
 import { departmentName } from "../lib/i18n/catalog.js";
 import { resolveImage } from "../lib/utils.js";
-
-// Deliberate display order for the departments grid below — Category.find()
-// sorts by sortOrder/name, and every seeded department ties on
-// sortOrder=0, so without this the grid falls back to alphabetical order.
-// A department with no entry here (none expected today, but not fatal if
-// the catalog grows) sorts after all six known ones.
-const DEPARTMENT_ORDER = ["burqa", "abaya", "hijab", "niqab", "khimar", "modest-sets"];
+import { sortDepartmentsForFavourites } from "../lib/storefrontDepartments.js";
 
 const FABRICS = [
   { nameKey: "catalog.fabricNida", value: "nida", bodyKey: "home.fabricNidaBody" },
@@ -94,13 +89,7 @@ export default async function HomePage() {
   const carouselPromotions = filterByAudience(carouselPromotionsBase, Boolean(user));
   const homepageSettings = publicSettings?.homepage || {};
   const categories = localizeCategoryList(rawCategories, locale);
-  const departments = categories
-    .filter((c) => !c.parent)
-    .sort((a, b) => {
-      const ai = DEPARTMENT_ORDER.indexOf(a.slug);
-      const bi = DEPARTMENT_ORDER.indexOf(b.slug);
-      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-    });
+  const departments = sortDepartmentsForFavourites(categories);
 
   const burqa = departments.find((d) => d.slug === "burqa");
   const abaya = departments.find((d) => d.slug === "abaya");
@@ -220,32 +209,15 @@ export default async function HomePage() {
           {t("home.favouritesEyebrow")}
         </h2>
         <div className="-mx-5 mt-6 flex gap-4 overflow-x-auto px-5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-8">
-          {departments.slice(0, 8).map((d) => {
-            const deptName = departmentName(locale, d.slug, d.name);
-            const deptImage = departmentImages[d.slug] || heroImageBySlug[d.slug] || null;
-            return (
-              <Link
-                key={d._id}
-                href={`/shop?category=${d._id}`}
-                className="group flex w-[104px] flex-none flex-col items-center gap-2.5 text-center focus-ring sm:w-auto"
-              >
-                <div className="relative aspect-square w-full overflow-hidden rounded-2xl bg-media">
-                  {deptImage ? (
-                    <Image
-                      src={resolveImage(deptImage, 300)}
-                      alt=""
-                      fill
-                      sizes="(max-width: 640px) 104px, 12vw"
-                      className="object-cover object-top transition-transform duration-300 group-hover:scale-[1.04]"
-                    />
-                  ) : (
-                    <div aria-hidden="true" className="absolute inset-0 hatch" />
-                  )}
-                </div>
-                <span className="text-[13px] font-medium leading-tight text-ink">{deptName}</span>
-              </Link>
-            );
-          })}
+          {departments.slice(0, 8).map((d) => (
+            <CategoryCard
+              key={d._id}
+              as="link"
+              href={`/shop?category=${d._id}`}
+              label={departmentName(locale, d.slug, d.name)}
+              image={departmentImages[d.slug] || heroImageBySlug[d.slug] || null}
+            />
+          ))}
         </div>
         <Link
           href="/shop"

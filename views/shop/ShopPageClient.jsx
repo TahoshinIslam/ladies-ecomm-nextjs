@@ -17,9 +17,10 @@
 import { useState, useCallback, useEffect, useMemo, useRef, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Home, ShoppingBag, SlidersHorizontal, X } from "lucide-react";
+import { Home, ShoppingBag, SlidersHorizontal, Grid3x3, X } from "lucide-react";
 
 import ProductCard from "../../components/product/ProductCard.jsx";
+import CategoryCard from "../../components/product/CategoryCard.jsx";
 import PriceHistogramSlider from "../../components/product/PriceHistogramSlider.jsx";
 import Button from "../../components/ui/Button.jsx";
 import EmptyState from "../../components/ui/EmptyState.jsx";
@@ -30,20 +31,7 @@ import { cn, responsiveBatchSize, visibleBufferCount } from "../../lib/utils.js"
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
-import { STOREFRONT_DEPARTMENT_SLUGS as STOREFRONT_DEPARTMENT_SLUGS_LIST } from "../../lib/storefrontDepartments.js";
-
-// The top-nav departments the storefront shows — root categories only
-// (`!c.parent`, see `departments` below). Imported from the same plain,
-// framework-agnostic module services/productService.js's server-side
-// scoping uses (lib/storefrontDepartments.js) — this used to be an
-// independently hand-maintained copy here that silently fell out of sync
-// when the 11 marketplace divisions were added server-side, leaving every
-// marketplace category page (Cosmetics, Jewelry, Food, ...) showing only
-// the original 9 fashion departments in its Category filter and pill row.
-// A real allowlist, not just "any root category": a stray root category
-// (e.g. leftover test/fixture data) must never silently appear in the
-// storefront nav.
-const STOREFRONT_DEPARTMENT_SLUGS = new Set(STOREFRONT_DEPARTMENT_SLUGS_LIST);
+import { sortDepartmentsForFavourites, FAVOURITE_DEPARTMENTS_COUNT } from "../../lib/storefrontDepartments.js";
 
 // `value` is the stable filter/query value (see section 7 of the
 // localization audit — never translated); `labelKey` is resolved via t()
@@ -110,7 +98,7 @@ const computeTitle = (sp, allCategories, t, locale) => {
   return t("shop.shopAll");
 };
 
-export default function ShopPageClient({ initialProducts, total, facets }) {
+export default function ShopPageClient({ initialProducts, total, facets, initialCategories = [], initialDepartmentImages = {} }) {
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -175,14 +163,31 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   const [revealedExtra, setRevealedExtra] = useState(0);
   const visibleBuffered = visibleBufferCount(breakpoint, revealedExtra, Math.min(products.length, PAGE_SIZE));
 
+  // `initialCategories` (from views/ShopPage.jsx, a Server Component)
+  // seeds this row's very first paint exactly like Header.jsx's own
+  // `initialDepartments` seeds the nav — this does NOT add a second
+  // request: useGetCategoriesQuery() below is the SAME single client
+  // query every other piece of this file already relied on (brand/
+  // attribute scoping, the page title, style groupings), just now also
+  // feeding the category-filter tile row instead of a separate fetch.
   const { data: catsData, isLoading: catsLoading } = useGetCategoriesQuery();
   // Unfiltered sample of catalog used only to draw the price histogram so the
   // bars represent the whole catalog, not the currently-filtered subset.
   const { data: histogramData } = useGetProductsQuery({ limit: 200, fields: "basePrice,discountPrice" });
 
-  const departments = useMemo(
-    () => (catsData?.categories ?? []).filter((c) => !c.parent && STOREFRONT_DEPARTMENT_SLUGS.has(c.slug)),
-    [catsData],
+  // Shop-category-tiles feature — the exact same shared sort/filter the
+  // homepage's "Shop your everyday favourites" row uses (lib/
+  // storefrontDepartments.js), so the two can never show a different
+  // department set or order. Deliberately NOT the old, wider
+  // STOREFRONT_DEPARTMENT_SLUGS-only list (all ~20 departments) the
+  // former DepartmentChips/CategoryFilterGroup rendered — capped to the
+  // same top 8 as the homepage tile row, by design (see the PR
+  // discussion this feature shipped from): a full 20-tile image row would
+  // never fit as tiles the way it did as small text pills, and the mega
+  // menu/mobile drawer already cover every department beyond these 8.
+  const favouriteDepartments = useMemo(
+    () => sortDepartmentsForFavourites(catsData?.categories ?? initialCategories).slice(0, FAVOURITE_DEPARTMENTS_COUNT),
+    [catsData, initialCategories],
   );
   const selectedDept = sp.get("category") || "";
   // Scoped to the department being browsed (see services/productService.js's
@@ -257,6 +262,11 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   // stripInapplicableAttributeFilters() also enforces server-side as a
   // defensive backstop.
   const selectDepartment = (deptId) => {
+    // Re-clicking the already-active department (or "All" while already
+    // on "All") would push the exact same URL — a no-op render, but still
+    // a wasted transition/isPending flash and a candidate for a duplicate
+    // request if clicked again before the first settles. Skip it outright.
+    if ((deptId || "") === selectedDept) return;
     const next = new URLSearchParams();
     for (const k of ["sort", "search", "priceMin", "priceMax", "ageGroup", "collection", "new", "featured", "discount", "availability", "ratingGte"]) {
       if (sp.get(k)) next.set(k, sp.get(k));
@@ -441,15 +451,23 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
         </div>
       </div>
 
-      {/* Department chips — the entry point for the whole dynamic filter
-          system: picking one loads that department's real subcategories
-          and attributes (fabric, coverage, occasion, ...) instead of any
-          hardcoded filter set. Always visible, desktop and mobile. */}
-      <DepartmentChips
-        departments={departments}
-        loading={catsLoading}
+      {/* Category filter tiles — the entry point for the whole dynamic
+          filter system: picking one loads that department's real
+          subcategories and attributes (fabric, coverage, occasion, ...)
+          instead of any hardcoded filter set. Always visible, desktop and
+          mobile. Same shared CategoryCard, same department set/order/
+          images/fallback as the homepage's "Shop your everyday
+          favourites" row (see lib/storefrontDepartments.js's
+          sortDepartmentsForFavourites) — this is the Shop-side reuse of
+          that exact presentation, wired to the filter instead of a
+          plain navigation. */}
+      <CategoryTileFilter
+        departments={favouriteDepartments}
+        departmentImages={initialDepartmentImages}
+        loading={catsLoading && !favouriteDepartments.length}
         selected={selectedDept}
         onSelect={selectDepartment}
+        disabled={isPending}
       />
 
       <ActiveFilterChips chips={activeChips} onClearAll={clearAll} />
@@ -474,8 +492,6 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
             toggleFacetValue={toggleFacetValue}
             clearAll={clearAll}
             brandsData={brandsData}
-            departments={departments}
-            deptLoading={catsLoading}
             selectedDept={selectedDept}
             selectDepartment={selectDepartment}
             groupingsData={groupingsData}
@@ -509,8 +525,6 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
               toggleFacetValue={toggleFacetValue}
               clearAll={clearAll}
               brandsData={brandsData}
-              departments={departments}
-              deptLoading={catsLoading}
               selectedDept={selectedDept}
               selectDepartment={selectDepartment}
               groupingsData={groupingsData}
@@ -595,41 +609,57 @@ export default function ShopPageClient({ initialProducts, total, facets }) {
   );
 }
 
-function DepartmentChips({ departments, loading, selected, onSelect }) {
+// Same tile row as views/HomePage.jsx's "Shop your everyday favourites"
+// section (same CategoryCard, same responsive scroll-rail-then-grid
+// pattern, same image/fallback/localization), wired here as a real filter
+// instead of plain navigation: "All" is a real first tile (not a
+// department), and the active one gets CategoryCard's accent-ring +
+// checkmark treatment. `sm:grid-cols-3 lg:grid-cols-9` (not the
+// homepage's own `sm:grid-cols-4 lg:grid-cols-8`) is deliberate — this row
+// always has exactly 9 tiles (1 "All" + FAVOURITE_DEPARTMENTS_COUNT), and
+// both 3 and 9 divide it evenly (3 full rows / 1 full row) with no
+// orphaned tile stranded alone on a trailing row, unlike 4 or 8 would.
+function CategoryTileFilter({ departments, departmentImages, loading, selected, onSelect, disabled }) {
   const { t, locale } = useLocale();
-  if (loading && !departments.length) {
+  const rowClasses =
+    "-mx-5 mt-2 mb-6 flex gap-4 overflow-x-auto px-5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-9";
+
+  if (loading) {
     return (
-      <div className="mb-6 flex gap-2 overflow-x-auto pb-1">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="skeleton h-10 w-24 flex-none rounded-full" />
+      <div className={rowClasses} aria-hidden="true">
+        {Array.from({ length: FAVOURITE_DEPARTMENTS_COUNT + 1 }).map((_, i) => (
+          <div key={i} className="flex w-[104px] flex-none flex-col items-center gap-2.5 sm:w-auto">
+            <div className="skeleton aspect-square w-full rounded-2xl" />
+            <div className="skeleton h-3 w-14 rounded" />
+          </div>
         ))}
       </div>
     );
   }
+
   return (
-    <div className="mb-6 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-      <button
-        type="button"
+    <div
+      className={cn(rowClasses, "transition-opacity", disabled && "pointer-events-none opacity-50")}
+      aria-busy={disabled}
+    >
+      <CategoryCard
+        as="button"
+        label={t("shop.all")}
+        icon={Grid3x3}
+        active={!selected}
+        disabled={disabled}
         onClick={() => onSelect("")}
-        className={cn(
-          "h-10 flex-none rounded-full border px-4 text-sm font-medium transition-colors focus-ring",
-          !selected ? "border-ink bg-ink text-canvas" : "border-line text-ink hover:border-ink",
-        )}
-      >
-        {t("shop.all")}
-      </button>
+      />
       {departments.map((d) => (
-        <button
+        <CategoryCard
           key={d._id}
-          type="button"
+          as="button"
+          label={departmentName(locale, d.slug, d.name)}
+          image={departmentImages[d.slug] || null}
+          active={selected === d._id}
+          disabled={disabled}
           onClick={() => onSelect(d._id)}
-          className={cn(
-            "h-10 flex-none rounded-full border px-4 text-sm font-medium transition-colors focus-ring",
-            selected === d._id ? "border-ink bg-ink text-canvas" : "border-line text-ink hover:border-ink",
-          )}
-        >
-          {departmentName(locale, d.slug, d.name)}
-        </button>
+        />
       ))}
     </div>
   );
@@ -742,8 +772,6 @@ function FilterPanel({
   toggleFacetValue,
   clearAll,
   brandsData,
-  departments = [],
-  deptLoading,
   selectedDept,
   selectDepartment,
   groupingsData,
@@ -754,20 +782,19 @@ function FilterPanel({
   facets,
 }) {
   const { t, locale } = useLocale();
-  // Filter layout: Category, Age Group (only when meaningful), Collection,
+  // Filter layout: Age Group (only when meaningful), Collection,
   // Availability, Rating, [Style / attribute facets / Brand — only once a
   // department narrows what's available], Price Range. Collection/
   // Availability/Rating are permanently visible regardless of department
   // selection — they're common filters, not department-specific ones.
+  // Category itself is no longer a sidebar group here — the always-visible
+  // CategoryTileFilter row above the grid (same shared CategoryCard the
+  // homepage uses) is the one category control now; keeping a second,
+  // separate one here would be exactly the "two controls that can
+  // disagree" risk this feature was built to avoid.
   if (!selectedDept) {
     return (
       <>
-        <CategoryFilterGroup
-          departments={departments}
-          loading={deptLoading}
-          selectedDept={selectedDept}
-          onSelect={selectDepartment}
-        />
         {hasMeaningfulAgeGroupVariety(facets?.ageGroup) && (
           <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
         )}
@@ -785,13 +812,6 @@ function FilterPanel({
 
   return (
     <>
-      <CategoryFilterGroup
-        departments={departments}
-        loading={deptLoading}
-        selectedDept={selectedDept}
-        onSelect={selectDepartment}
-      />
-
       {hasMeaningfulAgeGroupVariety(facets?.ageGroup) && (
         <AgeGroupFilterGroup sp={sp} toggleFacetValue={toggleFacetValue} counts={facets?.ageGroup} />
       )}
@@ -910,34 +930,8 @@ function FilterRowSkeleton({ count = 4 }) {
   );
 }
 
-// Always the first group in the sidebar — Category, then (once one's
-// picked) Style, then the department's attribute-driven facets, then
-// Brand, then Price. Single-select via checkboxes, same convention the
-// Style/gender facets below already use elsewhere in this file: clicking
-// the active department clears it back to "Shop all," clicking another
-// switches to it (selectDepartment resets every filter that doesn't
-// survive a department change).
-function CategoryFilterGroup({ departments, loading, selectedDept, onSelect }) {
-  const { t, locale } = useLocale();
-  return (
-    <FilterGroup title={t("shop.category")}>
-      {loading && !departments.length ? (
-        <FilterRowSkeleton count={5} />
-      ) : (
-        departments.map((d) => (
-          <CheckBox
-            key={d._id}
-            label={departmentName(locale, d.slug, d.name)}
-            checked={selectedDept === d._id}
-            onChange={(v) => onSelect(v ? d._id : "")}
-          />
-        ))
-      )}
-    </FilterGroup>
-  );
-}
-
-// Permanently visible, second group in the sidebar. UI shows Kids / Girls /
+// Permanently visible, first group in the sidebar (Category itself moved
+// out — see FilterPanel's own comment above). UI shows Kids / Girls /
 // Adults; stored ageGroup values stay exactly "kids" / "girls" / "adult"
 // (see productModel.js — "girls" added without renaming the pre-existing
 // two). Multiple selections OR together (toggleFacetValue's usual CSV

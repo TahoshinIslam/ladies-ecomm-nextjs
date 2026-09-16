@@ -8,7 +8,7 @@ import { isLeafCategory } from "../services/categoryService.js";
 import { assertNoDuplicateQueryKeys, assertNoDangerousQueryKeys } from "../lib/validation.js";
 import { parseQueryParams, HttpError } from "../lib/http.js";
 import { serializeForClient } from "../lib/serialize.js";
-import { getCachedProductList, getCachedCategories } from "../lib/serverDataCache.js";
+import { getCachedProductList, getCachedCategories, getCachedPublicSettings } from "../lib/serverDataCache.js";
 import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
 import { getServerLocale, getT } from "../lib/i18n/server.js";
 import { localizeCategory } from "../lib/i18n/localize.js";
@@ -55,6 +55,17 @@ export default async function ShopPage({ searchParams }) {
   // which reads Category directly.
   await connectDB();
 
+  // Shop-category-tiles feature — fetched once, up front, and reused both
+  // by the CategoryLanding branch below (previously its own separate
+  // getCachedCategories() call) and as an `initialCategories`/
+  // `initialDepartmentImages` prop seeding ShopPageClient.jsx's category-
+  // filter tile row's very first paint, exactly like Header.jsx's
+  // `initialDepartments` already seeds the nav — the client's own
+  // useGetCategoriesQuery() still fires and takes over for freshness, so
+  // this is not a second, competing data source, only a first-paint seed.
+  const [categories, publicSettings] = await Promise.all([getCachedCategories(), getCachedPublicSettings()]);
+  const departmentImages = publicSettings?.homepage?.departmentImages || {};
+
   // A category that itself has children (e.g. "Cosmetics", or "Food") is a
   // browsing waypoint, not a leaf shoppers file real products under —
   // showing the full filter+grid UI for it would be either empty or a
@@ -79,7 +90,6 @@ export default async function ShopPage({ searchParams }) {
   const categoryParam = typeof rawSearchParams?.category === "string" ? rawSearchParams.category : null;
   const hasStyleParam = typeof rawSearchParams?.style === "string" && rawSearchParams.style !== "";
   if (categoryParam && isObjectIdFormat(categoryParam) && !hasStyleParam) {
-    const categories = await getCachedCategories();
     const requestedCategory = categories.find((c) => String(c._id) === categoryParam);
     const isFashionDept =
       requestedCategory && !requestedCategory.parent && FASHION_DEPARTMENT_SLUGS.includes(requestedCategory.slug);
@@ -139,7 +149,14 @@ export default async function ShopPage({ searchParams }) {
   return (
     <>
       <ShopBreadcrumbJsonLd rawSearchParams={rawSearchParams} />
-      <ShopPageClient key={usp.toString()} initialProducts={initialProducts} total={total} facets={facets} />
+      <ShopPageClient
+        key={usp.toString()}
+        initialProducts={initialProducts}
+        total={total}
+        facets={facets}
+        initialCategories={serializeForClient(categories)}
+        initialDepartmentImages={departmentImages}
+      />
     </>
   );
 }
