@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback, useEffect, useState } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { cn } from "../../lib/utils.js";

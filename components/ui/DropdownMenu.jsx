@@ -11,7 +11,7 @@ const PANEL_MAX_HEIGHT = 280;
 /**
  * Compact icon-trigger action menu — collapses a row's View/Edit/Delete
  * buttons into one "⋯" control. No Radix in this project (see
- * components/layout/Header.jsx's MegaTrigger for the same hand-rolled
+ * components/layout/Header.jsx's Categories panel for the same hand-rolled
  * click-toggle + outside-click + Escape pattern this follows), so this is
  * a small self-contained popover rather than a third-party primitive.
  *

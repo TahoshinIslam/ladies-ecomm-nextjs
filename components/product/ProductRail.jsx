@@ -6,7 +6,6 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import ProductCard from "./ProductCard.jsx";
 import ProductCardSkeleton from "./ProductCardSkeleton.jsx";
-import { cn } from "../../lib/utils.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 
 /**

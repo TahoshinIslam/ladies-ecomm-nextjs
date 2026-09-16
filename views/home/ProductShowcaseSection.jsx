@@ -10,7 +10,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Sparkles, Star } from "lucide-react";
+import { ArrowRight, Gem, Home, Sparkles, Star } from "lucide-react";
 
 import ProductCard from "../../components/product/ProductCard.jsx";
 import Button from "../../components/ui/Button.jsx";
@@ -24,7 +24,7 @@ import SectionHead from "./SectionHead.jsx";
 // reference — the caller (views/HomePage.jsx) is a Server Component, and a
 // component/function value can't cross the server→client prop boundary to
 // a "use client" file like this one (RSC serializes data, not functions).
-const ICONS = { new: Sparkles, featured: Star };
+const ICONS = { new: Sparkles, featured: Star, cosmetics: Sparkles, jewelry: Gem, homeDecor: Home };
 
 /**
  * Leo's "Trending now" pattern: a row of category pills that filters the

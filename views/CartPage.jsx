@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Home, Minus, Plus, ShoppingBag } from "lucide-react";
+import { Home, Minus, Plus, ShoppingBag, X } from "lucide-react";
 import { toast } from "sonner";
 
 import Button from "@/components/ui/Button.jsx";
@@ -90,8 +90,18 @@ export default function CartPage() {
       <PageHeading count={items.length} />
 
       <div className="mt-10 grid gap-12 lg:grid-cols-[1fr_380px] lg:items-start">
-        {/* Line items */}
-        <ul className="border-t border-line">
+        {/* Line items — EShopper's cart table (Products / Price / Quantity /
+            Total / Remove), reflowed as a grid so it stacks cleanly on
+            mobile instead of forcing a horizontal-scroll table. */}
+        <div className="border-t border-line">
+          <div className="hidden grid-cols-[1fr_100px_140px_100px_44px] gap-4 border-b border-line py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-stone sm:grid">
+            <span>{t("cart.colProduct")}</span>
+            <span className="text-right">{t("cart.colPrice")}</span>
+            <span className="text-center">{t("cart.colQuantity")}</span>
+            <span className="text-right">{t("cart.colTotal")}</span>
+            <span />
+          </div>
+          <ul>
           {items.map((item) => {
             const p = item.product;
             if (!p) return null;
@@ -104,12 +114,12 @@ export default function CartPage() {
             return (
               <li
                 key={keyOf(id, variantId)}
-                className="flex gap-5 border-b border-line py-6 transition-opacity"
+                className="grid grid-cols-[72px_1fr] items-center gap-4 border-b border-line py-6 transition-opacity sm:grid-cols-[1fr_100px_140px_100px_44px]"
                 style={{ opacity: busy ? 0.5 : 1 }}
               >
                 <Link
                   href={`/product/${p.slug || id}`}
-                  className="relative aspect-4/5 w-[88px] flex-none overflow-hidden rounded-[10px] bg-media sm:w-28"
+                  className="relative row-span-2 aspect-4/5 w-full flex-none overflow-hidden rounded-[10px] bg-media sm:row-span-1 sm:w-20"
                 >
                   <div aria-hidden="true" className="absolute inset-0 hatch" />
                   {(item.variant?.image || p.images?.[0]) && (
@@ -117,103 +127,102 @@ export default function CartPage() {
                       src={resolveImage(item.variant?.image || p.images[0], 240)}
                       alt={p.name}
                       fill
-                      sizes="(max-width: 640px) 88px, 112px"
+                      sizes="(max-width: 640px) 72px, 80px"
                       loading="lazy"
                       className="object-contain"
                     />
                   )}
                 </Link>
 
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="flex justify-between gap-3">
-                    <div className="min-w-0">
-                      {p.brand?.name && (
-                        <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-stone">
-                          {p.brand.name}
-                        </div>
-                      )}
-                      <Link
-                        href={`/product/${p.slug || id}`}
-                        className="mt-1.5 block text-base font-semibold tracking-[-0.015em] hover:text-verm"
-                      >
-                        {p.name}
-                      </Link>
-                      {variantLine && (
-                        <div className="mt-1 text-[13.5px] text-stone">
-                          {variantLine}
-                        </div>
-                      )}
+                <div className="min-w-0">
+                  {p.brand?.name && (
+                    <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-stone">
+                      {p.brand.name}
                     </div>
+                  )}
+                  <Link
+                    href={`/product/${p.slug || id}`}
+                    className="mt-1.5 block text-base font-semibold tracking-[-0.015em] hover:text-verm"
+                  >
+                    {p.name}
+                  </Link>
+                  {variantLine && <div className="mt-1 text-[13.5px] text-stone">{variantLine}</div>}
+                  {/* Mobile only: price/qty/remove inline under the name — the
+                      grid columns above (sm+) render these as their own cells. */}
+                  <div className="mt-3 flex items-center justify-between gap-3 sm:hidden">
+                    <QuantityStepper
+                      quantity={item.quantity}
+                      busy={busy}
+                      onDecrease={() =>
+                        withPending(id, variantId, () =>
+                          item.quantity <= 1
+                            ? cart.removeItem({ productId: id, variantId })
+                            : cart.updateItem({ productId: id, variantId, quantity: item.quantity - 1 }),
+                        )
+                      }
+                      onIncrease={() =>
+                        withPending(id, variantId, () =>
+                          cart.updateItem({ productId: id, variantId, quantity: item.quantity + 1 }),
+                        )
+                      }
+                      decreaseLabel={t("product.decreaseQuantity")}
+                      increaseLabel={t("product.increaseQuantity")}
+                    />
                     <div data-tabular className="text-[15.5px] font-semibold">
                       {settings.formatPrice(displayPrice * item.quantity)}
                     </div>
                   </div>
-
-                  <div className="mt-auto flex items-center justify-between pt-4">
-                    <div className="flex items-center rounded-lg border border-line">
-                      <button
-                        type="button"
-                        aria-label={t("product.decreaseQuantity")}
-                        disabled={busy}
-                        onClick={() =>
-                          withPending(id, variantId, () =>
-                            item.quantity <= 1
-                              ? cart.removeItem({ productId: id, variantId })
-                              : cart.updateItem({
-                                  productId: id,
-                                  variantId,
-                                  quantity: item.quantity - 1,
-                                }),
-                          )
-                        }
-                        className="grid h-[38px] w-[38px] place-items-center text-stone transition-colors hover:text-ink focus-ring"
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </button>
-                      <span
-                        data-tabular
-                        aria-live="polite"
-                        className="min-w-[26px] text-center font-mono text-[13px]"
-                      >
-                        {item.quantity}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={t("product.increaseQuantity")}
-                        disabled={busy}
-                        onClick={() =>
-                          withPending(id, variantId, () =>
-                            cart.updateItem({
-                              productId: id,
-                              variantId,
-                              quantity: item.quantity + 1,
-                            }),
-                          )
-                        }
-                        className="grid h-[38px] w-[38px] place-items-center text-stone transition-colors hover:text-ink focus-ring"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        withPending(id, variantId, () =>
-                          cart.removeItem({ productId: id, variantId }),
-                        )
-                      }
-                      className="text-[13.5px] text-stone underline underline-offset-[3px] transition-colors hover:text-verm focus-ring"
-                    >
-                      {t("common.remove")}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => withPending(id, variantId, () => cart.removeItem({ productId: id, variantId }))}
+                    className="mt-3 text-[13.5px] text-stone underline underline-offset-[3px] transition-colors hover:text-verm focus-ring sm:hidden"
+                  >
+                    {t("common.remove")}
+                  </button>
                 </div>
+
+                {/* sm+ grid cells */}
+                <div data-tabular className="hidden text-right text-[14.5px] sm:block">
+                  {settings.formatPrice(displayPrice)}
+                </div>
+                <div className="hidden justify-self-center sm:block">
+                  <QuantityStepper
+                    quantity={item.quantity}
+                    busy={busy}
+                    onDecrease={() =>
+                      withPending(id, variantId, () =>
+                        item.quantity <= 1
+                          ? cart.removeItem({ productId: id, variantId })
+                          : cart.updateItem({ productId: id, variantId, quantity: item.quantity - 1 }),
+                      )
+                    }
+                    onIncrease={() =>
+                      withPending(id, variantId, () =>
+                        cart.updateItem({ productId: id, variantId, quantity: item.quantity + 1 }),
+                      )
+                    }
+                    decreaseLabel={t("product.decreaseQuantity")}
+                    increaseLabel={t("product.increaseQuantity")}
+                  />
+                </div>
+                <div data-tabular className="hidden text-right text-[15.5px] font-semibold sm:block">
+                  {settings.formatPrice(displayPrice * item.quantity)}
+                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={t("common.remove")}
+                  onClick={() => withPending(id, variantId, () => cart.removeItem({ productId: id, variantId }))}
+                  className="hidden h-[38px] w-[38px] place-items-center rounded-lg text-stone transition-colors hover:text-verm focus-ring sm:grid"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </li>
             );
           })}
-        </ul>
+          </ul>
+        </div>
 
         {/* Summary */}
         <aside className="rounded-2xl border border-line bg-surface p-7 lg:sticky lg:top-32">
@@ -273,6 +282,34 @@ function PageHeading({ count }) {
       <h1 className="mt-4 text-[clamp(34px,4vw,52px)] font-semibold leading-none tracking-[-0.035em]">
         {count > 0 ? t("cart.pairsReady", { count }) : t("cart.nothingHereYet")}
       </h1>
+    </div>
+  );
+}
+
+function QuantityStepper({ quantity, busy, onDecrease, onIncrease, decreaseLabel, increaseLabel }) {
+  return (
+    <div className="flex items-center rounded-lg border border-line">
+      <button
+        type="button"
+        aria-label={decreaseLabel}
+        disabled={busy}
+        onClick={onDecrease}
+        className="grid h-[38px] w-[38px] place-items-center text-stone transition-colors hover:text-ink focus-ring"
+      >
+        <Minus className="h-3.5 w-3.5" />
+      </button>
+      <span data-tabular aria-live="polite" className="min-w-[26px] text-center font-mono text-[13px]">
+        {quantity}
+      </span>
+      <button
+        type="button"
+        aria-label={increaseLabel}
+        disabled={busy}
+        onClick={onIncrease}
+        className="grid h-[38px] w-[38px] place-items-center text-stone transition-colors hover:text-ink focus-ring"
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }

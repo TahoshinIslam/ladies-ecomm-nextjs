@@ -4,7 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { BellRing, Heart, ImageOff, Scale, Star } from "lucide-react";
+import { BellRing, Eye, Heart, ImageOff, Scale, ShoppingCart, Star } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { toast } from "sonner";
 
@@ -21,10 +21,12 @@ import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js"
 import { cn, resolveImage, effectivePrice, isRealDiscount } from "../../lib/utils.js";
 
 /**
- * The board's card is a 4:5 media plate on the surface colour with the product
- * floating on it — no card border, no shadow. Depth comes from the hatch, the
- * contact shadow under the shoe, and a 1.6° tilt on hover; the quick-add bar
- * rises into the plate rather than covering the whole image.
+ * EShopper's product-item card: a single bordered box (image, then a
+ * centered name/price body, then a two-link footer row — "View Detail" /
+ * "Add To Cart") rather than a borderless floating plate. Wishlist and
+ * compare are real features the template has no equivalent for, so they
+ * stay as small icon buttons overlaid on the image corner rather than
+ * being dropped.
  */
 export default function ProductCard({ product, className, index = 0, onQuickAdd, attributeMeta, priority = false }) {
   const user = useSelector(selectCurrentUser);
@@ -153,7 +155,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
       }}
       onMouseLeave={() => setHovered(false)}
       onFocus={() => prefetchAttributes(undefined)}
-      className={cn("group relative flex flex-col", className)}
+      className={cn("group relative flex flex-col overflow-hidden rounded-lg border border-line", className)}
     >
       {/* Phase 10 — the image area and the action buttons (wishlist/
           compare/quick-add/notify) are siblings, not a <button> nested
@@ -166,7 +168,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           buttons sit in their own `z-10` layer above it so they keep
           receiving their own clicks/focus, and the name/price block below
           is its own separate real link. */}
-      <div className="relative aspect-4/5 overflow-hidden rounded-[14px] bg-media">
+      <div className="relative aspect-4/5 overflow-hidden border-b border-line bg-media">
         <Link href={href} aria-label={product.name} className="absolute inset-0 z-0 focus-ring rounded-[14px]">
           <div aria-hidden="true" className="absolute inset-0 hatch" />
           <div aria-hidden="true" className="absolute inset-0 glow" />
@@ -278,44 +280,37 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           </div>
         </div>
 
-        {/* Leo's card body is one left-aligned column — brand/category,
-            name, star-row rating, then price with its compare-at price
-            inline on the SAME line (not split into a right-floated price
-            block) — matching components/commerce/ProductCard.jsx's
-            leo-card__body/leo-card__foot structure. */}
-        <Link href={href} className="mt-3.5 block min-w-0 focus-ring rounded-md">
+        {/* Body — EShopper's card-body: centered, truncated name then
+            price (+ struck-through compare-at price) on one line. Brand/
+            category, rating, fabric, and swatches are real data the
+            template has no fields for at all — kept, but folded into this
+            centered layout rather than Leo's left-aligned stack. */}
+        <Link href={href} className="block min-w-0 border-b border-line px-3 pb-3 pt-4 text-center focus-ring">
           {(categoryName || product.brand?.name) && (
             <div className="text-[11px] uppercase tracking-[0.08em] text-stone">
               {product.brand?.name || categoryName}
             </div>
           )}
-          <h3 className="mt-1 text-[14px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink md:text-[15.5px] md:leading-[1.25]">
+          <h3 className="mt-1 truncate text-[14px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink md:text-[15.5px]">
             {product.name}
           </h3>
-          {
-            // Always a rating row, never conditional on rating > 0 — a card
-            // that simply omitted it when unrated looked broken sitting
-            // next to cards that had one. Five stars (filled up to the
-            // rounded rating, matching Leo's star-row), plus the real
-            // count as text — never color/fill alone.
-            <div className="mt-1 flex items-center gap-1">
-              <span className="flex items-center gap-0.5" aria-hidden="true">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Star
-                    key={i}
-                    className={cn(
-                      "h-3 w-3",
-                      i < Math.round(product.rating || 0) ? "fill-current text-star" : "text-line",
-                    )}
-                  />
-                ))}
-              </span>
-              <span className="text-[12px] text-stone">
-                {product.rating > 0 ? `(${product.numReviews ?? 0})` : t("product.noReviewsYet")}
-              </span>
-            </div>
-          }
-          <div className="mt-1.5 flex items-baseline gap-2">
+          <div className="mt-1 flex items-center justify-center gap-1">
+            <span className="flex items-center gap-0.5" aria-hidden="true">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star
+                  key={i}
+                  className={cn(
+                    "h-3 w-3",
+                    i < Math.round(product.rating || 0) ? "fill-current text-star" : "text-line",
+                  )}
+                />
+              ))}
+            </span>
+            <span className="text-[12px] text-stone">
+              {product.rating > 0 ? `(${product.numReviews ?? 0})` : t("product.noReviewsYet")}
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-baseline justify-center gap-2">
             <span data-tabular className="text-[15.5px] font-semibold text-ink">
               {settings.formatPrice(price)}
             </span>
@@ -333,7 +328,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             </div>
           )}
           {(colorValues.length > 0 || sizeValues.length > 0) && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1">
               {colorValues.length > 0 && (
                 <span className="flex items-center gap-1">
                   {colorValues.slice(0, VISIBLE_SWATCHES).map((v) => (
@@ -362,26 +357,31 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           )}
         </Link>
 
-        {/* Persistent footer action — Leo's card always shows its one CTA
-            (Add to cart / Choose options / Sold out), not a hover-only
-            reveal over the image. Real handlers, unchanged: the same
-            QuickAddSheet / notify-me flow the old hover button used. */}
-        {isUnavailable ? (
-          <button
-            onClick={handleNotify}
-            className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-surface text-[13.5px] font-semibold text-ink transition-colors hover:border-ink focus-ring active:scale-[0.985]"
-          >
-            <BellRing className="h-4 w-4" strokeWidth={1.8} />
-            {t("product.notifyIfReturns")}
-          </button>
-        ) : (
-          <button
-            onClick={handleQuickAdd}
-            className="mt-3 h-10 w-full rounded-lg border border-line bg-surface text-[13.5px] font-semibold text-ink transition-colors hover:border-ink hover:bg-wash focus-ring active:scale-[0.985]"
-          >
-            {product.variants?.length > 1 ? t("quickAddSheet.chooseOptions") : t("product.quickAdd")}
-          </button>
-        )}
+        {/* Footer — EShopper's own two-link row (View Detail | Add To
+            Cart) instead of Leo's single persistent full-width button. */}
+        <div className="flex items-center justify-between bg-wash px-3 py-2.5 text-[13px] font-medium">
+          <Link href={href} className="flex items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring">
+            <Eye className="h-3.5 w-3.5 text-verm" strokeWidth={1.8} />
+            {t("product.viewDetail")}
+          </Link>
+          {isUnavailable ? (
+            <button
+              onClick={handleNotify}
+              className="flex items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring"
+            >
+              <BellRing className="h-3.5 w-3.5 text-verm" strokeWidth={1.8} />
+              {t("product.notifyIfReturns")}
+            </button>
+          ) : (
+            <button
+              onClick={handleQuickAdd}
+              className="flex items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring"
+            >
+              <ShoppingCart className="h-3.5 w-3.5 text-verm" strokeWidth={1.8} />
+              {product.variants?.length > 1 ? t("quickAddSheet.chooseOptions") : t("product.quickAdd")}
+            </button>
+          )}
+        </div>
     </motion.article>
   );
 }

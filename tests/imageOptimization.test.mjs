@@ -285,21 +285,17 @@ describe("Phase 9 — loading priority is scoped to genuine LCP images only", ()
   // a single card (index 0) is exactly the point being proved below.
   const UNCONDITIONAL_HIGH_RE = /fetchPriority="high"/g;
 
-  test("home hero: the desktop/mobile/tablet breakpoint variants (3) are each fetchPriority high, but NONE is loading=\"eager\" — CSS-hidden variants must not be unconditionally downloaded", () => {
-    // Next's own docs (the CSS-toggled light/dark-image guidance) are
-    // explicit: "You cannot use ... loading='eager' because that would
-    // cause both images to load. Instead, you can use
-    // fetchPriority='high'." This file renders three breakpoint variants
-    // of the same hero photo inside CSS-media-query-toggled sections
-    // (never more than one visible at once) — each may carry
-    // fetchPriority="high" (only the visible one ever actually fetches),
-    // but a literal `loading="eager"` on any of them would force an
-    // unconditional fetch regardless of visibility. Thumbnail selectors
-    // and the decorative blur backdrop must stay non-priority.
+  test("home hero: the single responsive slide image is fetchPriority high, and never loading=\"eager\"", () => {
+    // The hero carousel renders one <Image> per active slide (a single,
+    // fully responsive full-bleed banner — no separate desktop/tablet/
+    // mobile breakpoint variants hidden via CSS), so exactly one
+    // fetchPriority="high" is expected, never three. `loading="eager"`
+    // is still disallowed: Next's own docs recommend fetchPriority="high"
+    // over loading="eager" for a real LCP candidate.
     const content = stripComments(read("views/home/HeroCarousel.jsx"));
     const highMatches = [...content.matchAll(UNCONDITIONAL_HIGH_RE)];
-    assert.equal(highMatches.length, 3, "expected exactly three fetchPriority=\"high\" images — one per breakpoint variant");
-    assert.ok(!content.includes('loading="eager"'), "no image in the hero carousel may be loading=\"eager\" — that would force all breakpoint variants to download regardless of which is visible");
+    assert.equal(highMatches.length, 1, "expected exactly one fetchPriority=\"high\" image — the single responsive hero slide");
+    assert.ok(!content.includes('loading="eager"'), "the hero image may be fetchPriority high, but never loading=\"eager\"");
   });
 
   test("home page category tiles and hero thumbnail selectors are never fetchPriority high", () => {
