@@ -190,27 +190,68 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
   });
 
   // ---------- 4: a migration re-run cannot double-convert an already-migrated row ----------
+  //
+  // Imports the REAL shared decision functions scripts/migrations/
+  // 0003_bdt_price_currency.mjs actually calls (lib/bdtMigration.js) —
+  // not a hand-copied reimplementation of the guard that could pass even
+  // if the real migration's logic were broken. See lib/bdtMigration.js's
+  // own header for why this split exists (pure decision logic vs. the
+  // migration's own DB I/O).
 
-  test("re-applying the migration-style BDT conversion guard to an already-'BDT' row is a no-op (cannot double-convert)", async () => {
-    // Mirrors the exact idempotency guard used in scripts/migrations/
-    // 0003_bdt_price_currency.mjs / 0004_bdt_hijab_burqa.mjs: skip any row
-    // whose price_currency is already 'BDT', never re-multiply it.
+  test("computeProductBdtMigration() — the real function 0003 calls — cannot double-convert an already-'BDT' row", async () => {
+    const { computeProductBdtMigration } = await import("../lib/bdtMigration.js");
     const RATE = 120;
-    function applyBdtConversionOnce(row, rate) {
-      if (row.price_currency === "BDT") return row; // the real guard under test
-      return { ...row, base_price: row.base_price * rate, price_currency: "BDT" };
-    }
+    const expected = { baseUsd: 10, discountUsd: null };
 
-    let row = { base_price: 10, price_currency: "USD" };
-    row = applyBdtConversionOnce(row, RATE);
-    assert.equal(row.base_price, 1200, "first application converts once, as expected");
-    assert.equal(row.price_currency, "BDT");
+    const first = computeProductBdtMigration({ basePrice: 10, discountPrice: null, priceCurrency: "USD" }, expected, RATE);
+    assert.equal(first.applied, true);
+    assert.equal(first.basePrice, 1200, "first application converts once, as expected");
+    assert.equal(first.priceCurrency, "BDT");
 
-    const afterFirst = { ...row };
-    row = applyBdtConversionOnce(row, RATE); // simulates the migration being run a second time
-    assert.deepEqual(row, afterFirst, "a second application must be a complete no-op — no further multiplication");
-    assert.equal(row.base_price, 1200, "must NOT become 1200 * 120 = 144000");
+    // Feed the FIRST call's own output back in, exactly as the real
+    // migration would on a second run against the now-migrated row.
+    const second = computeProductBdtMigration(
+      { basePrice: first.basePrice, discountPrice: first.discountPrice, priceCurrency: first.priceCurrency },
+      expected,
+      RATE,
+    );
+    assert.equal(second.applied, false, "a second run against an already-'BDT' row must be a no-op");
+    assert.equal(second.basePrice, 1200, "must NOT become 1200 * 120 = 144000");
   });
+
+  test("computeVariantBdtMigration() — the real function 0003 calls — cannot double-convert an already-converted variant price", async () => {
+    const { computeVariantBdtMigration } = await import("../lib/bdtMigration.js");
+    const RATE = 120;
+
+    const first = computeVariantBdtMigration(10, 10, RATE);
+    assert.equal(first.applied, true);
+    assert.equal(first.price, 1200);
+
+    const second = computeVariantBdtMigration(first.price, 10, RATE);
+    assert.equal(second.applied, false, "a second run against the already-converted price must be a no-op");
+    assert.equal(second.price, 1200, "must NOT become 1200 * 120 = 144000");
+  });
+
+  test("computeProductBdtMigration() refuses to convert data that no longer matches the audited pre-migration value", async () => {
+    const { computeProductBdtMigration } = await import("../lib/bdtMigration.js");
+    assert.throws(
+      () => computeProductBdtMigration({ basePrice: 999, discountPrice: null, priceCurrency: "USD" }, { baseUsd: 10, discountUsd: null }, 120),
+      /no longer matches the audited value/,
+      "must refuse to blindly convert unaudited/stale data rather than guessing",
+    );
+  });
+
+  // Note: migration 0003's real up() is NOT invoked end-to-end here — it
+  // iterates 11 hardcoded, dev-database-specific product ids in one
+  // sequence and throws immediately on the first one not found, so it
+  // cannot run to completion against a generic test database seeded with
+  // only some of them. That constraint is exactly why the actual
+  // idempotency decision was extracted into lib/bdtMigration.js's pure,
+  // DB-free functions above — those ARE the real code 0003 calls per row
+  // (confirmed by import path, not a copy), and are what this suite tests
+  // directly. 0003's own guard against unaudited/missing rows was
+  // exercised for real against the live dev database when it originally
+  // ran (see docs/CURRENCY_MIGRATION_PLAN.md's execution record).
 
   // ---------- 5: duplicate SKU rejected server-side ----------
 

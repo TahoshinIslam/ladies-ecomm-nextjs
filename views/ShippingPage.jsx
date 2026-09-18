@@ -1,14 +1,19 @@
-"use client";
-
 import Link from "next/link";
 import { Truck } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
-import { useSettings } from "../context/SettingsContext.jsx";
+import { getT, getServerLocale } from "../lib/i18n/server.js";
+import { getCachedPublicSettings } from "../lib/serverDataCache.js";
+import { formatBdt } from "../lib/currency.js";
 
-export default function ShippingPage() {
-  const { t } = useLocale();
-  const settings = useSettings();
+// Converted from a Client Component: this page's only client-side need
+// was useLocale()'s t() and useSettings()'s already-BDT shippingZones/
+// formatBdt() — both have direct server-side equivalents (getT(),
+// getCachedPublicSettings(), lib/currency.js's pure formatBdt()), and this
+// page has no interactivity (no client state, no event handlers), so
+// there's no reason to ship its JS to the browser at all. Matches
+// views/HomePage.jsx's existing server-side i18n pattern.
+export default async function ShippingPage() {
+  const [t, settings, locale] = await Promise.all([getT(), getCachedPublicSettings(), getServerLocale()]);
 
   // Storefront is BD-shipping-only (see SettingsContext.jsx's own
   // freeShippingThreshold() comment) — only the BDT/BD zone's tiers are
@@ -41,9 +46,9 @@ export default function ShippingPage() {
                 {tiers.map((tier) => (
                   <tr key={tier.name}>
                     <td className="p-3 font-semibold">{tier.name}</td>
-                    <td className="p-3 text-muted-foreground">{settings.formatBdt(tier.baseCost)}</td>
+                    <td className="p-3 text-muted-foreground">{formatBdt(tier.baseCost, locale)}</td>
                     <td className="p-3 text-muted-foreground">
-                      {tier.freeAbove > 0 ? settings.formatBdt(tier.freeAbove) : "—"}
+                      {tier.freeAbove > 0 ? formatBdt(tier.freeAbove, locale) : "—"}
                     </td>
                   </tr>
                 ))}

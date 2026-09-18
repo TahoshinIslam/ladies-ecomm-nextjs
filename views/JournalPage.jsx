@@ -1,13 +1,11 @@
-"use client";
-
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT } from "../lib/i18n/server.js";
 import Button from "../components/ui/Button.jsx";
 
-export default function JournalPage() {
-  const { t } = useLocale();
+export default async function JournalPage() {
+  const t = await getT();
 
   return (
     <div className="container-x py-16 text-center">

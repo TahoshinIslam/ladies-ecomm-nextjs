@@ -1,9 +1,7 @@
-"use client";
-
 import Link from "next/link";
 import { Ruler } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT } from "../lib/i18n/server.js";
 
 const GARMENT_SIZES = [
   { sizeKey: "catalog.sizeS", bust: "34–36 in", waist: "27–29 in" },
@@ -21,8 +19,8 @@ const LENGTH_GUIDE = [
   { labelKey: "catalog.sizeMaxi", height: "5'10\" and above" },
 ];
 
-export default function SizeGuidePage() {
-  const { t } = useLocale();
+export default async function SizeGuidePage() {
+  const t = await getT();
   return (
     <div className="container-x py-10">
       <div className="flex items-center gap-2.5">

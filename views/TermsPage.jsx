@@ -1,12 +1,10 @@
-"use client";
-
 import Link from "next/link";
 import { FileText } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT } from "../lib/i18n/server.js";
 
-export default function TermsPage() {
-  const { t } = useLocale();
+export default async function TermsPage() {
+  const t = await getT();
 
   return (
     <div className="container-x py-10">

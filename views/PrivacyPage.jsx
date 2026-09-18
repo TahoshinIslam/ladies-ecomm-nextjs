@@ -1,9 +1,7 @@
-"use client";
-
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT } from "../lib/i18n/server.js";
 
 const SECTIONS = [
   ["privacyCollectHeading", "privacyCollectBody"],
@@ -15,8 +13,8 @@ const SECTIONS = [
   ["privacyChangesHeading", "privacyChangesBody"],
 ];
 
-export default function PrivacyPage() {
-  const { t } = useLocale();
+export default async function PrivacyPage() {
+  const t = await getT();
 
   return (
     <div className="container-x py-10">

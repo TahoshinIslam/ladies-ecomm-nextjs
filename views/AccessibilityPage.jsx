@@ -1,12 +1,10 @@
-"use client";
-
 import Link from "next/link";
 import { Accessibility } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT } from "../lib/i18n/server.js";
 
-export default function AccessibilityPage() {
-  const { t } = useLocale();
+export default async function AccessibilityPage() {
+  const t = await getT();
 
   return (
     <div className="container-x py-10">

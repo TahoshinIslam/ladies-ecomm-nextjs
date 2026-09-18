@@ -14,10 +14,10 @@ import { isDepartmentCategory } from "@/lib/utils.js";
 // Forces this route to run at REQUEST time only, never during `next
 // build` — sitemap.js/robots.js are cached-by-default Route Handlers per
 // Next's own docs, which would otherwise try to statically prerender
-// this page at build time and touch MongoDB then. This app has no
+// this page at build time and touch the database then. This app has no
 // database connection available at build time (nor should it need one —
 // every other page here is already fully dynamic for the same nonce-CSP
-// reason, see lib/cacheTags.js), so a build-time MongoDB read would
+// reason, see lib/cacheTags.js), so a build-time database read would
 // either hang or fail the build outright.
 export const dynamic = "force-dynamic";
 

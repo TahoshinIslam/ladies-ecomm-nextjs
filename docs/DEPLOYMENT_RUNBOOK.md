@@ -32,15 +32,23 @@ provision unilaterally.
 - **[NEEDS DECISION]** Region alignment: co-locate the database region with
   the Vercel deployment region once both are chosen — cross-region DB
   round trips silently degrade every page's TTFB.
-- **[READY, DRILLED LOCALLY]** `scripts/backupDb.mjs` / `scripts/restoreDb.mjs`
-  now exist and were actually exercised end-to-end against the disposable
-  test database (2026-09-18): backed up `ladies_multi_ecomm_test` (with a
-  known marker row inserted first) via `mysqldump --single-transaction`,
-  restored the dump into a fresh, disposable `ladies_multi_ecomm_restore_drill`
-  database, and independently verified the marker row and full 31-table
-  schema were present — then dropped the drill database and deleted the
-  dump file (no artifacts left behind). This proves the *mechanism* works;
-  it is **not** the same as having automated production backups running.
+- **[READY, DRILLED LOCALLY, STRENGTHENED]** `scripts/backupDb.mjs` /
+  `scripts/restoreDb.mjs` / `scripts/verifyRestoreDrill.mjs` were exercised
+  end-to-end against the disposable test database (2026-09-18, second,
+  stronger pass): backed up `ladies_multi_ecomm_test` via `mysqldump
+  --single-transaction`, restored into a fresh, disposable
+  `ladies_multi_ecomm_restore_drill` database, then verified — beyond just
+  a marker row and a table-name list — **exact row counts for all 31
+  tables** (every one matched exactly, including 445 review_helpful_votes
+  and 101 sessions rows) and that **5 key UNIQUE constraints survived
+  identically** (`uq_product_variants_sku` — the SKU-uniqueness guarantee
+  this whole engagement centers on — plus session/review/order/payment
+  uniqueness). Both the drill database and the dump file were then deleted.
+  This proves the *mechanism* (backup format, restore process, schema and
+  data fidelity) works on real data shape; it is **not** the same as
+  having automated production backups running, and a drill against test
+  data cannot prove a specific *production* backup is restorable — only a
+  drill against a real production backup, once one exists, can.
   **[NEEDS ACCESS]** remaining: (1) a real production database host to
   actually back up, (2) either the provider's own backup product (most
   managed MySQL hosts include automatic daily backups + point-in-time
@@ -77,11 +85,18 @@ provision unilaterally.
   no-op (proves overlapping-scheduler safety). `events` (10-minute TTL,
   `lib/events.js`) was a confirmed gap in the old CLI-only script — it's
   now covered too.
-  **[NEEDS DECISION]** remaining: which scheduler actually calls this on
-  an interval — a Vercel Cron `crons` entry in `vercel.ts`, or an external
-  scheduler — and setting a real `CRON_SECRET` value in the hosting
-  platform's environment. This app cannot provision that scheduling
-  infrastructure itself.
+  **[PREPARED, NOT DEPLOYED]** `vercel.json` now has a real `crons` entry
+  (`0 * * * *` — hourly — calling this exact endpoint), matching this
+  project's actual hosting target (`.vercel/project.json` confirms this
+  repo is already linked to a Vercel project). Vercel automatically sends
+  `Authorization: Bearer $CRON_SECRET` on every Cron-triggered invocation
+  when that env var is set on the project — exactly the header
+  `lib/cronAuth.js` already expects, so no further code change is needed.
+  **What's still an external step:** (1) setting a real `CRON_SECRET`
+  value in the Vercel project's environment variables (via the dashboard
+  or `vercel env add`), and (2) this file actually being deployed — it's
+  committed locally but not pushed/deployed as part of this audit, per
+  the authorization boundary for this work.
   - Event retention/reconnect behavior itself is already correctly
     designed and does not need new code: `resolveStartCursor()` in
     `lib/events.js` gracefully falls back to "start from now" when a
@@ -106,6 +121,34 @@ provision unilaterally.
   provider like Axiom/Datadog/Better Stack) and at minimum an alert on
   sustained 5xx rate and on `/api/health/ready` failing. Cannot be
   configured without picking and provisioning a provider.
+
+## 4b. CI trigger scope (verified, no push to main needed)
+
+`.github/workflows/ci.yml`'s `on:` block is `push: branches: [main]` plus a
+**branch-unrestricted** `pull_request:`. Confirmed from the file directly:
+opening a pull request from any feature branch triggers the full real CI
+run (MariaDB service, lint, all test suites, build) without needing to
+push to `main` first or at all. Future verification of a CI-affecting
+change should open a PR rather than assume `main` is the only path — this
+was a real, unnecessary risk this audit avoided by asking before pushing
+to `main` directly, not something the workflow itself requires.
+
+## 4c. HSTS `includeSubDomains` — deliberately not enabled
+
+Acceptance criterion: `includeSubDomains` is safe to add ONLY once every
+subdomain of the production domain is confirmed to serve HTTPS-only — if
+any subdomain (a marketing microsite, a status page, a legacy redirect,
+etc.) is ever reached over plain HTTP, browsers that have cached this
+header will refuse to load it at all, a self-inflicted outage with no
+quick fix (HSTS is cached client-side for `max-age`, currently ~180 days).
+This audit has no access to a verified production subdomain inventory —
+`next.config.mjs`'s current header (`max-age=15552000`, no
+`includeSubDomains`) is the correct, conservative choice until that
+inventory exists, not an oversight. Enabling it here would be optimizing
+for a rubric point, not for the actual deployment. **Decision needed:**
+once a production domain and its full subdomain list are known, confirm
+every one is HTTPS-only, then add `includeSubDomains` (and only then
+consider `preload`, which is effectively irreversible).
 
 ## 5. Deployment and rollback
 

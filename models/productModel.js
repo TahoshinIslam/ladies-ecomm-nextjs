@@ -249,8 +249,25 @@ function buildSlug(name, id) {
 
 /** Recomputes denormalized topCategory + attribute facets — the SQL port of the old pre-validate hook. */
 async function resolveDerivedFields(data) {
-  const category = await Category.findById(data.category);
-  const topCategory = category?.parent ?? category?._id ?? data.category;
+  // Confirmed live bug, fixed: on an UPDATE, `data` here is the product
+  // object services/productService.js's updateProduct() already loaded
+  // via Product.findById() — its `.category` field is a POPULATED
+  // category object ({_id, name, parent, ...}), not a raw id string,
+  // whenever the caller's request body didn't itself include a new
+  // `category` (e.g. a price-only or name-only edit). Passing that object
+  // straight to Category.findById() (which expects a raw id) failed to
+  // resolve a real category, and `String(<object>)` on the eventual
+  // fallback silently wrote the literal text "[object Object]" into
+  // top_category_id — breaking that product's storefront department
+  // scoping (getStorefrontDepartmentIds()'s IN-list match) invisibly,
+  // while leaving the product otherwise looking completely normal
+  // (active, correct price, visible on its own direct product page).
+  // Normalizing to a raw id here, unconditionally, closes this for every
+  // caller regardless of whether `data.category` is already a raw id
+  // (create path) or a populated object (update path).
+  const categoryId = data.category && typeof data.category === "object" ? data.category._id : data.category;
+  const category = await Category.findById(categoryId);
+  const topCategory = category?.parent ?? category?._id ?? categoryId;
 
   const defs = await AttributeDefinition.findDerivedFromVariant();
   const topCategoryId = topCategory ? String(topCategory) : null;

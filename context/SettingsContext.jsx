@@ -151,6 +151,14 @@ export const SettingsProvider = ({ children }) => {
   // settings update — DOM ops are idempotent.
   useEffect(() => {
     applyBranding(settings.store);
+    // applyBranding() (defined above) only ever reads store.name/
+    // store.faviconUrl, nothing else — these two are the complete, correct
+    // dep list, deliberately narrower than the whole `settings.store`
+    // object so this effect doesn't re-run on every unrelated settings
+    // field (currency rate, shipping zones, ...). Adding `settings.store`
+    // itself as the linter suggests would defeat that and re-run this on
+    // every settings change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.store?.name, settings.store?.faviconUrl]);
 
   const rate = settings.currency?.usdToBdt;

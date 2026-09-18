@@ -13,7 +13,12 @@
 // Every conversion below is `current_value * RATE` (120, this database's
 // live settings.currency.usdToBdt at the time of this migration) applied
 // exactly once, to exactly the column named — never applied twice, never
-// applied to a row already marked 'BDT'.
+// applied to a row already marked 'BDT'. The actual per-row decision
+// (convert vs. no-op vs. refuse-on-mismatch) lives in lib/bdtMigration.js,
+// shared with tests/bdtPricingIntegrity.test.mjs's idempotency-guard test
+// — so that test exercises this migration's real logic, not a copy of it.
+import { computeProductBdtMigration, computeVariantBdtMigration } from "../../lib/bdtMigration.js";
+
 const RATE = 120;
 
 // [productId, baseUsd, discountUsd|null] — every product-level conversion.
@@ -62,31 +67,24 @@ const migration = {
       );
       if (!rows.length) throw new Error(`Product ${productId} not found — refusing to proceed with a partial migration`);
       const row = rows[0];
-      if (row.price_currency === "BDT") continue; // already migrated, idempotent re-run
-      if (Number(row.base_price) !== baseUsd || (discountUsd == null ? row.discount_price != null : Number(row.discount_price) !== discountUsd)) {
-        throw new Error(
-          `Product ${productId}'s current price (base=${row.base_price}, discount=${row.discount_price}) ` +
-            `no longer matches the audited value (base=${baseUsd}, discount=${discountUsd}) this migration expects — ` +
-            `refusing to convert stale/unexpected data. Re-audit before re-running.`,
-        );
-      }
-      const newDiscount = discountUsd == null ? null : discountUsd * RATE;
+      const decision = computeProductBdtMigration(
+        { basePrice: row.base_price, discountPrice: row.discount_price, priceCurrency: row.price_currency },
+        { baseUsd, discountUsd },
+        RATE,
+      );
+      if (!decision.applied) continue; // already migrated, idempotent re-run
       await conn.query(
         "UPDATE products SET base_price = ?, discount_price = ?, price_currency = 'BDT' WHERE id = ?",
-        [baseUsd * RATE, newDiscount, productId],
+        [decision.basePrice, decision.discountPrice, productId],
       );
     }
 
     for (const [variantId, priceUsd] of VARIANT_CONVERSIONS) {
       const [rows] = await conn.query("SELECT price FROM product_variants WHERE id = ?", [variantId]);
       if (!rows.length) throw new Error(`Variant ${variantId} not found — refusing to proceed with a partial migration`);
-      if (Number(rows[0].price) !== priceUsd) {
-        throw new Error(
-          `Variant ${variantId}'s current price (${rows[0].price}) no longer matches the audited value (${priceUsd}) — ` +
-            `refusing to convert. Re-audit before re-running.`,
-        );
-      }
-      await conn.query("UPDATE product_variants SET price = ? WHERE id = ?", [priceUsd * RATE, variantId]);
+      const decision = computeVariantBdtMigration(rows[0].price, priceUsd, RATE);
+      if (!decision.applied) continue;
+      await conn.query("UPDATE product_variants SET price = ? WHERE id = ?", [decision.price, variantId]);
     }
 
     // "Remove USD conversion from the active pricing flow" also applies to

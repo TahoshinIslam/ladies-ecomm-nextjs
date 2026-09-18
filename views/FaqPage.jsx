@@ -1,14 +1,12 @@
-"use client";
-
 import Link from "next/link";
 import { HelpCircle } from "lucide-react";
 
-import { useLocale } from "../context/LocaleProvider.jsx";
+import { getT } from "../lib/i18n/server.js";
 
 const QA_KEYS = [1, 2, 3, 4, 5, 6, 7];
 
-export default function FaqPage() {
-  const { t } = useLocale();
+export default async function FaqPage() {
+  const t = await getT();
 
   return (
     <div className="container-x py-10">

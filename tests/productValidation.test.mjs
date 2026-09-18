@@ -4,7 +4,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestSession, requestAs, createTestUser, createTestCategory, deleteRows } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestSession, requestAs, createTestUser, createTestCategory, deleteRows, rawQuery } from "./helpers/testDb.mjs";
 import { generateObjectId } from "../lib/objectId.js";
 
 const canRun = dbReady;
@@ -212,7 +212,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       return (await res.json()).product;
     }
 
-    test("PUT with only basePrice succeeds (200) and preserves category", async () => {
+    test("PUT with only basePrice succeeds (200), preserves category, and does NOT corrupt topCategory", async () => {
       product = await freshProduct();
       try {
         const res = await productPUT(
@@ -223,6 +223,22 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
         const json = await res.json();
         assert.equal(json.product.basePrice, 999);
         assert.equal(String(json.product.category), child._id.toString());
+        // Confirmed live bug, fixed: models/productModel.js's
+        // resolveDerivedFields() previously received the already-hydrated
+        // (populated-object) `category` from the pre-update Product.findById()
+        // read whenever the request body didn't itself include `category`
+        // — silently writing the literal string "[object Object]" into
+        // top_category_id instead of the real department id, which broke
+        // this product's storefront category-scoped visibility (see
+        // services/productService.js's getStorefrontDepartmentIds()) while
+        // leaving everything else about it looking normal.
+        assert.equal(
+          String(json.product.topCategory?._id ?? json.product.topCategory),
+          category._id.toString(),
+          "topCategory must remain the real department id — must never become the literal string \"[object Object]\"",
+        );
+        const [row] = await rawQuery("SELECT top_category_id FROM products WHERE id = ?", [product._id]);
+        assert.equal(row.top_category_id, category._id.toString(), "the raw DB column itself must hold the real id, not a corrupted string");
       } finally {
         await deleteRows("products", "id", product._id);
       }

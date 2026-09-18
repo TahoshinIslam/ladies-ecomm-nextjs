@@ -749,3 +749,35 @@ async function sha256Hex(raw) {
   const crypto = await import("node:crypto");
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
+
+// Pure unit coverage for lib/session.js's exported resolveIdleTimeoutMs()
+// — no database needed. Confirmed audit gap this closes: the idle
+// timeout previously had no configuration validation at all, so a value
+// smaller than lastSeenAt's own write-throttle window (5 minutes) would
+// have logged out genuinely active users, not just abandoned sessions.
+describe("lib/session.js — resolveIdleTimeoutMs() configuration validation", () => {
+  test("unset/invalid values fall back to the 30-day default", async () => {
+    const { resolveIdleTimeoutMs } = await import("../lib/session.js");
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    assert.equal(resolveIdleTimeoutMs(undefined), THIRTY_DAYS_MS);
+    assert.equal(resolveIdleTimeoutMs(""), THIRTY_DAYS_MS);
+    assert.equal(resolveIdleTimeoutMs("not-a-number"), THIRTY_DAYS_MS);
+    assert.equal(resolveIdleTimeoutMs("-5"), THIRTY_DAYS_MS);
+    assert.equal(resolveIdleTimeoutMs("0"), THIRTY_DAYS_MS);
+  });
+
+  test("a configured value below the minimum floor (15 minutes) is clamped up, not accepted as-is", async () => {
+    const { resolveIdleTimeoutMs } = await import("../lib/session.js");
+    const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+    assert.equal(resolveIdleTimeoutMs("1"), FIFTEEN_MIN_MS, "1 minute is below lastSeenAt's own 5-minute write-throttle lag — must be floored");
+    assert.equal(resolveIdleTimeoutMs("14"), FIFTEEN_MIN_MS);
+    assert.equal(resolveIdleTimeoutMs("15"), FIFTEEN_MIN_MS, "exactly the floor is accepted as the floor value");
+  });
+
+  test("a configured value at or above the floor is used exactly as given", async () => {
+    const { resolveIdleTimeoutMs } = await import("../lib/session.js");
+    assert.equal(resolveIdleTimeoutMs("16"), 16 * 60 * 1000);
+    assert.equal(resolveIdleTimeoutMs("120"), 120 * 60 * 1000);
+    assert.equal(resolveIdleTimeoutMs("43200"), 43200 * 60 * 1000, "the documented default (30 days) round-trips exactly when set explicitly");
+  });
+});

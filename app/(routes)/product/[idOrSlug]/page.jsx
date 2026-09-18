@@ -8,7 +8,7 @@ import { absoluteUrl, truncateDescription } from "@/lib/seo.js";
 
 // Phase 10 — reuses the SAME Phase 8 cached read the page body itself
 // calls (lib/serverDataCache.js's getCachedProductByIdOrSlug) — same
-// unstable_cache entry, so this never adds a duplicate uncached MongoDB
+// unstable_cache entry, so this never adds a duplicate uncached database
 // read alongside the page's own fetch. `params` is a Promise in this
 // Next version (confirmed against node_modules/next/dist/docs and
 // matching every other dynamic route in this repo), so it's awaited here
