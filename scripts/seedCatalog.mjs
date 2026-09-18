@@ -685,6 +685,35 @@ function buildProducts(categoryBySlug) {
   ];
 }
 
+// Confirmed, reproduced-in-code risk (see docs/CURRENCY_MIGRATION_PLAN.md):
+// models/productModel.js's saveProduct() UPDATE never touches
+// price_currency — so re-running this script against an already-migrated
+// ('BDT') product would silently overwrite its real Taka price with this
+// file's own (pre-migration, USD-scale) hardcoded numbers while the
+// product stayed labeled 'BDT', corrupting the price rather than merely
+// mislabeling it. This function's own product data below has NOT been
+// converted to BDT — updating that is a separate, larger content change —
+// so instead this preserves whatever price is already live on a migrated
+// product and only refreshes non-price catalog fields (name/description/
+// images/category/tags/...) for it. A genuinely NEW product (no existing
+// row) is still created with this file's own price data, explicitly
+// marked priceCurrency: "BDT" per this store's now-BDT-only convention
+// (never left to fall through to the schema DEFAULT implicitly).
+function preservePricingOnUpdate(existing, incoming) {
+  const merged = { ...incoming };
+  if (existing.priceCurrency === "BDT") {
+    merged.basePrice = existing.basePrice;
+    merged.discountPrice = existing.discountPrice;
+    const existingVariantBySku = new Map(existing.variants.map((v) => [v.sku, v]));
+    merged.variants = (incoming.variants || []).map((v) => {
+      const prior = v.sku ? existingVariantBySku.get(v.sku) : null;
+      if (!prior) return v;
+      return { ...v, price: prior.price, discountPrice: prior.discountPrice };
+    });
+  }
+  return merged;
+}
+
 async function seedProducts(categoryBySlug) {
   const products = buildProducts(categoryBySlug);
   let created = 0;
@@ -693,11 +722,11 @@ async function seedProducts(categoryBySlug) {
   for (const data of products) {
     const existing = await Product.findByName(data.name);
     if (existing) {
-      Object.assign(existing, data);
+      Object.assign(existing, preservePricingOnUpdate(existing, data));
       await existing.save();
       updated++;
     } else {
-      await Product.create(data);
+      await Product.create({ ...data, priceCurrency: "BDT" });
       created++;
     }
   }

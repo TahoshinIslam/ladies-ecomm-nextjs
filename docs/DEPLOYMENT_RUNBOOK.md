@@ -32,17 +32,24 @@ provision unilaterally.
 - **[NEEDS DECISION]** Region alignment: co-locate the database region with
   the Vercel deployment region once both are chosen — cross-region DB
   round trips silently degrade every page's TTFB.
-- **[NEEDS ACCESS]** Backups and a restore drill: **not configured, and this
-  audit did not create a backup mechanism** — that requires the chosen
-  provider's own backup product (most managed MySQL hosts include automatic
-  daily backups + point-in-time recovery) or a scheduled `mysqldump`
-  pushed to object storage, both of which need real provider access/budget
-  this session doesn't have. Before launch: (1) confirm the provider's
-  backup retention window, (2) actually restore one backup into a scratch
-  database and run `npm run smoke` against it, and (3) document the
-  restore procedure's exact steps and time-to-restore. Skipping the actual
-  restore test is the single most common way "we have backups" turns out
-  to be false when it matters.
+- **[READY, DRILLED LOCALLY]** `scripts/backupDb.mjs` / `scripts/restoreDb.mjs`
+  now exist and were actually exercised end-to-end against the disposable
+  test database (2026-09-18): backed up `ladies_multi_ecomm_test` (with a
+  known marker row inserted first) via `mysqldump --single-transaction`,
+  restored the dump into a fresh, disposable `ladies_multi_ecomm_restore_drill`
+  database, and independently verified the marker row and full 31-table
+  schema were present — then dropped the drill database and deleted the
+  dump file (no artifacts left behind). This proves the *mechanism* works;
+  it is **not** the same as having automated production backups running.
+  **[NEEDS ACCESS]** remaining: (1) a real production database host to
+  actually back up, (2) either the provider's own backup product (most
+  managed MySQL hosts include automatic daily backups + point-in-time
+  recovery — preferred if available) or a scheduled job running
+  `scripts/backupDb.mjs` against production and pushing the dump to
+  durable object storage, (3) a defined retention window, and (4)
+  re-running this exact drill against a real production backup once one
+  exists — a drill against test data proves the scripts work, not that a
+  specific production backup is restorable.
 
 ## 2. Environment separation
 
@@ -60,14 +67,21 @@ provision unilaterally.
 
 ## 3. Scheduled cleanup
 
-- **[CONFIRMED GAP]** `scripts/cleanupExpired.mjs` correctly deletes
-  expired `sessions`/`rate_limit_counters`/`events` rows (verified by
-  reading `lib/expiryCleanup.js` — uses a JS-computed UTC cutoff, not SQL
-  `NOW()`, consistent with this audit's timezone fix) but **nothing runs it
-  automatically** — no `vercel.json` crons block, no GitHub Actions
-  schedule, nothing. In production this means the `events` table (10-minute
-  TTL, per `lib/events.js`) and `rate_limit_counters`/`sessions` tables grow
-  without bound.
+- **[READY]** `app/api/admin/cron/cleanup` — a real, authenticated
+  (`CRON_SECRET` bearer token, fails closed if unset), repeat-safe HTTP
+  endpoint now exists, wrapping `lib/expiryCleanup.js`'s batched cleanup of
+  `sessions`/`rate_limit_counters`/`events`. Verified with a live
+  regression test (`tests/scheduledCleanup.test.mjs`): rejects missing/
+  wrong credentials, succeeds with the right one, reports per-table +
+  total counts, and calling it twice in immediate succession is a safe
+  no-op (proves overlapping-scheduler safety). `events` (10-minute TTL,
+  `lib/events.js`) was a confirmed gap in the old CLI-only script — it's
+  now covered too.
+  **[NEEDS DECISION]** remaining: which scheduler actually calls this on
+  an interval — a Vercel Cron `crons` entry in `vercel.ts`, or an external
+  scheduler — and setting a real `CRON_SECRET` value in the hosting
+  platform's environment. This app cannot provision that scheduling
+  infrastructure itself.
   - Event retention/reconnect behavior itself is already correctly
     designed and does not need new code: `resolveStartCursor()` in
     `lib/events.js` gracefully falls back to "start from now" when a

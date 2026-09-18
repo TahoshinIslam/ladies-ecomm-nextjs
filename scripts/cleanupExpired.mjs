@@ -1,9 +1,15 @@
-// Bounded, indexed, repeatable cleanup for the two tables MongoDB's own
+// Bounded, indexed, repeatable cleanup for the tables MongoDB's own
 // background TTL index used to physically delete automatically —
-// `sessions` and `rate_limit_counters` — see sql/schema.sql's own
-// idx_sessions_expires_at / idx_rate_limit_expires_at comments, and
-// docs/PRODUCTION_READINESS.md §6.4 ("Expiry cleanup — real gap
-// introduced by the migration") for the full background.
+// `sessions`, `rate_limit_counters`, and `events` — see sql/schema.sql's
+// own idx_sessions_expires_at / idx_rate_limit_expires_at /
+// idx_events_expires_at comments, and docs/PRODUCTION_READINESS.md §6.4
+// ("Expiry cleanup — real gap introduced by the migration") for the full
+// background. `events` (lib/events.js's durable SSE outbox, 10-minute
+// TTL) was a confirmed gap this script didn't cover — nothing about its
+// correctness depends on this cleanup running (resolveStartCursor()
+// already gracefully falls back to "start from now" for a cleaned-up or
+// never-existed event id), but left unrun in production this table grows
+// without bound.
 //
 // This script is a storage-reclamation BACKSTOP ONLY — it is never relied
 // on for correctness:
@@ -37,7 +43,7 @@
 // alert on a non-zero exit without parsing output.
 
 import connectDB, { query, closePool } from "../config/db.js";
-import { countExpired, deleteExpiredInBatches } from "../lib/expiryCleanup.js";
+import { countExpired, runExpiryCleanup, EXPIRY_CLEANUP_TABLES } from "../lib/expiryCleanup.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -49,20 +55,19 @@ async function main() {
   await connectDB();
 
   if (DRY_RUN) {
-    const sessionsExpired = await countExpired(query, "sessions");
-    const countersExpired = await countExpired(query, "rate_limit_counters");
-    log(`DRY RUN — would delete ${sessionsExpired} expired session(s), ${countersExpired} expired rate-limit counter(s). Nothing written.`);
+    for (const table of EXPIRY_CLEANUP_TABLES) {
+      const n = await countExpired(query, table);
+      log(`DRY RUN — would delete ${n} expired row(s) from ${table}. Nothing written.`);
+    }
     await closePool();
     return;
   }
 
-  const sessionsDeleted = await deleteExpiredInBatches(query, "sessions");
-  log(`sessions: deleted ${sessionsDeleted} expired row(s)`);
-
-  const countersDeleted = await deleteExpiredInBatches(query, "rate_limit_counters");
-  log(`rate_limit_counters: deleted ${countersDeleted} expired row(s)`);
-
-  log(`done — ${sessionsDeleted + countersDeleted} row(s) reclaimed total`);
+  const { deleted, total } = await runExpiryCleanup(query);
+  for (const [table, n] of Object.entries(deleted)) {
+    log(`${table}: deleted ${n} expired row(s)`);
+  }
+  log(`done — ${total} row(s) reclaimed total`);
   await closePool();
 }
 

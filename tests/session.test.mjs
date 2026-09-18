@@ -694,6 +694,55 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       await deleteRows("users", "id", user._id);
     }
   });
+
+  // Confirmed audit finding, fixed: sessions had no idle timeout at all —
+  // lastSeenAt was tracked but never read by validateSessionToken(). This
+  // proves the fix against the real DB/session layer, not a mock.
+  test("a session idle past the default idle timeout is rejected even though its absolute expiry hasn't arrived", async () => {
+    // lib/session.js reads SESSION_IDLE_TIMEOUT_MINUTES once at module
+    // load (same established convention as this file's other config
+    // constants, e.g. MAX_ACTIVE_SESSIONS_PER_USER) — setting the env var
+    // mid-test would not retroactively change an already-imported
+    // constant, so this exercises the real default (30 days) directly.
+    const user = await createTestUser();
+    try {
+      const session = await createTestSession(user._id);
+
+      const freshReq = requestAs({ method: "GET", url: "http://test/api/users/me", session });
+      assert.equal((await mePOST_GET(freshReq)).status, 200, "a freshly-created session is valid");
+
+      // Backdate last_seen_at past the default 30-day idle window —
+      // absolute expiresAt is still ~30 days out from createTestSession's
+      // own default too, so only the idle check can be what rejects this.
+      const tokenHash = await sha256Hex(session.rawToken);
+      await rawQuery("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?", [
+        new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+        tokenHash,
+      ]);
+
+      const idleReq = requestAs({ method: "GET", url: "http://test/api/users/me", session });
+      assert.equal((await mePOST_GET(idleReq)).status, 401, "an idle-past-timeout session must be rejected, not silently accepted");
+    } finally {
+      await deleteRows("users", "id", user._id);
+    }
+  });
+
+  test("SESSION_IDLE_TIMEOUT_MINUTES defaults to a generous window — ordinary recent activity is never falsely rejected", async () => {
+    const user = await createTestUser();
+    try {
+      const session = await createTestSession(user._id);
+      const tokenHash = await sha256Hex(session.rawToken);
+      // 1 hour idle — comfortably inside the default 30-day window.
+      await rawQuery("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?", [
+        new Date(Date.now() - 60 * 60 * 1000),
+        tokenHash,
+      ]);
+      const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
+      assert.equal((await mePOST_GET(req)).status, 200);
+    } finally {
+      await deleteRows("users", "id", user._id);
+    }
+  });
 });
 
 async function sha256Hex(raw) {

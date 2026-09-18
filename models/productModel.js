@@ -367,10 +367,10 @@ async function create(data) {
     await conn.query(
       `INSERT INTO products
          (id, name, name_bn, slug, description, description_bn, category_id, top_category_id, brand_id,
-          age_group, base_price, discount_price, images, measurement_height_range, measurement_chest,
+          age_group, base_price, discount_price, price_currency, images, measurement_height_range, measurement_chest,
           measurement_sleeve_length, included_items, availability, tags, tags_text, rating, num_reviews,
           is_featured, is_active, meta_title, meta_description, meta_keywords, og_image)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         draft.name,
@@ -384,6 +384,11 @@ async function create(data) {
         draft.ageGroup || "adult",
         draft.basePrice,
         draft.discountPrice ?? null,
+        // Explicit, not left to the schema DEFAULT — this store is
+        // BDT-only (see docs/CURRENCY_MIGRATION_PLAN.md); any caller that
+        // still needs to create a legacy USD row (there should be none
+        // going forward) must pass priceCurrency: "USD" explicitly.
+        draft.priceCurrency === "USD" ? "USD" : "BDT",
         JSON.stringify(draft.images || []),
         draft.measurements?.heightRange || "",
         draft.measurements?.chest || "",
