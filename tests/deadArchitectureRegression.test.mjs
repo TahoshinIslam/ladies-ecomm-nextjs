@@ -117,9 +117,14 @@ describe("Phase 6 — COD-only enforcement stays in place", () => {
     assert.deepEqual(offenders, []);
   });
 
-  test("models/paymentModel.js's method enum is COD-only, not pre-declaring unimplemented gateways", () => {
-    const content = fs.readFileSync(abs("models/paymentModel.js"), "utf8");
-    assert.match(content, /enum:\s*\["cod"\]/);
+  test("payments.method is COD-only at the schema level, not pre-declaring unimplemented gateways", () => {
+    // Post Mongo -> MySQL migration, field-level enum constraints live in
+    // sql/schema.sql's DDL (MySQL ENUM), not in models/paymentModel.js —
+    // the SQL model is a plain query builder with no schema-declaration
+    // layer of its own, unlike the old Mongoose schema this test used to
+    // check directly.
+    const content = fs.readFileSync(abs("sql/schema.sql"), "utf8");
+    assert.match(content, /method\s+ENUM\('cod'\)/);
   });
 });
 

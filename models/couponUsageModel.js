@@ -1,44 +1,58 @@
-import mongoose from "mongoose";
+import { query } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
 
-// Phase 5 — tracks how many times EACH USER has used EACH coupon, so
-// `Coupon.perUserLimit` (defined in models/couponModel.js since Phase 1 but
-// never enforced anywhere) can be enforced atomically under concurrency,
-// the same way stock decrement already is (services/orderService.js's
-// guarded `Product.updateOne` pattern) — a plain "count existing orders
-// with this coupon+user, then compare" check-then-act would still race.
-//
-// The unique compound index below is what makes the atomic claim possible:
-// services/orderService.js's coupon-claim step does a guarded
-// `findOneAndUpdate({coupon, user, count: {$lt: perUserLimit}}, {$inc:
-// {count: 1}}, {upsert: true})` — when a per-user-limited user's existing
-// usage row fails that `count < perUserLimit` filter, Mongo's upsert
-// attempts to insert a second row for the same (coupon, user) pair, which
-// this unique index rejects with a duplicate-key error — the SAME
-// "guarded write + catch the race" shape already used for Phase 4's
-// idempotency key and Phase 4's COD Payment.order uniqueness, just backed
-// by a different index.
-const couponUsageSchema = new mongoose.Schema(
-  {
-    coupon: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "coupons",
-      required: true,
-    },
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: true,
-    },
-    count: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-  },
-  { timestamps: true },
-);
+function rowToUsage(row) {
+  if (!row) return null;
+  return { _id: row.id, coupon: row.coupon_id, user: row.user_id, count: row.count };
+}
 
-couponUsageSchema.index({ coupon: 1, user: 1 }, { unique: true });
+async function findByCouponUser(couponId, userId, conn) {
+  const sql = "SELECT * FROM coupon_usages WHERE coupon_id = ? AND user_id = ?";
+  const rows = conn ? (await conn.query(sql, [couponId, userId]))[0] : await query(sql, [couponId, userId]);
+  return rowToUsage(rows[0]);
+}
 
-const CouponUsage = mongoose.models.couponusages || mongoose.model("couponusages", couponUsageSchema);
+/**
+ * Atomic, guarded per-user claim inside an order-creation transaction —
+ * mirrors the old guarded upsert (`findOneAndUpdate({coupon,user,count:{$lt:
+ * perUserLimit}}, {$inc}, {upsert:true})`). `SELECT ... FOR UPDATE` locks
+ * any existing row for this (coupon, user) pair for the rest of the caller's
+ * transaction, so two concurrent claims can never both read the same
+ * "not yet at limit" count and both proceed — the second one blocks until
+ * the first commits or rolls back, exactly the serialization the old
+ * duplicate-key-catch upsert achieved via a different mechanism. Returns
+ * true only when THIS call actually advanced the count.
+ */
+async function claimPerUserUsage(conn, couponId, userId, perUserLimit) {
+  const [existingRows] = await conn.query(
+    "SELECT count FROM coupon_usages WHERE coupon_id = ? AND user_id = ? FOR UPDATE",
+    [couponId, userId],
+  );
+
+  if (!existingRows.length) {
+    await conn.query("INSERT INTO coupon_usages (id, coupon_id, user_id, count) VALUES (?, ?, ?, 1)", [
+      generateObjectId(),
+      couponId,
+      userId,
+    ]);
+    return true;
+  }
+
+  if (perUserLimit != null && existingRows[0].count >= perUserLimit) {
+    return false;
+  }
+  await conn.query("UPDATE coupon_usages SET count = count + 1 WHERE coupon_id = ? AND user_id = ?", [couponId, userId]);
+  return true;
+}
+
+/** Reverses claimPerUserUsage() on order cancellation. */
+async function restorePerUserUsage(conn, couponId, userId) {
+  await conn.query(
+    "UPDATE coupon_usages SET count = count - 1 WHERE coupon_id = ? AND user_id = ? AND count > 0",
+    [couponId, userId],
+  );
+}
+
+const CouponUsage = { findByCouponUser, claimPerUserUsage, restorePerUserUsage };
+
 export default CouponUsage;

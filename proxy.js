@@ -78,7 +78,16 @@ function buildPageCsp(nonce) {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    "upgrade-insecure-requests",
+    // Dev-only exclusion: this unconditionally forces every subresource
+    // (CSS/JS/fonts) referenced by the page to upgrade to https. Chrome
+    // treats `localhost` as already-secure and quietly ignores the
+    // directive there, but a LAN IP (e.g. accessing the dev server from
+    // another device as http://192.168.x.x:3000) is not special-cased —
+    // the browser dutifully upgrades every request to https, and since
+    // `next dev` never serves TLS, every asset fails with
+    // ERR_SSL_PROTOCOL_ERROR, breaking all styling. Production still
+    // gets this unconditionally; only dev needs the LAN-access carve-out.
+    ...(isDev ? [] : ["upgrade-insecure-requests"]),
   ].join("; ");
 }
 

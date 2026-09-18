@@ -1,105 +1,190 @@
-import mongoose from "mongoose";
+import { query, withConnection } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
 
-const optionSchema = new mongoose.Schema(
-  {
-    value: { type: String, required: true },
-    label: { type: String, required: true },
-    // Optional Bangla mirror of `label` (e.g. value "nida" -> label "Nida",
-    // labelBn "নিদা"). `value` itself never translates — see
-    // attributeService.js's localizeAttributeDefinition().
-    labelBn: { type: String, default: "" },
-    swatchHex: { type: String, default: "" },
-  },
-  { _id: false },
-);
+async function loadChildren(defIds) {
+  if (!defIds.length) return { options: new Map(), overrides: new Map(), categories: new Map() };
+  const ph = defIds.map(() => "?").join(",");
+  const [optionRows, overrideRows, categoryRows] = await Promise.all([
+    query(
+      `SELECT * FROM attribute_definition_options WHERE attribute_definition_id IN (${ph}) ORDER BY position ASC`,
+      defIds,
+    ),
+    query(
+      `SELECT * FROM attribute_definition_label_overrides WHERE attribute_definition_id IN (${ph})`,
+      defIds,
+    ),
+    query(
+      `SELECT * FROM attribute_definition_categories WHERE attribute_definition_id IN (${ph})`,
+      defIds,
+    ),
+  ]);
+  const options = new Map();
+  for (const r of optionRows) {
+    const list = options.get(r.attribute_definition_id) || [];
+    list.push({ value: r.value, label: r.label, labelBn: r.label_bn, swatchHex: r.swatch_hex });
+    options.set(r.attribute_definition_id, list);
+  }
+  const overrides = new Map();
+  for (const r of overrideRows) {
+    const list = overrides.get(r.attribute_definition_id) || [];
+    list.push({ category: r.category_id, label: r.label, labelBn: r.label_bn });
+    overrides.set(r.attribute_definition_id, list);
+  }
+  const categories = new Map();
+  for (const r of categoryRows) {
+    const list = categories.get(r.attribute_definition_id) || [];
+    list.push(r.category_id);
+    categories.set(r.attribute_definition_id, list);
+  }
+  return { options, overrides, categories };
+}
 
-const labelOverrideSchema = new mongoose.Schema(
-  {
-    category: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "categories",
-      required: true,
-    },
-    label: { type: String, required: true },
-    labelBn: { type: String, default: "" },
-  },
-  { _id: false },
-);
+function rowToDefinition(row, children) {
+  if (!row) return null;
+  const def = {
+    _id: row.id,
+    key: row.attr_key,
+    label: row.label,
+    labelBn: row.label_bn,
+    labelOverrides: children?.overrides.get(row.id) || [],
+    type: row.type,
+    options: children?.options.get(row.id) || [],
+    appliesToCategories: children?.categories.get(row.id) || [],
+    derivedFromVariant: !!row.derived_from_variant,
+    filterable: !!row.filterable,
+    required: !!row.required,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  def.save = async function save() {
+    return saveDefinition(this);
+  };
+  def.deleteOne = async function deleteOne() {
+    await query("DELETE FROM attribute_definitions WHERE id = ?", [this._id]);
+  };
+  return def;
+}
 
-// Drives both the admin product form and the dynamic filter panel: which
-// attributes render for a given top-level category, in what shape, and
-// under what label. Nothing about the filter UI is hardcoded per-category —
-// it all reads from this collection.
-const attributeDefinitionSchema = new mongoose.Schema(
-  {
-    key: {
-      type: String,
-      required: [true, "Attribute key is required"],
-      unique: true,
-      // No `lowercase: true` here deliberately: this key must match
-      // Product.attributes[].key byte-for-byte (e.g. "coverageLevel"), and
-      // that field isn't case-normalized either.
-      trim: true,
-    },
-    label: {
-      type: String,
-      required: [true, "Attribute label is required"],
-    },
-    // Optional Bangla mirror of `label` — same fallback rule as
-    // Product.nameBn.
-    labelBn: {
-      type: String,
-      default: "",
-    },
-    // Per-top-level-category display label override, e.g. "size" reads as
-    // "Length" for Burqa/Khimar but stays "Size" everywhere else.
-    labelOverrides: {
-      type: [labelOverrideSchema],
-      default: [],
-    },
-    type: {
-      type: String,
-      enum: ["select", "swatch", "boolean", "text"],
-      required: true,
-    },
-    // Unused for type "text" / "boolean".
-    options: {
-      type: [optionSchema],
-      default: [],
-    },
-    // Top-level category ids this attribute applies to. Empty = universal
-    // (shown regardless of selected category, e.g. color/size/occasion).
-    appliesToCategories: {
-      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "categories" }],
-      default: [],
-    },
-    // true for color/size/fabric: their values are synced from
-    // product.variants rather than hand-entered on the product form.
-    derivedFromVariant: {
-      type: Boolean,
-      default: false,
-    },
-    filterable: {
-      type: Boolean,
-      default: true,
-    },
-    required: {
-      type: Boolean,
-      default: false,
-    },
-    sortOrder: {
-      type: Number,
-      default: 0,
-    },
-  },
-  { timestamps: true },
-);
+async function findById(id) {
+  if (!id) return null;
+  const rows = await query("SELECT * FROM attribute_definitions WHERE id = ?", [id]);
+  if (!rows.length) return null;
+  const children = await loadChildren([id]);
+  return rowToDefinition(rows[0], children);
+}
 
-attributeDefinitionSchema.index({ appliesToCategories: 1 });
+async function findByKeys(keys) {
+  if (!keys.length) return [];
+  const rows = await query(
+    `SELECT * FROM attribute_definitions WHERE attr_key IN (${keys.map(() => "?").join(",")})`,
+    keys,
+  );
+  const children = await loadChildren(rows.map((r) => r.id));
+  return rows.map((r) => rowToDefinition(r, children));
+}
 
-// Guards against Next.js dev's hot-reload re-executing this module and
-// trying to re-register an already-compiled model.
-const attributeDefinitionModel =
-  mongoose.models.attributedefinitions ||
-  mongoose.model("attributedefinitions", attributeDefinitionSchema);
-export default attributeDefinitionModel;
+/** Every definition, sorted sort_order then key. */
+async function findAll() {
+  const rows = await query("SELECT * FROM attribute_definitions ORDER BY sort_order ASC, attr_key ASC");
+  const children = await loadChildren(rows.map((r) => r.id));
+  return rows.map((r) => rowToDefinition(r, children));
+}
+
+/** Definitions applying to `topCategoryId`: universal (no categories set) OR explicitly scoped to it. */
+async function findByCategoryOrGlobal(topCategoryId) {
+  const rows = await query(
+    `SELECT ad.* FROM attribute_definitions ad
+     WHERE NOT EXISTS (SELECT 1 FROM attribute_definition_categories c WHERE c.attribute_definition_id = ad.id)
+        OR EXISTS (
+             SELECT 1 FROM attribute_definition_categories c
+             WHERE c.attribute_definition_id = ad.id AND c.category_id = ?
+           )
+     ORDER BY ad.sort_order ASC, ad.attr_key ASC`,
+    [topCategoryId],
+  );
+  const children = await loadChildren(rows.map((r) => r.id));
+  return rows.map((r) => rowToDefinition(r, children));
+}
+
+/** Definitions flagged derivedFromVariant, optionally narrowed to ones applying to a given top category (or universal). */
+async function findDerivedFromVariant() {
+  const rows = await query("SELECT * FROM attribute_definitions WHERE derived_from_variant = 1");
+  const children = await loadChildren(rows.map((r) => r.id));
+  return rows.map((r) => rowToDefinition(r, children));
+}
+
+async function writeChildren(conn, defId, def) {
+  await conn.query("DELETE FROM attribute_definition_options WHERE attribute_definition_id = ?", [defId]);
+  await conn.query("DELETE FROM attribute_definition_label_overrides WHERE attribute_definition_id = ?", [defId]);
+  await conn.query("DELETE FROM attribute_definition_categories WHERE attribute_definition_id = ?", [defId]);
+
+  const options = def.options || [];
+  for (let i = 0; i < options.length; i++) {
+    const o = options[i];
+    await conn.query(
+      "INSERT INTO attribute_definition_options (attribute_definition_id, value, label, label_bn, swatch_hex, position) VALUES (?, ?, ?, ?, ?, ?)",
+      [defId, o.value, o.label, o.labelBn || "", o.swatchHex || "", i],
+    );
+  }
+  for (const o of def.labelOverrides || []) {
+    await conn.query(
+      "INSERT INTO attribute_definition_label_overrides (attribute_definition_id, category_id, label, label_bn) VALUES (?, ?, ?, ?)",
+      [defId, o.category, o.label, o.labelBn || ""],
+    );
+  }
+  for (const categoryId of def.appliesToCategories || []) {
+    await conn.query(
+      "INSERT INTO attribute_definition_categories (attribute_definition_id, category_id) VALUES (?, ?)",
+      [defId, categoryId],
+    );
+  }
+}
+
+async function saveDefinition(def) {
+  await withConnection(async (conn) => {
+    await conn.query(
+      `UPDATE attribute_definitions SET label=?, label_bn=?, type=?, derived_from_variant=?,
+         filterable=?, required=?, sort_order=? WHERE id=?`,
+      [
+        def.label,
+        def.labelBn || "",
+        def.type,
+        def.derivedFromVariant ? 1 : 0,
+        def.filterable === false ? 0 : 1,
+        def.required ? 1 : 0,
+        def.sortOrder || 0,
+        def._id,
+      ],
+    );
+    await writeChildren(conn, def._id, def);
+  });
+  return def;
+}
+
+async function create(data) {
+  const id = generateObjectId();
+  await withConnection(async (conn) => {
+    await conn.query(
+      `INSERT INTO attribute_definitions (id, attr_key, label, label_bn, type, derived_from_variant, filterable, required, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        data.key,
+        data.label,
+        data.labelBn || "",
+        data.type,
+        data.derivedFromVariant ? 1 : 0,
+        data.filterable === false ? 0 : 1,
+        data.required ? 1 : 0,
+        data.sortOrder || 0,
+      ],
+    );
+    await writeChildren(conn, id, data);
+  });
+  return findById(id);
+}
+
+const AttributeDefinition = { findById, findByKeys, findAll, findByCategoryOrGlobal, findDerivedFromVariant, create };
+
+export default AttributeDefinition;

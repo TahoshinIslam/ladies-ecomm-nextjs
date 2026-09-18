@@ -1,86 +1,157 @@
-import mongoose from "mongoose";
 import slugify from "slugify";
 
-const categorySchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: [true, "Category name is required"],
-      trim: true,
-    },
-    // Optional Bangla mirror of `name` — see categoryService.js's
-    // localizeCategory(). Absent/empty falls back to the English `name`,
-    // never a blank label. Slugs/ids stay English-only and stable — see
-    // section 7 of the localization audit for why filter values never
-    // translate.
-    nameBn: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-    slug: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-    },
-    // null = one of the top-level departments (Burqa, Hijab, Niqab, Abaya,
-    // Khimar, Modest Sets); set = a subcategory/style under that department.
-    parent: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "categories",
-      default: null,
-    },
-    image: {
-      type: String,
-      default: "",
-    },
-    // A lucide-react icon name (e.g. "utensils-crossed"), used only for a
-    // top-level department's row in the mega-menu category flyout
-    // (components/layout/CategoryMegaMenu.jsx maps this string to the
-    // actual icon component — never rendered as raw HTML). Empty for every
-    // non-top-level category; the flyout falls back to a generic icon when
-    // a department has none set.
-    icon: {
-      type: String,
-      default: "",
-    },
-    description: {
-      type: String,
-      default: "",
-    },
-    // Optional Bangla mirror of `description` — same fallback rule as nameBn.
-    descriptionBn: {
-      type: String,
-      default: "",
-    },
-    sortOrder: {
-      type: Number,
-      default: 0,
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  { timestamps: true },
-);
+import { query } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
 
-categorySchema.index({ parent: 1, sortOrder: 1 });
+function rowToCategory(row) {
+  if (!row) return null;
+  const category = {
+    _id: row.id,
+    name: row.name,
+    nameBn: row.name_bn,
+    slug: row.slug,
+    parent: row.parent_id,
+    image: row.image,
+    icon: row.icon,
+    description: row.description,
+    descriptionBn: row.description_bn,
+    sortOrder: row.sort_order,
+    isActive: !!row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  // Tracks the name this category had when loaded, so save() can tell
+  // whether `name` actually changed (Mongoose's `isModified("name")`) —
+  // needed because, unlike products, a category's slug is sometimes a
+  // human-curated stable key (see scripts/seedCatalog.mjs's upsert-by-slug
+  // seeding, e.g. "burqa-closed-style") that must NOT be silently
+  // overwritten by a name-derived one on every unrelated save (a plain
+  // "recompute unconditionally" approach — which is safe for products,
+  // which never have a custom slug — would corrupt these on the very next
+  // re-seed or admin edit).
+  category.__originalName = category.name;
+  category.save = async function save() {
+    if (this.name !== this.__originalName || !this.slug) {
+      this.slug = buildSlug(this.name, this._id);
+      this.__originalName = this.name;
+    }
+    await query(
+      `UPDATE categories SET name=?, name_bn=?, slug=?, parent_id=?, image=?, icon=?,
+         description=?, description_bn=?, sort_order=?, is_active=? WHERE id=?`,
+      [
+        this.name,
+        this.nameBn || "",
+        this.slug,
+        this.parent,
+        this.image || "",
+        this.icon || "",
+        this.description || "",
+        this.descriptionBn || "",
+        this.sortOrder || 0,
+        this.isActive ? 1 : 0,
+        this._id,
+      ],
+    );
+    return this;
+  };
+  category.deleteOne = async function deleteOne() {
+    await query("DELETE FROM categories WHERE id = ?", [this._id]);
+  };
+  return category;
+}
 
-// Auto-generate slug from name if one wasn't explicitly provided (the seed
-// script sets stable slugs directly via findOneAndUpdate, which bypasses
-// this hook entirely — this only matters for Category.create()/.save(),
-// i.e. the admin API). Mirrors productModel.js's pattern.
-categorySchema.pre("validate", function () {
-  if (this.isModified("name") || !this.slug) {
-    const base = slugify(this.name, { lower: true, strict: true });
-    this.slug = `${base}-${this._id.toString().slice(-6)}`;
-  }
-});
+async function findById(id) {
+  if (!id) return null;
+  const rows = await query("SELECT * FROM categories WHERE id = ?", [id]);
+  return rowToCategory(rows[0]);
+}
 
-// mongoose.models.categories || ... guards against Next.js dev's hot-reload
-// re-executing this module and trying to re-register an already-compiled
-// model (throws OverwriteModelError otherwise).
-const categoryModel = mongoose.models.categories || mongoose.model("categories", categorySchema);
-export default categoryModel;
+async function findBySlug(slug) {
+  const rows = await query("SELECT * FROM categories WHERE slug = ?", [slug]);
+  return rowToCategory(rows[0]);
+}
+
+/** Every category, sorted sort_order then name — the one shape listCategories() needs. */
+async function findAll() {
+  const rows = await query("SELECT * FROM categories ORDER BY sort_order ASC, name ASC");
+  return rows.map(rowToCategory);
+}
+
+async function findByIds(ids) {
+  if (!ids.length) return [];
+  const rows = await query(`SELECT * FROM categories WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  return rows.map(rowToCategory);
+}
+
+async function findByParent(parentId) {
+  const rows = parentId === null
+    ? await query("SELECT * FROM categories WHERE parent_id IS NULL ORDER BY sort_order ASC, name ASC")
+    : await query("SELECT * FROM categories WHERE parent_id = ? ORDER BY sort_order ASC, name ASC", [parentId]);
+  return rows.map(rowToCategory);
+}
+
+async function findChildIdsByParents(parentIds) {
+  if (!parentIds.length) return [];
+  const rows = await query(
+    `SELECT id, parent_id FROM categories WHERE parent_id IN (${parentIds.map(() => "?").join(",")})`,
+    parentIds,
+  );
+  return rows;
+}
+
+function buildSlug(name, id) {
+  const base = slugify(name, { lower: true, strict: true });
+  return `${base}-${id.slice(-6)}`;
+}
+
+async function create(data) {
+  const id = generateObjectId();
+  // Explicit `slug` (used only by scripts/seedCatalog.mjs, which treats
+  // slug as a stable, human-curated natural key, e.g. "burqa-closed-style"
+  // rather than a name-derived one) wins over the usual auto-generated
+  // form — every other caller (the admin API) never passes one.
+  const slug = data.slug || buildSlug(data.name, id);
+  await query(
+    `INSERT INTO categories (id, name, name_bn, slug, parent_id, image, icon, description, description_bn, sort_order, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.name,
+      data.nameBn || "",
+      slug,
+      data.parent || null,
+      data.image || "",
+      data.icon || "",
+      data.description || "",
+      data.descriptionBn || "",
+      data.sortOrder || 0,
+      data.isActive === false ? 0 : 1,
+    ],
+  );
+  return findById(id);
+}
+
+async function countByParent(parentId) {
+  const rows = await query("SELECT COUNT(*) AS n FROM categories WHERE parent_id = ?", [parentId]);
+  return rows[0].n;
+}
+
+async function existsWithParent(parentId) {
+  const rows = await query("SELECT 1 FROM categories WHERE parent_id = ? LIMIT 1", [parentId]);
+  return rows.length > 0;
+}
+
+const Category = {
+  findById,
+  findBySlug,
+  findAll,
+  findByIds,
+  findByParent,
+  findChildIdsByParents,
+  create,
+  countByParent,
+  existsWithParent,
+  buildSlug,
+};
+
+export default Category;

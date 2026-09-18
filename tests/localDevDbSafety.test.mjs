@@ -1,199 +1,76 @@
-// Incident response (2026-09-12) — regression coverage for the root-cause
-// fix in config/db.js. A plain `next dev` (no test-only override flags
-// set) previously fell through unconditionally to MONGO_URI — the real
-// Production database — with no guard at all. A real order was mutated by
-// ordinary admin-UI verification testing as a direct result. This file
-// proves the fix: any local-machine run (not on Vercel, not the test
-// harness, not the explicit httpTestServer override) now requires a
-// dedicated MONGO_URI_DEV or an explicitly-set MONGO_URI_TEST, refuses the
-// Production database name outright, refuses any other unsafely-named
-// database, refuses a remote host without an explicit opt-in, and never
-// reveals a URI or credential in any error message it throws.
-import { test, describe, after } from "node:test";
+// Incident response, restored for MySQL — regression coverage for
+// lib/localDevSafety.js's checkLocalDevHost(), wired into config/db.js's
+// buildPool(). See that module's own header comment for the full incident
+// history this guards against: a plain `next dev` (no explicit opt-in)
+// silently connecting to a remote production database.
+//
+// This is a pure-function test (no live database, no real Vercel/test
+// environment) — checkLocalDevHost() takes an explicit env object
+// specifically so it's testable this way, same as lib/testDbSafety.js's
+// checks. A companion integration proof (config/db.js's buildPool()
+// actually calling this and refusing to build a pool) is covered by
+// tests/buildTimeDbAccessPrevention.test.mjs's sibling NEXT_PHASE guard
+// pattern — that file already proves getPool()'s guards fire for real;
+// this file proves the underlying predicate's decision table is correct.
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import mongoose from "mongoose";
 
-import connectDB from "../config/db.js";
-import { disconnectTestDb } from "./helpers/testDb.mjs";
+import { checkLocalDevHost } from "../lib/localDevSafety.js";
 
-const ENV_KEYS = [
-  "VERCEL",
-  "NODE_ENV",
-  "ALLOW_TEST_DB_OVERRIDE",
-  "TEST_SERVER_MONGO_URI",
-  "MONGO_URI_DEV",
-  "MONGO_URI_TEST",
-  "MONGO_URI",
-  "ALLOW_REMOTE_DEV_DB",
-];
-
-function snapshotEnv() {
-  return Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-}
-
-function restoreEnv(snapshot) {
-  for (const k of ENV_KEYS) {
-    if (snapshot[k] === undefined) delete process.env[k];
-    else process.env[k] = snapshot[k];
-  }
-}
-
-// Forces a genuinely clean slate before AND after every test in this file —
-// never just swaps `globalThis.__mongooseCache`'s pointers. Several tests
-// here deliberately attempt a real mongoose.connect() against a bogus/
-// unreachable host (to prove the guard never even tries the forbidden
-// fallback in practice); the MongoDB driver keeps background server-
-// selection/heartbeat monitoring alive on the shared default connection
-// even after that connect() promise rejects, so merely restoring a saved
-// cache snapshot (this file's first version) left that monitoring running
-// into the NEXT test — and, worse, into whichever test file `test:core`
-// runs next in the same process, hanging the entire suite indefinitely.
-// Explicitly disconnecting (bounded by a timeout, so a hang here can never
-// re-introduce the exact bug this exists to prevent) before resetting the
-// cache to a real empty state is what actually guarantees no connection or
-// timer survives past this file's own tests.
-async function forceCleanMongooseState() {
-  await Promise.race([
-    mongoose.disconnect().catch(() => {}),
-    new Promise((resolve) => setTimeout(resolve, 2000)),
-  ]);
-  const cache = (globalThis.__mongooseCache ??= { conn: null, promise: null });
-  cache.conn = null;
-  cache.promise = null;
-}
-
-// Runs `fn` with a clean, fully-controlled env + connection state, always
-// tearing both down afterward regardless of pass/fail — every test in this
-// file must leave mongoose fully disconnected so the next test (in this
-// file, or the next file in the same test:core process) starts from a
-// real clean slate rather than inheriting a half-open connection.
-async function withIsolatedEnv(overrides, fn) {
-  const envSnapshot = snapshotEnv();
-  await forceCleanMongooseState();
-  try {
-    for (const k of ENV_KEYS) delete process.env[k];
-    Object.assign(process.env, overrides);
-    await fn();
-  } finally {
-    await forceCleanMongooseState();
-    restoreEnv(envSnapshot);
-  }
-}
-
-describe("Incident response — local-machine database-safety guard (config/db.js)", () => {
-  after(async () => {
-    await disconnectTestDb();
+describe("checkLocalDevHost — Vercel and test-suite runs are always unaffected", () => {
+  test("VERCEL=1 bypasses every check, even a remote host with nothing else configured", () => {
+    const result = checkLocalDevHost({ VERCEL: "1" }, "some-remote-host.example");
+    assert.deepEqual(result, { ok: true });
   });
 
-  test("1. local run refuses database name 'nextjs_ecomm' even when explicitly configured as MONGO_URI_DEV", async () => {
-    await withIsolatedEnv(
-      { NODE_ENV: "development", MONGO_URI_DEV: "mongodb://127.0.0.1:27099/nextjs_ecomm" },
-      async () => {
-        await assert.rejects(() => connectDB(), (err) => {
-          assert.match(err.message, /nextjs_ecomm/);
-          assert.match(err.message, /Production database name/);
-          return true;
-        });
-      },
-    );
+  test("NODE_ENV=test bypasses this guard (the test suite has its own independent, stricter guard)", () => {
+    const result = checkLocalDevHost({ NODE_ENV: "test" }, "some-remote-host.example");
+    assert.deepEqual(result, { ok: true });
   });
 
-  test("2. local run cannot fall back to MONGO_URI when no development URI is configured", async () => {
-    await withIsolatedEnv(
-      { NODE_ENV: "development", MONGO_URI: "mongodb://evil-prod-host.example/nextjs_ecomm" },
-      async () => {
-        await assert.rejects(() => connectDB(), (err) => {
-          assert.match(err.message, /MONGO_URI_DEV or MONGO_URI_TEST/);
-          assert.match(err.message, /Refusing to fall back to MONGO_URI/);
-          // The forbidden host must never even be attempted — proven by
-          // the message naming the missing dev vars, not a connection
-          // failure to evil-prod-host.
-          assert.doesNotMatch(err.message, /evil-prod-host/);
-          return true;
-        });
-      },
-    );
+  test("VERCEL is checked before NODE_ENV — order doesn't matter, both alone are sufficient", () => {
+    assert.equal(checkLocalDevHost({ VERCEL: "1", NODE_ENV: "development" }, "remote.example").ok, true);
+  });
+});
+
+describe("checkLocalDevHost — local-machine runs (neither VERCEL nor NODE_ENV=test)", () => {
+  test("accepts 127.0.0.1, localhost, and ::1", () => {
+    assert.equal(checkLocalDevHost({}, "127.0.0.1").ok, true);
+    assert.equal(checkLocalDevHost({}, "localhost").ok, true);
+    assert.equal(checkLocalDevHost({}, "::1").ok, true);
   });
 
-  test("2b. a bare local `next start` (NODE_ENV=production, VERCEL unset) gets the same protection as `next dev`", async () => {
-    await withIsolatedEnv({ NODE_ENV: "production", MONGO_URI: "mongodb://evil-prod-host.example/nextjs_ecomm" }, async () => {
-      await assert.rejects(() => connectDB(), /MONGO_URI_DEV or MONGO_URI_TEST/);
-    });
+  test("rejects an unset host", () => {
+    const result = checkLocalDevHost({}, undefined);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /DB_HOST is not set/);
   });
 
-  test("3. MONGO_URI_TEST alone (no MONGO_URI_DEV) is accepted for a local run and actually connects", async () => {
-    const realTestUri = process.env.MONGO_URI_TEST;
-    assert.ok(realTestUri, "this suite must run with a real MONGO_URI_TEST already set (see package.json's --env-file)");
-    await withIsolatedEnv({ NODE_ENV: "development", MONGO_URI_TEST: realTestUri }, async () => {
-      const conn = await connectDB();
-      assert.ok(conn, "connectDB() must resolve to a real connection using MONGO_URI_TEST alone");
-      assert.doesNotMatch(conn.connection.name, /nextjs_ecomm/);
-    });
+  test("rejects a remote host by default — this is the actual incident-prevention case", () => {
+    const result = checkLocalDevHost({}, "prod-mysql.internal.example.com");
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /not localhost/);
+    assert.match(result.reason, /ALLOW_REMOTE_DEV_DB/);
   });
 
-  test("3b. a safely-named but non-localhost MONGO_URI_DEV is refused unless ALLOW_REMOTE_DEV_DB=true", async () => {
-    await withIsolatedEnv(
-      { NODE_ENV: "development", MONGO_URI_DEV: "mongodb+srv://cluster.example.mongodb.net/tahos_dev" },
-      async () => {
-        await assert.rejects(() => connectDB(), (err) => {
-          assert.match(err.message, /remote host/);
-          assert.match(err.message, /ALLOW_REMOTE_DEV_DB/);
-          return true;
-        });
-      },
-    );
+  test("a remote host is accepted only with the explicit ALLOW_REMOTE_DEV_DB=true opt-in", () => {
+    assert.equal(checkLocalDevHost({ ALLOW_REMOTE_DEV_DB: "true" }, "prod-mysql.internal.example.com").ok, true);
   });
 
-  test("4. Vercel Preview/Production resolution is unaffected — VERCEL set bypasses every local-only check", async () => {
-    await withIsolatedEnv(
-      { VERCEL: "1", NODE_ENV: "production", MONGO_URI: "mongodb://127.0.0.1:1/does-not-need-to-connect" },
-      async () => {
-        // On Vercel, resolution must still pick MONGO_URI directly, with
-        // none of the local-dev name/host checks applied to it — proven by
-        // the failure being a genuine connection error (bad host), never
-        // one of this fix's own validation messages.
-        await assert.rejects(() => connectDB(), (err) => {
-          assert.doesNotMatch(err.message, /nextjs_ecomm/);
-          assert.doesNotMatch(err.message, /MONGO_URI_DEV/);
-          assert.doesNotMatch(err.message, /remote host/);
-          return true;
-        });
-      },
-    );
+  test("ALLOW_REMOTE_DEV_DB set to anything other than the exact string \"true\" is NOT an opt-in", () => {
+    assert.equal(checkLocalDevHost({ ALLOW_REMOTE_DEV_DB: "1" }, "remote.example").ok, false);
+    assert.equal(checkLocalDevHost({ ALLOW_REMOTE_DEV_DB: "yes" }, "remote.example").ok, false);
+    assert.equal(checkLocalDevHost({ ALLOW_REMOTE_DEV_DB: "false" }, "remote.example").ok, false);
   });
 
-  test("5. standalone readiness/index-audit scripts do not go through connectDB() at all", async () => {
-    const fs = await import("node:fs");
-    const src = fs.readFileSync(new URL("../scripts/auditIndexes.mjs", import.meta.url), "utf8");
-    assert.doesNotMatch(src, /from ["'].*config\/db\.js["']/, "auditIndexes.mjs must keep resolving its own URI directly, unaffected by this fix");
-    assert.match(src, /mongoose\.connect\(/);
-  });
-
-  test("6. the pre-existing NEXT_PHASE build-time guard still fires before any of this fix's new checks", async () => {
-    await withIsolatedEnv({ NODE_ENV: "development" }, async () => {
-      process.env.NEXT_PHASE = "phase-production-build";
-      try {
-        await assert.rejects(() => connectDB(), /NEXT_PHASE=phase-production-build/);
-      } finally {
-        delete process.env.NEXT_PHASE;
-      }
-    });
-  });
-
-  test("7. no error message thrown by the new guard ever contains a credential-shaped substring", async () => {
-    const attempts = [
-      { NODE_ENV: "development", MONGO_URI_DEV: "mongodb://user:supersecretpassword@127.0.0.1/nextjs_ecomm" },
-      { NODE_ENV: "development", MONGO_URI_DEV: "mongodb://user:supersecretpassword@remote.example/tahos_dev" },
-      { NODE_ENV: "development", MONGO_URI: "mongodb://user:supersecretpassword@prod.example/nextjs_ecomm" },
-    ];
-    for (const overrides of attempts) {
-      await withIsolatedEnv(overrides, async () => {
-        await assert.rejects(() => connectDB(), (err) => {
-          assert.doesNotMatch(err.message, /supersecretpassword/);
-          assert.doesNotMatch(err.message, /mongodb(\+srv)?:\/\//);
-          return true;
-        });
-      });
-    }
+  test("NODE_ENV=production (a bare local `next start`, which always forces this) still gets the guard — VERCEL is the only real bypass", () => {
+    // `next start` always runs as NODE_ENV=production regardless of the
+    // actual deployment target (documented elsewhere in this codebase) —
+    // so NODE_ENV alone can never distinguish "real Vercel Production"
+    // from "someone's laptop running `next start` locally." VERCEL is the
+    // only trustworthy signal, which is exactly why this guard keys off
+    // it instead.
+    const result = checkLocalDevHost({ NODE_ENV: "production" }, "remote.example");
+    assert.equal(result.ok, false);
   });
 });

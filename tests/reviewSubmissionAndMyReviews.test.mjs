@@ -27,11 +27,13 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
   createDeliveredOrderFor,
+  deleteRows,
 } from "./helpers/testDb.mjs";
 import { createReviewSchema } from "../schemas/reviewSchemas.js";
 
@@ -65,6 +67,7 @@ describe("POST /api/reviews/product/[productId] and GET /api/reviews/mine", { sk
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: createReviewPOST } = await import("../app/api/reviews/product/[productId]/route.js"));
     ({ GET: myReviewsGET } = await import("../app/api/reviews/mine/route.js"));
     ({ default: Review } = await import("../models/reviewModel.js"));
@@ -76,8 +79,8 @@ describe("POST /api/reviews/product/[productId] and GET /api/reviews/mine", { sk
   });
 
   after(async () => {
-    await Review.deleteMany({ product: product?._id });
-    await Order.deleteMany({ _id: order?._id });
+    if (product?._id) await deleteRows("reviews", "product_id", product._id);
+    if (order?._id) await deleteRows("orders", "id", order._id);
     await disconnectTestDb();
   });
 
@@ -117,9 +120,8 @@ describe("POST /api/reviews/product/[productId] and GET /api/reviews/mine", { sk
       const json = await res.json();
       assert.ok(json.reviewable.some((p) => String(p._id) === String(secondProduct._id)));
     } finally {
-      await Order.deleteMany({ _id: secondOrder._id });
-      const { default: Product } = await import("../models/productModel.js");
-      await Product.deleteMany({ _id: secondProduct._id });
+      await deleteRows("orders", "id", secondOrder._id);
+      await deleteRows("products", "id", secondProduct._id);
     }
   });
 });

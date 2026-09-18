@@ -140,8 +140,8 @@ describe("Phase 11 — bounded-concurrency load/resilience checks", { skip }, ()
 });
 
 // ---------------------------------------------------------------------
-// Mongo-unavailable behavior: a SEPARATE, single throwaway `next start`
-// instance pointed at a genuinely unreachable Mongo host (not the shared
+// Database-unavailable behavior: a SEPARATE, single throwaway `next start`
+// instance pointed at a genuinely unreachable database host (not the shared
 // disposable database every other test in this run depends on) — proves
 // readiness fails closed (503) while liveness stays up (200), the app
 // doesn't crash, and no internal detail leaks, then confirms RECOVERY
@@ -173,21 +173,33 @@ async function waitForLive(baseUrl, timeoutMs) {
   return false;
 }
 
-describe("Phase 11 — Mongo-unavailable behavior (separate throwaway instance)", { skip }, () => {
-  test("readiness returns 503 (sanitized) while liveness stays 200 when Mongo is unreachable, then recovers once Mongo is reachable again", async () => {
+describe("Phase 11 — database-unavailable behavior (separate throwaway instance)", { skip }, () => {
+  test("readiness returns 503 (sanitized) while liveness stays 200 when the database is unreachable, then recovers once the database is reachable again", async () => {
     const port = await findFreePort();
     const baseUrl = `http://127.0.0.1:${port}`;
     // An address in the TEST-NET-1 documentation range (RFC 5737) —
-    // guaranteed unreachable/non-routable, never a real host.
-    const unreachableUri = "mongodb://192.0.2.1:27017/tahos_test_unreachable?serverSelectionTimeoutMS=1500";
+    // guaranteed unreachable/non-routable, never a real host. Only
+    // DB_HOST is overridden — DB_PORT/DB_NAME/DB_USER/DB_PASSWORD are
+    // inherited from this test run's own real .env.test via `...process.env`
+    // below, since config/db.js's buildPool() (see its own header comment)
+    // only cares about the host being reachable, not any other credential.
+    const unreachableHost = "192.0.2.1";
 
     const child = spawn("node_modules/.bin/next", ["start", "-p", String(port)], {
       cwd: new URL("../..", import.meta.url).pathname,
       env: {
         ...process.env,
         PORT: String(port),
-        ALLOW_TEST_DB_OVERRIDE: "true",
-        TEST_SERVER_MONGO_URI: unreachableUri,
+        // `next start` always forces NODE_ENV=production (see this file's
+        // sibling test comments elsewhere in tests/http/ for the same
+        // point), so lib/localDevSafety.js's checkLocalDevHost() would
+        // otherwise refuse a non-localhost DB_HOST outright before ever
+        // attempting a real connection — ALLOW_REMOTE_DEV_DB=true is the
+        // SQL-era equivalent of the old double-gated ALLOW_TEST_DB_OVERRIDE
+        // mechanism, letting the pool actually attempt (and then time out
+        // against) the genuinely unreachable host below.
+        ALLOW_REMOTE_DEV_DB: "true",
+        DB_HOST: unreachableHost,
         APP_ORIGIN: baseUrl,
       },
       stdio: "ignore",
@@ -195,12 +207,12 @@ describe("Phase 11 — Mongo-unavailable behavior (separate throwaway instance)"
 
     try {
       const isLive = await waitForLive(baseUrl, 30_000);
-      assert.ok(isLive, "the app process itself must come up and respond to /api/health/live even though Mongo is unreachable");
+      assert.ok(isLive, "the app process itself must come up and respond to /api/health/live even though the database is unreachable");
 
       const readyRes = await fetch(`${baseUrl}/api/health/ready`);
-      assert.equal(readyRes.status, 503, "readiness must fail closed when Mongo is unreachable");
+      assert.equal(readyRes.status, 503, "readiness must fail closed when the database is unreachable");
       const readyText = await readyRes.text();
-      assert.ok(!/192\.0\.2\.1|mongo|ECONNREFUSED|timeout/i.test(readyText), "must never leak the unreachable host/driver detail");
+      assert.ok(!/192\.0\.2\.1|mysql|mongo|ECONNREFUSED|ETIMEDOUT|timeout/i.test(readyText), "must never leak the unreachable host/driver detail");
 
       // Liveness must stay 200 the whole time — a database outage is not
       // a process-health problem.

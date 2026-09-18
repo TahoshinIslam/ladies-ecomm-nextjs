@@ -11,12 +11,8 @@ const PRESETS = [
 ];
 
 // Public — the storefront's ThemeProvider fetches this on every page load.
-// Returning a real, bootstrapped theme here (rather than always null) is
-// what actually lets the admin-editable palette reach the live site; it was
-// previously a hardcoded `{ theme: null }` stub regardless of what existed
-// in the database.
 export async function getActiveTheme() {
-  let theme = await Theme.findOne({ isActive: true });
+  let theme = await Theme.findActive();
   if (!theme) theme = await Theme.create({ name: "Default", isActive: true });
   return theme;
 }
@@ -24,7 +20,7 @@ export async function getActiveTheme() {
 // ========== ADMIN ==========
 
 export async function getAllThemes() {
-  return Theme.find().sort("-isActive -createdAt");
+  return Theme.findAll();
 }
 
 export async function getTheme(id) {
@@ -43,12 +39,13 @@ export async function updateTheme(id, body, adminId) {
   const theme = await Theme.findById(id);
   if (!theme) throw new HttpError(404, "Theme not found");
 
-  // Deep-merge the nested subdocs so a partial update doesn't wipe fields
-  // the caller didn't send (e.g. changing one color shouldn't blank the rest).
+  // Deep-merge the nested JSON blobs so a partial update doesn't wipe
+  // fields the caller didn't send (e.g. changing one color shouldn't blank
+  // the rest).
   const nestedKeys = ["colors", "darkColors", "fonts", "features"];
   for (const key of Object.keys(body)) {
     if (nestedKeys.includes(key) && typeof body[key] === "object" && body[key] !== null) {
-      theme[key] = { ...(theme[key]?.toObject?.() || theme[key]), ...body[key] };
+      theme[key] = { ...theme[key], ...body[key] };
     } else {
       theme[key] = body[key];
     }
@@ -64,7 +61,7 @@ export async function activateTheme(id, adminId) {
   if (!theme) throw new HttpError(404, "Theme not found");
   theme.isActive = true;
   theme.updatedBy = adminId;
-  await theme.save(); // pre-save hook deactivates every other theme
+  await theme.save(); // deactivates every other theme (see models/themeModel.js)
   return theme;
 }
 
@@ -79,7 +76,7 @@ export async function deleteTheme(id) {
 export async function seedPresets(adminId) {
   const created = [];
   for (const preset of PRESETS) {
-    const exists = await Theme.findOne({ name: preset.name });
+    const exists = await Theme.findByName(preset.name);
     if (!exists) created.push(await Theme.create({ ...preset, updatedBy: adminId }));
   }
   return created;

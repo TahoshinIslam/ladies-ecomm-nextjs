@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
-import mongoose from "mongoose";
 
 import connectDB from "../../../../config/db.js";
 
-// Phase 11, section G — READINESS: proves this instance can actually
-// serve a real request right now (a warm, pingable Mongo connection),
-// distinct from LIVENESS (app/api/health/live/route.js), which proves
-// only that the process itself is running. A load balancer/orchestrator
-// should stop routing traffic here on a 503 but must NOT restart the
-// process for it — that's exactly why these are two separate endpoints
-// with two separate meanings.
+// Phase 11, section G — READINESS: proves this instance can actually serve
+// a real request right now (a warm, pingable MySQL connection), distinct
+// from LIVENESS (app/api/health/live/route.js), which proves only that the
+// process itself is running. A load balancer/orchestrator should stop
+// routing traffic here on a 503 but must NOT restart the process for it —
+// that's exactly why these are two separate endpoints with two separate
+// meanings.
 //
-// Bounded: a `ping` against a genuinely unreachable Mongo host can hang
-// for the driver's own (much longer) server-selection timeout otherwise —
-// this uses its own strict, short timeout so a degraded database turns
-// into a fast, clear 503 rather than a slow, ambiguous one.
+// Bounded: a `SELECT 1` against a genuinely unreachable MySQL host can hang
+// for the driver's own (much longer) connect timeout otherwise — this uses
+// its own strict, short timeout so a degraded database turns into a fast,
+// clear 503 rather than a slow, ambiguous one.
 const READY_TIMEOUT_MS = 2000;
 
 function withTimeout(promise, ms) {
@@ -31,18 +30,17 @@ function withTimeout(promise, ms) {
 // bounded-timeout and no-detail-leak contract.
 export async function GET() {
   try {
-    // Reuses the app's single cached connection (config/db.js's
-    // globalThis-cached promise) — never opens a second connection just
-    // to check the first one's health.
+    // connectDB() itself runs a real `SELECT 1` against the pool (see
+    // config/db.js) — that one query IS the readiness ping, so no second
+    // round trip is needed here.
     await withTimeout(connectDB(), READY_TIMEOUT_MS);
-    await withTimeout(mongoose.connection.db.admin().ping(), READY_TIMEOUT_MS);
     return NextResponse.json(
       { status: "ok" },
       { status: 200, headers: { "Cache-Control": "no-store" } },
     );
   } catch {
-    // No internal detail (host, error message, driver error) ever
-    // reaches the client — only a generic, safe status.
+    // No internal detail (host, error message, driver error) ever reaches
+    // the client — only a generic, safe status.
     return NextResponse.json(
       { status: "unavailable" },
       { status: 503, headers: { "Cache-Control": "no-store" } },

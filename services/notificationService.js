@@ -5,31 +5,15 @@ import { requireObjectIdFormat } from "../lib/validation.js";
 import { emitUserEvent, emitBestEffort } from "../lib/events.js";
 
 // Fans a notification out to every admin/employee — called internally from
-// orderService.js (new order) and reviewService.js (new review). Already a
-// live dependency of both before this file existed (they imported it
-// straight from controllers/notificationController.js); moving it here is
-// the reason those two files' imports get updated alongside this one.
+// orderService.js (new order) and reviewService.js (new review).
 export async function createAdminNotification({ message, url }) {
-  const admins = await User.find({ role: { $in: ["admin", "employee"] } }).select("_id");
-  if (!admins.length) return;
-
-  const docs = admins.map((u) => ({ recipient: u._id, message, url }));
-  await Notification.insertMany(docs);
+  const staffIds = await User.findStaffIds();
+  if (!staffIds.length) return;
+  await Notification.insertMany(staffIds.map((id) => ({ recipient: id, message, url })));
 }
 
 // The customer-facing counterpart to createAdminNotification above — one
-// recipient (an order's owner), not a team broadcast. Called from
-// orderService.js's updateOrderStatus() on every genuine status
-// transition (shipped/delivered/cancelled/...), which is also what makes
-// GET /api/notifications (already keyed by requireUser(), never
-// admin-only — see that route) return something for a signed-in
-// customer, not just staff. Also emits on that customer's own event
-// channel (lib/events.js's userChannel) so an already-open tab's bell
-// updates immediately via useUserEventStream, the same realtime path
-// createAdminNotification's callers get via emitAdminEvent — awaited with
-// emitBestEffort so a failure here is logged, never thrown, and never
-// turns an otherwise-successful order-status update into a failed
-// request.
+// recipient (an order's owner), not a team broadcast.
 export async function createUserNotification({ recipient, message, url }) {
   const notification = await Notification.create({ recipient, message, url });
   await emitBestEffort(emitUserEvent(recipient, { type: "NEW_NOTIFICATION", message, url }));
@@ -38,13 +22,12 @@ export async function createUserNotification({ recipient, message, url }) {
 
 export async function getNotifications(userId, { page = 1, limit = 20, unreadOnly } = {}) {
   const skip = (Number(page) - 1) * Number(limit);
-  const filter = { recipient: userId };
-  if (unreadOnly === "true" || unreadOnly === true) filter.readAt = null;
+  const unread = unreadOnly === "true" || unreadOnly === true;
 
   const [notifications, total, unreadCount] = await Promise.all([
-    Notification.find(filter).sort("-createdAt").skip(skip).limit(Number(limit)),
-    Notification.countDocuments(filter),
-    Notification.countDocuments({ recipient: userId, readAt: null }),
+    Notification.findByRecipient(userId, { unreadOnly: unread, skip, limit: Number(limit) }),
+    Notification.countByRecipient(userId, { unreadOnly: unread }),
+    Notification.countByRecipient(userId, { unreadOnly: true }),
   ]);
 
   return { total, unreadCount, page: Number(page), pages: Math.ceil(total / Number(limit)) || 1, notifications };
@@ -52,15 +35,11 @@ export async function getNotifications(userId, { page = 1, limit = 20, unreadOnl
 
 export async function markAsRead(userId, notificationId) {
   requireObjectIdFormat(notificationId, "notificationId");
-  const notification = await Notification.findOneAndUpdate(
-    { _id: notificationId, recipient: userId },
-    { readAt: new Date() },
-    { new: true },
-  );
+  const notification = await Notification.markRead(notificationId, userId);
   if (!notification) throw new HttpError(404, "Notification not found");
   return notification;
 }
 
 export async function markAllAsRead(userId) {
-  await Notification.updateMany({ recipient: userId, readAt: null }, { readAt: new Date() });
+  await Notification.markAllRead(userId);
 }

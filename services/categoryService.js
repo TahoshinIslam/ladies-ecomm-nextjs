@@ -23,10 +23,10 @@ const pickWritable = (body) => {
 async function validateParent(parentId) {
   if (!parentId) return null;
   if (!isObjectIdFormat(parentId)) throw new HttpError(400, "Invalid parent category id");
-  const parent = await Category.findById(parentId).lean();
+  const parent = await Category.findById(parentId);
   if (!parent) throw new HttpError(400, "Parent category not found");
   if (parent.parent) {
-    const grandparent = await Category.findById(parent.parent).select("parent").lean();
+    const grandparent = await Category.findById(parent.parent);
     if (grandparent?.parent) {
       throw new HttpError(400, "Categories can only be nested up to 3 levels deep (division -> department -> style)");
     }
@@ -39,23 +39,17 @@ async function validateParent(parentId) {
 // of each re-deriving "is this a leaf" from `!category.parent`, which only
 // meant "is a leaf" back when the tree was exactly 2 levels deep.
 export async function isLeafCategory(categoryId) {
-  return !(await Category.exists({ parent: categoryId }));
+  return !(await Category.existsWithParent(categoryId));
 }
 
 export async function listCategories() {
-  // Read-only — its one caller (lib/serverDataCache.js's getCachedCategories())
-  // immediately serializeForClient()s the result, and this read fires on
-  // every single storefront/admin page load (see app/api/categories/route.js's
-  // own comment), so it's worth skipping Mongoose document hydration for.
-  const categories = await Category.find().sort("sortOrder name").lean();
-  return categories;
+  return Category.findAll();
 }
 
 export async function createCategory(body) {
   const data = pickWritable(body);
   data.parent = await validateParent(data.parent);
-  const category = await Category.create(data);
-  return category;
+  return Category.create(data);
 }
 
 export async function updateCategory(id, body) {
@@ -80,22 +74,22 @@ export async function deleteCategory(id) {
   const category = await Category.findById(id);
   if (!category) throw new HttpError(404, "Category not found");
 
-  const childCount = await Category.countDocuments({ parent: id });
+  const childCount = await Category.countByParent(id);
   if (childCount > 0) {
     throw new HttpError(400, `Cannot delete: ${childCount} subcategor${childCount > 1 ? "ies" : "y"} under this category. Reassign or delete them first.`);
   }
   // Only ACTIVE products block deletion. "Delete" on a product
   // (services/productService.js's deleteProduct) is a soft delete —
-  // isActive: false, the document and its category reference stay put —
-  // there is no way to ever truly remove a product from a category. Without
-  // this isActive filter, a category that ever had a product deactivated in
-  // it could never be deleted at all, even after the admin believed they'd
+  // isActive: false, the row and its category reference stay put — there
+  // is no way to ever truly remove a product from a category. Without this
+  // isActive filter, a category that ever had a product deactivated in it
+  // could never be deleted at all, even after the admin believed they'd
   // "removed" that product. A deactivated product is already invisible
   // everywhere on the storefront, so leaving its category reference intact
   // after the category is gone (it just won't resolve to a real category
   // any more) is harmless — the same trade-off orders already make by
   // keeping historical snapshots after a product is deactivated.
-  const productCount = await Product.countDocuments({ category: id, isActive: true });
+  const productCount = await Product.countActiveByCategory(id);
   if (productCount > 0) {
     throw new HttpError(400, `Cannot delete: ${productCount} product${productCount > 1 ? "s" : ""} use this category. Reassign or deactivate them first.`);
   }

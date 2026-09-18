@@ -24,8 +24,30 @@
 //      event at all.
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser, createTestProduct } from "../helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser, createTestProduct, deleteRows, rawQuery } from "../helpers/testDb.mjs";
+
+// events.payload is a MySQL JSON column (no Mongo-style dot-path filter
+// support in models/eventModel.js — it only exposes the channel-scoped
+// reads real service code needs, see models/README-migration.md) — this
+// test file's own fixture-verification counts go straight through SQL's
+// native JSON_EXTRACT, the same "test-only SQL escape hatch" pattern
+// tests/helpers/testDb.mjs's rawQuery() exists for.
+async function countEvents({ channel, type, orderId }) {
+  const clauses = ["channel = ?"];
+  const params = [channel];
+  if (type) {
+    clauses.push("type = ?");
+    params.push(type);
+  }
+  if (orderId) {
+    clauses.push("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?");
+    params.push(orderId);
+  }
+  const rows = await rawQuery(`SELECT COUNT(*) AS n FROM events WHERE ${clauses.join(" AND ")}`, params);
+  return Number(rows[0].n);
+}
 
 const BASE_A = process.env.HTTP_TEST_BASE_URL_A;
 const BASE_B = process.env.HTTP_TEST_BASE_URL_B;
@@ -110,23 +132,30 @@ async function collectFramesUntil(response, predicate, timeoutMs = 8000) {
 }
 
 describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durable event outbox", { skip }, () => {
-  let admin, customer, product, order, adminAuth, customerAuth, Order, Event;
+  let admin, customer, product, order, adminAuth, customerAuth, Order, withTransaction;
 
   before(async () => {
     ({ default: Order } = await import("../../models/orderModel.js"));
-    ({ default: Event } = await import("../../models/eventModel.js"));
+    ({ withTransaction } = await import("../../lib/db/tx.js"));
 
     admin = await createTestUser({ role: "admin" });
     customer = await createTestUser({ role: "customer" });
     product = await createTestProduct({ stock: 10 });
-    order = await Order.create({
-      user: customer._id,
-      items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 1000 } }],
-      shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
-      subtotal: 1000,
-      total: 1000,
-      status: "processing",
-    });
+    order = await withTransaction((conn) =>
+      Order.create(
+        {
+          user: customer._id,
+          items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 1000 } }],
+          shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
+          subtotal: 1000,
+          total: 1000,
+          status: "processing",
+          idempotencyKeyHash: crypto.randomBytes(16).toString("hex"),
+          idempotencyRequestHash: crypto.randomBytes(16).toString("hex"),
+        },
+        conn,
+      ),
+    );
 
     adminAuth = await cookieHeaderFor(admin._id);
     customerAuth = await cookieHeaderFor(customer._id);
@@ -134,8 +163,8 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
 
   after(async () => {
     if (dbConnectable) {
-      await Order.deleteMany({ _id: order?._id });
-      await Event.deleteMany({});
+      if (order?._id) await deleteRows("orders", "id", order._id);
+      await rawQuery("DELETE FROM events");
       await disconnectTestDb();
     }
   });
@@ -246,7 +275,7 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
     const firstBody = await first.json();
     const newOrderId = firstBody.order._id;
 
-    const countAfterFirst = await Event.countDocuments({ channel: "admin", type: "NEW_ORDER", "payload.orderId": newOrderId });
+    const countAfterFirst = await countEvents({ channel: "admin", type: "NEW_ORDER", orderId: newOrderId });
     assert.equal(countAfterFirst, 1);
 
     const second = await makeRequest();
@@ -254,14 +283,14 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
     const secondBody = await second.json();
     assert.equal(secondBody.order._id, newOrderId, "replay must return the SAME order, not create a second one");
 
-    const countAfterReplay = await Event.countDocuments({ channel: "admin", type: "NEW_ORDER", "payload.orderId": newOrderId });
+    const countAfterReplay = await countEvents({ channel: "admin", type: "NEW_ORDER", orderId: newOrderId });
     assert.equal(countAfterReplay, 1, "a replayed idempotent request must not create a second NEW_ORDER event");
 
-    await Order.deleteOne({ _id: newOrderId });
+    await deleteRows("orders", "id", newOrderId);
   });
 
   test("a rejected mutation (schema validation failure) emits no event at all", async () => {
-    const beforeCount = await Event.countDocuments({ channel: `order:${order._id}` });
+    const beforeCount = await countEvents({ channel: `order:${order._id}` });
 
     const res = await fetch(`${BASE_A}/api/orders/${order._id}/status`, {
       method: "PUT",
@@ -270,7 +299,7 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
     });
     assert.equal(res.status, 400, "an invalid status value must be rejected before any event is emitted");
 
-    const afterCount = await Event.countDocuments({ channel: `order:${order._id}` });
+    const afterCount = await countEvents({ channel: `order:${order._id}` });
     assert.equal(afterCount, beforeCount, "a rejected mutation must never write an Event document");
   });
 });

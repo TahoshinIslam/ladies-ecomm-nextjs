@@ -23,7 +23,15 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestProduct } from "../helpers/testDb.mjs";
+import {
+  dbReady,
+  skipReason,
+  connectTestDb,
+  disconnectTestDb,
+  createTestProduct,
+  deleteRows,
+  rawQuery,
+} from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -62,7 +70,7 @@ if (serverUp && dbReady) {
 const skip = !serverUp
   ? "test server not reachable — run via `npm run test:http`"
   : !dbConnectable
-    ? skipReason || "MONGO_URI_TEST not reachable — see .env.test.example"
+    ? skipReason || "database not reachable — check DB_NAME/DB_HOST in .env.test (see .env.test.example)"
     : false;
 
 // ---------------------------------------------------------------------------
@@ -169,13 +177,10 @@ async function registerNewUser(jar, origin = BASE_URL) {
 }
 
 describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, SSE", { skip }, () => {
-  let User, Session, Cart, Order;
+  let User;
 
   before(async () => {
     ({ default: User } = await import("../../models/userModel.js"));
-    ({ default: Session } = await import("../../models/sessionModel.js"));
-    ({ default: Cart } = await import("../../models/cartModel.js"));
-    ({ default: Order } = await import("../../models/orderModel.js"));
   });
 
   after(async () => {
@@ -206,7 +211,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     assert.match(csrfRaw, /path=\//);
     assert.ok(!csrfRaw.includes("httponly"), "the CSRF cookie must NOT be HttpOnly — client JS has to read it to attach X-CSRF-Token");
 
-    await User.deleteOne({ email });
+    await deleteRows("users", "email", email);
   });
 
   // =========================================================================
@@ -300,11 +305,10 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     const meAfterLogoutRes = await req(jar, "/api/users/me");
     assert.equal(meAfterLogoutRes.status, 401);
 
-    await Order.deleteMany({ user: me2.user._id });
-    await Cart.deleteMany({ userId: me2.user._id });
-    await User.deleteOne({ email });
-    const { default: Product } = await import("../../models/productModel.js");
-    await Product.deleteOne({ _id: product._id });
+    await deleteRows("orders", "user_id", me2.user._id);
+    await deleteRows("carts", "user_id", me2.user._id);
+    await deleteRows("users", "email", email);
+    await deleteRows("products", "id", product._id);
   });
 
   // =========================================================================
@@ -345,7 +349,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     assert.equal(fixationLoginRes.status, 200);
     assert.notEqual(attackerJar.get(SESSION_COOKIE), "attacker-planted-garbage-session-value", "the server must issue a brand-new session, never accept/reuse the presented one");
 
-    await User.deleteOne({ email });
+    await deleteRows("users", "email", email);
   });
 
   test("real HTTP: Authorization: Bearer alone (no cookie) returns 401; a ?token= query string alone (no cookie) returns 401", async () => {
@@ -372,9 +376,8 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     });
 
     after(async () => {
-      const { default: Product } = await import("../../models/productModel.js");
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ email });
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "email", email);
     });
 
     const cartBody = () => ({ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 });
@@ -479,7 +482,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       const res = await req(crossedJar, "/api/cart", { method: "POST", origin: BASE_URL, csrf: otherCsrf, body: cartBody() });
       assert.equal(res.status, 403, "header and cookie agree with each other, but neither matches THIS session's csrfTokenHash");
 
-      await User.deleteOne({ email: otherEmail });
+      await deleteRows("users", "email", otherEmail);
     });
 
     test("an expired session with an otherwise-valid CSRF pair fails with 401 (not 403) — session state is checked before CSRF is even relevant", async () => {
@@ -487,12 +490,12 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       const { email: expiredEmail } = await registerNewUser(expiredJar);
       const rawToken = expiredJar.get(SESSION_COOKIE);
       const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-      await Session.updateOne({ tokenHash }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+      await rawQuery("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
 
       const res = await req(expiredJar, "/api/cart", { method: "POST", origin: BASE_URL, csrf: expiredJar.get("tahos_csrf"), body: cartBody() });
       assert.equal(res.status, 401);
 
-      await User.deleteOne({ email: expiredEmail });
+      await deleteRows("users", "email", expiredEmail);
     });
 
     test("a revoked session (real logout) with its previously-valid CSRF pair fails with 401", async () => {
@@ -508,15 +511,15 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       await req(revokedJar, "/api/users/logout", { method: "POST", origin: BASE_URL, csrf: staleCsrfValue });
 
       const user = await User.findOne({ email: revokedEmail });
-      const revokedSession = await Session.findOne({ user: user._id });
-      assert.ok(revokedSession.revokedAt, "sanity check: logout really did revoke it server-side");
+      const [revokedSession] = await rawQuery("SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", [user._id]);
+      assert.ok(revokedSession.revoked_at, "sanity check: logout really did revoke it server-side");
 
       const staleJar = new CookieJar();
       staleJar.cookies.set(SESSION_COOKIE, { value: staleSessionValue, raw: "" });
       const res = await req(staleJar, "/api/cart", { method: "POST", origin: BASE_URL, csrf: staleCsrfValue, body: cartBody() });
       assert.equal(res.status, 401, "the real HTTP request with the stale (now-revoked) session cookie and its own previously-valid CSRF token must fail with 401");
 
-      await User.deleteOne({ email: revokedEmail });
+      await deleteRows("users", "email", revokedEmail);
     });
   });
 
@@ -535,7 +538,10 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
 
       staffJar = new CookieJar();
       ({ email: staffEmail } = await registerNewUser(staffJar));
-      await User.updateOne({ email: staffEmail }, { $set: { role: "employee", permissions: [] } });
+      const staffUser = await User.findOne({ email: staffEmail });
+      staffUser.role = "employee";
+      staffUser.permissions = [];
+      await staffUser.save();
       // Re-login so the session's own view of the role is irrelevant — the
       // route re-reads the user from the database on every request anyway
       // (see lib/auth.js), so no re-login is actually required, but doing
@@ -563,10 +569,9 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     });
 
     after(async () => {
-      await Order.deleteMany({ _id: orderId });
-      const { default: Product } = await import("../../models/productModel.js");
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ email: { $in: [customerEmail, staffEmail, ownerEmail, strangerEmail] } });
+      await deleteRows("orders", "id", orderId);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "email", [customerEmail, staffEmail, ownerEmail, strangerEmail]);
     });
 
     async function openSse(path, jar) {

@@ -1,66 +1,48 @@
-import mongoose from "mongoose";
+import { query } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
 
-const paymentSchema = new mongoose.Schema(
-  {
-    order: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "orders",
-      required: [true, "Order is required"],
-      unique: true,
-    },
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: [true, "User is required"],
-    },
-    // COD-only at launch (see services/paymentService.js) — the enum is
-    // deliberately narrow rather than pre-declaring unimplemented gateways,
-    // since nothing in this codebase ever writes anything but "cod" and a
-    // wider enum would misleadingly suggest multi-gateway support exists.
-    method: {
-      type: String,
-      enum: ["cod"],
-      required: [true, "Payment method is required"],
-    },
-    status: {
-      type: String,
-      enum: ["pending", "completed", "failed", "refunded"],
-      default: "pending",
-    },
-    transactionId: {
-      // ID returned by the payment gateway
-      type: String,
-      default: "",
-    },
-    gatewayResponse: {
-      // raw response from the gateway for debugging/auditing
-      type: mongoose.Schema.Types.Mixed,
-      default: {},
-      select: false,
-    },
-    amount: {
-      type: Number,
-      required: [true, "Payment amount is required"],
-    },
-    currency: {
-      type: String,
-      default: "BDT",
-    },
-    paidAt: {
-      type: Date,
-    },
-    refundedAt: {
-      type: Date,
-    },
-    refundReason: {
-      type: String,
-      default: "",
-    },
-  },
-  { timestamps: true },
-);
+function rowToPayment(row) {
+  if (!row) return null;
+  return {
+    _id: row.id,
+    order: row.order_id,
+    user: row.user_id,
+    method: row.method,
+    status: row.status,
+    transactionId: row.transaction_id,
+    amount: Number(row.amount),
+    currency: row.currency,
+    paidAt: row.paid_at,
+    refundedAt: row.refunded_at,
+    refundReason: row.refund_reason,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
-// Guards against Next.js dev's hot-reload re-executing this module and
-// trying to re-register an already-compiled model.
-const paymentModel = mongoose.models.payments || mongoose.model("payments", paymentSchema);
-export default paymentModel;
+async function findByOrder(orderId, conn) {
+  const sql = "SELECT * FROM payments WHERE order_id = ?";
+  const rows = conn ? (await conn.query(sql, [orderId]))[0] : await query(sql, [orderId]);
+  return rowToPayment(rows[0]);
+}
+
+/** Insert inside the caller's transaction — the paymentModel unique `order_id` index is the DB-level backstop against a concurrent duplicate. */
+async function create({ order, user, method, amount, currency, status }, conn) {
+  const id = generateObjectId();
+  await conn.query(
+    "INSERT INTO payments (id, order_id, user_id, method, amount, currency, status, gateway_response) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, order, user, method, amount, currency || "BDT", status || "pending", JSON.stringify({})],
+  );
+  return rowToPayment({ id, order_id: order, user_id: user, method, amount, currency: currency || "BDT", status: status || "pending" });
+}
+
+async function markCompletedForCod(orderId) {
+  await query(
+    "UPDATE payments SET status = 'completed', paid_at = NOW(3) WHERE order_id = ? AND method = 'cod' AND status = 'pending'",
+    [orderId],
+  );
+}
+
+const Payment = { findByOrder, create, markCompletedForCod };
+
+export default Payment;

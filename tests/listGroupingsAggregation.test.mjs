@@ -12,7 +12,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const unique = () => crypto.randomBytes(6).toString("hex");
@@ -30,8 +30,8 @@ describe("services/productService.js — listGroupings() aggregation rewrite", {
   });
 
   after(async () => {
-    if (createdProductIds.length) await Product.deleteMany({ _id: { $in: createdProductIds } });
-    if (createdCategoryIds.length) await Category.deleteMany({ _id: { $in: createdCategoryIds } });
+    if (createdProductIds.length) await deleteRows("products", "id", createdProductIds);
+    if (createdCategoryIds.length) await deleteRows("categories", "id", createdCategoryIds);
     await disconnectTestDb();
   });
 

@@ -4,7 +4,8 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, requestAs, createTestUser, createTestCategory } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestSession, requestAs, createTestUser, createTestCategory, deleteRows } from "./helpers/testDb.mjs";
+import { generateObjectId } from "../lib/objectId.js";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -15,6 +16,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: productsPOST } = await import("../app/api/products/route.js"));
     ({ PUT: productPUT, DELETE: productDELETE } = await import("../app/api/products/[idOrSlug]/route.js"));
     ({ default: Product } = await import("../models/productModel.js"));
@@ -49,10 +51,10 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, validProductBody(child._id.toString())));
       assert.equal(res.status, 201);
       const json = await res.json();
-      await Product.deleteOne({ _id: json.product._id });
+      await deleteRows("products", "id", json.product._id);
     } finally {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -65,8 +67,8 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -77,7 +79,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -90,8 +92,8 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -104,8 +106,8 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -119,8 +121,8 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -133,8 +135,8 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -147,7 +149,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -166,9 +168,9 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       );
       assert.equal(emptyRes.status, 400);
     } finally {
-      if (product) await Product.deleteOne({ _id: product._id });
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      if (product) await deleteRows("products", "id", product._id);
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -181,7 +183,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -200,8 +202,8 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
     });
 
     after(async () => {
-      await Category.deleteMany({ _id: { $in: [category._id, child._id] } });
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("categories", "id", [category._id, child._id]);
+      await deleteRows("users", "id", admin._id);
     });
 
     async function freshProduct() {
@@ -222,7 +224,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
         assert.equal(json.product.basePrice, 999);
         assert.equal(String(json.product.category), child._id.toString());
       } finally {
-        await Product.deleteOne({ _id: product._id });
+        await deleteRows("products", "id", product._id);
       }
     });
 
@@ -238,7 +240,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
         assert.equal(json.product.isFeatured, true);
         assert.equal(String(json.product.category), child._id.toString());
       } finally {
-        await Product.deleteOne({ _id: product._id });
+        await deleteRows("products", "id", product._id);
       }
     });
 
@@ -251,26 +253,26 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
         );
         assert.equal(res.status, 400);
       } finally {
-        await Product.deleteOne({ _id: product._id });
+        await deleteRows("products", "id", product._id);
       }
     });
 
     test("PUT with an explicit valid-but-nonexistent category still 400 (not-found contract unchanged)", async () => {
       product = await freshProduct();
       try {
-        const fakeId = new (await import("mongoose")).default.Types.ObjectId().toString();
+        const fakeId = generateObjectId();
         const res = await productPUT(
           requestAs({ method: "PUT", url: `http://test/api/products/${product._id}`, session: await createTestSession(admin._id), body: { category: fakeId } }),
           { params: Promise.resolve({ idOrSlug: product._id }) },
         );
         assert.equal(res.status, 400);
       } finally {
-        await Product.deleteOne({ _id: product._id });
+        await deleteRows("products", "id", product._id);
       }
     });
 
     test("PUT of a missing product still 404", async () => {
-      const fakeId = new (await import("mongoose")).default.Types.ObjectId().toString();
+      const fakeId = generateObjectId();
       const res = await productPUT(
         requestAs({ method: "PUT", url: `http://test/api/products/${fakeId}`, session: await createTestSession(admin._id), body: { basePrice: 5 } }),
         { params: Promise.resolve({ idOrSlug: fakeId }) },

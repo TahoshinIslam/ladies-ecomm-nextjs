@@ -1,42 +1,44 @@
-import mongoose from "mongoose";
+import { withConnection } from "../config/db.js";
 
-// MongoDB-backed, atomic, fixed-window rate-limit counters — used in place
-// of Redis (see lib/rateLimit.js's own header comment for why: Redis is
-// not installed/configured/connected anywhere in this codebase, and Phase
-// 3 explicitly forbids claiming Redis protection that doesn't exist).
-//
-// Never stores a raw IP address, email, session token, reset token, or
-// coupon code — only `keyHash`, a SHA-256 hash of the normalized identity
-// string. A stolen database dump therefore reveals no usable identity, the
-// same defense-in-depth principle Phase 2's Session model already applies.
-const rateLimitSchema = new mongoose.Schema(
-  {
-    // SHA-256 hash of the normalized identity (lowercased/trimmed email,
-    // or the trusted client IP) — never the raw value itself.
-    keyHash: { type: String, required: true },
-    // A short, fixed action name (e.g. "login:ip", "login:account") —
-    // keeps one identity's buckets for different endpoints independent.
-    action: { type: String, required: true },
-    // Deterministic fixed-window start (Math.floor(now / windowMs) *
-    // windowMs) — NOT a rolling/sliding window. A new window is a NEW
-    // document with a NEW windowStart value, so correctness never depends
-    // on the old window's row having been deleted yet (TTL cleanup is a
-    // storage-reclamation backstop only, exactly like Phase 2's Session
-    // TTL index — see lib/rateLimit.js's own comment).
-    windowStart: { type: Date, required: true },
-    count: { type: Number, required: true, default: 0 },
-    // TTL backstop cleanup — set a little past windowStart + windowMs so a
-    // request arriving right at the boundary still sees a live document.
-    expiresAt: { type: Date, required: true, index: { expires: 0 } },
-  },
-  { timestamps: true },
-);
+// See models/README-migration.md. MySQL's `INSERT ... ON DUPLICATE KEY
+// UPDATE` is the direct equivalent of the old Mongo
+// `findOneAndUpdate({...}, {$inc}, {upsert:true})` this replaces — both are
+// a single atomic statement, so the "two concurrent requests racing to
+// create the same brand-new window" case lib/rateLimit.js's own comment
+// describes is handled by MySQL itself the same way MongoDB handled it,
+// just via ON DUPLICATE KEY UPDATE instead of a caught E11000 retry (no
+// separate retry branch is needed here — unlike a plain INSERT, ON
+// DUPLICATE KEY UPDATE never raises a duplicate-key error to catch).
+export async function upsertAndIncrement({ keyHash, action, windowStart, expiresAt }) {
+  // `LAST_INSERT_ID(expr)` is a documented MySQL idiom: evaluating it sets
+  // the CONNECTION's session-level last-insert-id to `expr` (as a side
+  // effect) and also returns `expr` as the expression's own value — so
+  // `SELECT LAST_INSERT_ID()` afterward retrieves whatever `expr` was. This
+  // ONLY works cleanly when nothing else on the table competes for that
+  // same session value — an AUTO_INCREMENT column on this table would
+  // silently overwrite it with the row's own generated id on a plain
+  // INSERT, even when the insert expression itself calls
+  // `LAST_INSERT_ID(1)` (confirmed empirically against MariaDB 10.4, not
+  // just a theoretical concern) — which is exactly why
+  // rate_limit_counters has NO separate surrogate id column and uses
+  // (key_hash, action, window_start) as its real PRIMARY KEY instead (see
+  // sql/schema.sql's own comment on this table).
+  //
+  // Both statements must run on the very same connection (withConnection,
+  // not the pool's own auto-checkout-per-call `query()`) since
+  // last-insert-id is a per-connection session value.
+  return withConnection(async (conn) => {
+    await conn.query(
+      `INSERT INTO rate_limit_counters (key_hash, action, window_start, count, expires_at)
+       VALUES (?, ?, ?, LAST_INSERT_ID(1), ?)
+       ON DUPLICATE KEY UPDATE count = LAST_INSERT_ID(count + 1)`,
+      [keyHash, action, windowStart, expiresAt],
+    );
+    const [rows] = await conn.query("SELECT LAST_INSERT_ID() AS count");
+    return Number(rows[0].count);
+  });
+}
 
-// One counter per (identity, action, window) — the atomic upsert in
-// lib/rateLimit.js relies on this to make concurrent first-requests-in-a-
-// new-window converge on a single document rather than each creating their
-// own duplicate counter.
-rateLimitSchema.index({ keyHash: 1, action: 1, windowStart: 1 }, { unique: true });
+const RateLimitCounter = { upsertAndIncrement };
 
-const RateLimitCounter = mongoose.models.rate_limit_counters || mongoose.model("rate_limit_counters", rateLimitSchema);
 export default RateLimitCounter;

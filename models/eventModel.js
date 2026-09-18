@@ -1,43 +1,56 @@
-import mongoose from "mongoose";
+import { query } from "../config/db.js";
 
-// Phase 11, section I — the durable, cross-process replacement for the old
-// process-local EventEmitter bus (lib/events.js). Vercel Fluid Compute runs
-// multiple isolated function instances that share no process memory — an
-// EventEmitter living in one instance's memory is invisible to every other
-// instance, so a client whose SSE connection happens to land on instance B
-// would never hear an event emitted from instance A. Every event this app
-// needs to broadcast is instead written here first (a durable, queryable
-// record every instance can read), and the SSE routes poll it.
-//
-// TTL pattern matches models/sessionModel.js / models/rateLimitModel.js
-// exactly: `expiresAt` with `index: { expires: 0 }` lets MongoDB's own
-// background task remove the document once it's no longer needed — an
-// event only needs to live long enough for an SSE client's own bounded
-// polling loop (and a brief reconnect window) to pick it up.
-const eventSchema = new mongoose.Schema({
-  // "admin" (the whole staff broadcast channel) or `order:<orderId>` (one
-  // customer's order) — see orderChannel()/ADMIN_CHANNEL below. Never a
-  // free-form string from user input; always constructed by this module.
-  channel: { type: String, required: true },
-  // The SSE event name the client's EventSource.addEventListener() name
-  // matches against (e.g. "NEW_ORDER", "ORDER_STATUS_UPDATED").
-  type: { type: String, required: true },
-  // Minimal payload only — never a full Mongoose document, never a
-  // secret/token/payment detail. Every existing call site already only
-  // ever passed small, purpose-built objects (ids, statuses, names) — this
-  // schema doesn't change what's allowed to be sent, only how it's
-  // delivered.
-  payload: { type: mongoose.Schema.Types.Mixed, default: {} },
-  createdAt: { type: Date, default: Date.now },
-  expiresAt: { type: Date, required: true, index: { expires: 0 } },
-});
+// See models/README-migration.md. `id` is a plain AUTO_INCREMENT BIGINT
+// here (not the usual 24-hex ObjectId-format string) — see sql/schema.sql's
+// header comment for why: this table's whole job is a real monotonic
+// cursor for SSE polling, which AUTO_INCREMENT gives natively, and no
+// external reference or "order number"-style display ever depends on an
+// event's id looking like an ObjectId.
 
-// The one index the SSE polling loop's query actually needs: "give me
-// every event on this channel with _id greater than the client's last
-// seen id, in order." `_id` is already indexed by MongoDB by default and
-// is monotonically increasing per-insert, which is what makes it usable
-// directly as a resumable cursor matching the SSE `Last-Event-ID` header
-// — no separate sequence counter needed.
-eventSchema.index({ channel: 1, _id: 1 });
+function rowToEvent(row) {
+  if (!row) return null;
+  return {
+    _id: row.id,
+    channel: row.channel,
+    type: row.type,
+    payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
 
-export default mongoose.models.Event || mongoose.model("Event", eventSchema);
+/** Inserts one event. Pass `conn` (a mysql2 PoolConnection) to join a caller's transaction — omit for a standalone, non-transactional insert. */
+async function create({ channel, type, payload, expiresAt }, conn) {
+  const sql = "INSERT INTO events (channel, type, payload, expires_at) VALUES (?, ?, ?, ?)";
+  const params = [channel, type, JSON.stringify(payload ?? {}), expiresAt];
+  const result = conn ? (await conn.query(sql, params))[0] : await query(sql, params);
+  return rowToEvent({
+    id: result.insertId,
+    channel,
+    type,
+    payload: JSON.stringify(payload ?? {}),
+    created_at: new Date(),
+    expires_at: expiresAt,
+  });
+}
+
+async function findSince(channel, afterId, limit) {
+  const rows = afterId
+    ? await query("SELECT * FROM events WHERE channel = ? AND id > ? ORDER BY id ASC LIMIT ?", [channel, afterId, limit])
+    : await query("SELECT * FROM events WHERE channel = ? ORDER BY id ASC LIMIT ?", [channel, limit]);
+  return rows.map(rowToEvent);
+}
+
+async function existsInChannel(id, channel) {
+  const rows = await query("SELECT 1 FROM events WHERE id = ? AND channel = ? LIMIT 1", [id, channel]);
+  return rows.length > 0;
+}
+
+async function findLatestId(channel) {
+  const rows = await query("SELECT id FROM events WHERE channel = ? ORDER BY id DESC LIMIT 1", [channel]);
+  return rows[0]?.id ?? null;
+}
+
+const Event = { create, findSince, existsInChannel, findLatestId };
+
+export default Event;

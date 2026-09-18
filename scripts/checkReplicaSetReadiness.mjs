@@ -1,3 +1,16 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// This checked that a MongoDB deployment was transaction-capable
+// (a real replica set, not a standalone mongod). MariaDB's InnoDB engine
+// (see sql/schema.sql) supports real ACID transactions on a single
+// standalone server by default — there is no replica-set-equivalent
+// topology to verify for MySQL/MariaDB.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Phase 11, section H — a READ-ONLY check that the configured MongoDB
 // deployment is transaction-capable. This app relies on multi-document
 // transactions (session.withTransaction — order creation, COD payment

@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Wordmark from "../brand/Wordmark.jsx";
 import HeaderSearchField from "./HeaderSearchField.jsx";
 import MobileCategoryDrawer from "./MobileCategoryDrawer.jsx";
+import HeaderCategoryMenu from "./HeaderCategoryMenu.jsx";
 import {
   Bell,
   Check,
@@ -31,7 +32,6 @@ import { cn } from "../../lib/utils.js";
 import { useTheme } from "../../context/ThemeProvider.jsx";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
-import { departmentName } from "../../lib/i18n/catalog.js";
 import LanguageSwitcher from "./LanguageSwitcher.jsx";
 import {
   selectCurrentUser,
@@ -80,6 +80,15 @@ export default function Header({ initialDepartments = [] }) {
   const [logout] = useLogoutMutation();
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // Lifted up from MobileCategoryDrawer itself: that component previously
+  // owned this as local state, which reset to [] every time because
+  // AnimatePresence unmounts the drawer's contents on close — so drilling
+  // into Food -> Fruits & Vegetables, tapping a leaf product to navigate,
+  // then reopening the hamburger always dumped the shopper back at the
+  // top-level department list instead of back where they'd been browsing.
+  // Header.jsx itself never unmounts, so keeping the drill-down path here
+  // instead makes it survive the drawer closing and reopening.
+  const [mobileCategoryPath, setMobileCategoryPath] = useState([]);
 
   const shopName = settings?.store?.name || "TAHOS.";
 
@@ -93,14 +102,13 @@ export default function Header({ initialDepartments = [] }) {
     : guestCount;
   const wlCount = wlData?.wishlist?.products?.length || 0;
 
-  // Real departments for both the "Categories" panel and the mobile
-  // drawer — same query ShopPage.jsx's department chips already use.
+  // Real departments for the "Shop by Category" header menu and the mobile
+  // drawer — same query ShopPage.jsx's category filter already uses.
   // `initialDepartments` (from app/(routes)/layout.jsx, a Server
   // Component) seeds the very first paint so the list isn't empty until
   // this client query resolves.
   const { data: catsData } = useGetCategoriesQuery();
   const allCategories = catsData?.categories ?? initialDepartments;
-  const departments = allCategories.filter((c) => !c.parent);
 
   // Route change closes every transient surface. Local panels reset during
   // render (React's "adjust state when a prop changes" pattern) so the new
@@ -140,9 +148,11 @@ export default function Header({ initialDepartments = [] }) {
       {/* Utility topbar — EShopper's slim FAQ/Help/Support strip, wired to
           the real pages that exist here (FAQ, Contact) instead of empty
           anchors, with the language/theme controls taking the place of
-          social links this store doesn't have. Desktop/tablet only. */}
+          social links this store doesn't have. Desktop/tablet only.
+          Default (non-green) styling — of the header's 3 stacked rows, only
+          the main logo/search/actions row below is brand-green. */}
       <div className="hidden border-b border-line bg-media md:block">
-        <div className="mx-auto flex h-9 max-w-[1480px] items-center justify-between px-5 text-[12.5px] text-stone sm:px-8 lg:px-14">
+        <div className="container-x flex h-9 items-center justify-between text-[12.5px] text-stone">
           <div className="flex items-center gap-3">
             <Link href="/faq" className="hover:text-ink">{t("footer.faq")}</Link>
             <span className="text-line">|</span>
@@ -164,23 +174,26 @@ export default function Header({ initialDepartments = [] }) {
 
       <header className="sticky top-0 z-[90] border-b border-line bg-surface">
         {/* Mobile app-shell bar (<768px): logo, theme toggle, cart — search
-            gets its own full-width row below. */}
-        <div className="flex h-[58px] items-center gap-3 px-5 md:hidden">
+            gets its own full-width row below. This is mobile's one
+            equivalent of the desktop main row below, so it shares that
+            row's brand-green treatment; the utility topbar and nav row
+            above/below stay default and are hidden on mobile anyway. */}
+        <div className="container-x flex h-[58px] items-center gap-3 bg-verm text-accent-foreground md:hidden">
           <button
             onClick={() => dispatch(toggleMobileMenu())}
             aria-label={t("header.openMenu")}
-            className="-ml-2 grid h-11 w-11 flex-none place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
+            className="-ml-2 grid h-11 w-11 flex-none place-items-center rounded-lg text-accent-foreground transition-colors hover:bg-white/10 focus-ring"
           >
             <Menu className="h-5 w-5" />
           </button>
           <Link href="/" className="flex-none focus-ring" aria-label={shopName}>
-            <Wordmark name={shopName} className="text-[20px]" />
+            <Wordmark name={shopName} onAccent className="text-[20px]" />
           </Link>
           <div className="flex-1" />
           <button
             onClick={toggleTheme}
             aria-label={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
-            className="grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
+            className="grid h-11 w-11 place-items-center rounded-lg text-accent-foreground transition-colors hover:bg-white/10 focus-ring"
           >
             {isDark ? <Sun className="h-[20px] w-[20px]" /> : <Moon className="h-[20px] w-[20px]" />}
           </button>
@@ -188,21 +201,28 @@ export default function Header({ initialDepartments = [] }) {
           <button
             onClick={() => dispatch(toggleCart())}
             aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
-            className="relative grid h-11 w-11 place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring"
+            className="relative grid h-11 w-11 place-items-center rounded-lg text-accent-foreground transition-colors hover:bg-white/10 focus-ring"
           >
             <ShoppingCart className="h-[21px] w-[21px]" strokeWidth={1.6} />
             {cartCount > 0 && <Badge count={cartCount} />}
           </button>
         </div>
-        <div className="px-5 pb-3 md:hidden">
+        <div className="container-x bg-verm pb-3 md:hidden">
           <HeaderSearchField />
         </div>
 
-        {/* Main row — EShopper's logo / search / action-buttons row. */}
-        <div className="mx-auto hidden max-w-[1480px] items-center gap-6 px-5 py-4 md:flex sm:px-8 lg:px-14">
-          <Link href="/" className="flex-none focus-ring" aria-label={shopName}>
-            <Wordmark name={shopName} className="text-[25px]" />
-          </Link>
+        {/* Main row — EShopper's logo / search / action-buttons row. The
+            ONE brand-green section of the header (matching Footer.jsx's own
+            `bg-verm`) — the utility topbar above and the nav row below both
+            stay the header's normal default background. The green fill is
+            on this full-width OUTER div, not the centered inner one, so it
+            reaches both edges of the viewport instead of leaving default-
+            colored gutters on screens wider than the 1480px content max. */}
+        <div className="hidden bg-verm text-accent-foreground md:block">
+          <div className="container-x flex items-center gap-6 py-4">
+            <Link href="/" className="flex-none focus-ring" aria-label={shopName}>
+              <Wordmark name={shopName} onAccent className="text-[25px]" />
+            </Link>
 
           <div className="flex-1">
             <HeaderSearchField />
@@ -213,7 +233,7 @@ export default function Header({ initialDepartments = [] }) {
               <Link
                 href="/compare"
                 aria-label={t("header.compareLabel", { count: compareCount })}
-                className="relative grid h-11 w-11 place-items-center rounded-lg border border-line text-ink transition-colors hover:border-ink focus-ring"
+                className="relative grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
               >
                 <Scale className="h-[18px] w-[18px]" />
                 <Badge count={compareCount} />
@@ -222,7 +242,7 @@ export default function Header({ initialDepartments = [] }) {
             <Link
               href="/wishlist"
               aria-label={wlCount ? t("header.wishlistLabel", { count: wlCount }) : t("header.wishlistEmpty")}
-              className="relative grid h-11 w-11 place-items-center rounded-lg border border-line text-ink transition-colors hover:border-ink focus-ring"
+              className="relative grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
             >
               <Heart className="h-[18px] w-[18px]" />
               {wlCount > 0 && <Badge count={wlCount} />}
@@ -230,7 +250,7 @@ export default function Header({ initialDepartments = [] }) {
             <button
               onClick={() => dispatch(toggleCart())}
               aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
-              className="relative grid h-11 w-11 place-items-center rounded-lg border border-line text-ink transition-colors hover:border-ink focus-ring"
+              className="relative grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
             >
               <ShoppingCart className="h-[18px] w-[18px]" />
               {cartCount > 0 && <Badge count={cartCount} />}
@@ -243,7 +263,7 @@ export default function Header({ initialDepartments = [] }) {
                 aria-label={t("header.account")}
                 aria-expanded={userMenuOpen}
                 aria-haspopup="menu"
-                className="grid h-11 w-11 place-items-center rounded-lg border border-line text-ink transition-colors hover:border-ink focus-ring"
+                className="grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
               >
                 <UserIcon className="h-[18px] w-[18px]" />
               </button>
@@ -291,22 +311,33 @@ export default function Header({ initialDepartments = [] }) {
               </AnimatePresence>
             </div>
           </div>
+          </div>
         </div>
 
-        {/* Nav row — the "Departments" mega-menu trigger that used to live
-            here was removed: the homepage's always-expanded CategorySidebar
-            is now the one category entry point, so this row no longer
-            duplicates it. The mobile drawer (opened by the hamburger below)
-            still lists every department for small screens. */}
+        {/* Nav row — "All Categories" now sits at the far left on every
+            storefront page (not just /shop): the homepage's old always-
+            expanded CategorySidebar is gone, so this is the one category
+            entry point everywhere above the mobile drawer's own breakpoint.
+            A plain flex row (not the old 3-column grid built to keep the
+            center nav mathematically centered around a page-dependent left
+            column) — the nav links now sit immediately beside the trigger,
+            left-aligned, matching this row's left-anchored composition. */}
         <div className="hidden border-t border-line md:block">
-          <div className="mx-auto flex max-w-[1480px] items-center gap-6 px-5 sm:px-8 lg:px-14">
-            <button
-              onClick={() => dispatch(toggleMobileMenu())}
-              aria-label={t("header.openMenu")}
-              className="-ml-2 grid h-11 w-11 flex-none place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring lg:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
+          <div className="container-x flex items-center gap-6">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => dispatch(toggleMobileMenu())}
+                aria-label={t("header.openMenu")}
+                className="-ml-2 grid h-11 w-11 flex-none place-items-center rounded-lg text-ink transition-colors hover:bg-wash focus-ring lg:hidden"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              {/* lg+ only — below that, the hamburger above already opens
+                  the mobile drawer's own category browser
+                  (MobileCategoryDrawer), so showing this trigger too would
+                  be a duplicate, redundant category entry point. */}
+              <HeaderCategoryMenu categories={allCategories} className="hidden lg:flex" />
+            </div>
 
             <nav aria-label="Primary" className="flex h-11 items-center gap-5 text-[14.5px] font-medium">
               <HeaderNavLink href="/" pathname={pathname} searchParams={searchParams}>
@@ -331,17 +362,6 @@ export default function Header({ initialDepartments = [] }) {
               >
                 {t("home.navDeals")}
               </HeaderNavLink>
-              {departments.slice(0, 3).map((d) => (
-                <HeaderNavLink
-                  key={d._id}
-                  href={`/shop?category=${d._id}`}
-                  pathname={pathname}
-                  searchParams={searchParams}
-                  className="hidden xl:flex"
-                >
-                  {departmentName(locale, d.slug, d.name)}
-                </HeaderNavLink>
-              ))}
               <HeaderNavLink href="/contact" pathname={pathname} searchParams={searchParams} className="hidden sm:flex">
                 {t("footer.contact")}
               </HeaderNavLink>
@@ -396,6 +416,8 @@ export default function Header({ initialDepartments = [] }) {
                 categories={allCategories}
                 locale={locale}
                 t={t}
+                path={mobileCategoryPath}
+                setPath={setMobileCategoryPath}
                 onNavigate={() => dispatch(setMobileMenuOpen(false))}
               />
 
@@ -449,6 +471,9 @@ function HeaderNavLink({ href, pathname, searchParams, className, children }) {
       href={href}
       aria-current={isActive ? "page" : undefined}
       className={cn(
+        // This nav row is the header's default (non-green) background, so
+        // the usual brand-green accent still works fine here for hover/
+        // active — only the main logo/search/actions row above is green.
         "flex items-center transition-colors hover:text-verm focus-ring",
         isActive && "text-verm",
         className,
@@ -476,7 +501,13 @@ function Badge({ count }) {
   return (
     <span
       data-tabular
-      className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-lg bg-verm-contrast px-1 text-[10px] leading-none text-white"
+      // These badges sit on icon buttons whose own background is
+      // transparent, so they show directly against the header's brand-
+      // green fill — `bg-verm-contrast` (the same green) would be
+      // invisible there. `bg-lime` is this design system's other
+      // on-accent highlight color, which needs dark text (see its own
+      // definition comment in app/globals.css).
+      className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-lg bg-lime px-1 text-[10px] leading-none text-ink"
     >
       {count > 99 ? "99+" : count}
     </span>
@@ -552,7 +583,7 @@ function NotificationBell() {
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={`${t("header.notifications")}${unreadCount ? ` (${unreadCount})` : ""}`}
-        className="relative grid h-11 w-11 place-items-center rounded-lg border border-line text-ink transition-colors hover:border-ink focus-ring md:border md:border-line"
+        className="relative grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
       >
         <Bell className="h-[20px] w-[20px]" strokeWidth={1.6} />
         {unreadCount > 0 && <Badge count={unreadCount} />}

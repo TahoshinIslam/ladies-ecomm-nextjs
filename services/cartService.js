@@ -1,15 +1,7 @@
 import Cart from "../models/cartModel.js";
 import Product from "../models/productModel.js";
-// Not referenced directly — imported so mongoose.model("brands", ...) is
-// registered before .populate("productId", "...brand...") runs (Mongoose
-// needs the schema registered somewhere in the process, and nothing else
-// in this route's module graph otherwise loads it). Same reasoning as
-// productService.js.
-import "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
-
-const PRODUCT_SELECT = "name slug images basePrice discountPrice brand isActive";
 
 function findVariant(product, variantId) {
   return product.variants.find((v) => String(v._id) === String(variantId));
@@ -25,8 +17,8 @@ function snapshotVariant(variant) {
 }
 
 async function getOrCreateCart(userId) {
-  let cart = await Cart.findOne({ userId });
-  if (!cart) cart = await Cart.create({ userId, items: [] });
+  let cart = await Cart.findByUser(userId);
+  if (!cart) cart = await Cart.create(userId);
   return cart;
 }
 
@@ -34,23 +26,29 @@ function sameItem(item, productId, variantId) {
   return String(item.productId) === String(productId) && String(item.variantId) === String(variantId);
 }
 
-// Reshapes a raw Cart document into the shape the frontend already
-// consumes (hooks/useCart.js just passes this straight through to
-// CartDrawer.jsx / app/(routes)/cart/page.jsx, which read item.product /
-// item.variantId / item.variant — the same shape store/guestCartSlice.js
-// produces for the guest cart). DB field names (productId/snapshot) stay
-// as specified; only the API response is aliased.
+// Reshapes a raw Cart into the shape the frontend already consumes
+// (hooks/useCart.js just passes this straight through to CartDrawer.jsx /
+// app/(routes)/cart/page.jsx, which read item.product / item.variantId /
+// item.variant — the same shape store/guestCartSlice.js produces for the
+// guest cart).
 async function serializeCart(cart) {
-  await cart.populate("items.productId", PRODUCT_SELECT);
+  const productIds = [...new Set(cart.items.map((i) => String(i.productId)))];
+  const products = productIds.length ? await Product.findByIds(productIds) : [];
+  const byId = new Map(products.map((p) => [String(p._id), p]));
   return {
     _id: cart._id,
-    items: cart.items.map((item) => ({
-      productId: item.productId?._id ?? item.productId,
-      variantId: item.variantId,
-      quantity: item.quantity,
-      product: item.productId?.name ? item.productId : null,
-      variant: item.snapshot,
-    })),
+    items: cart.items.map((item) => {
+      const product = byId.get(String(item.productId));
+      return {
+        productId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        product: product
+          ? { _id: product._id, name: product.name, slug: product.slug, images: product.images, basePrice: product.basePrice, discountPrice: product.discountPrice, brand: product.brand, isActive: product.isActive }
+          : null,
+        variant: item.snapshot,
+      };
+    }),
   };
 }
 
@@ -82,12 +80,9 @@ export async function addToCart(userId, productId, variantId, quantity = 1) {
   }
 
   if (existing) {
-    // Merge into the same line — same product AND same variant.
     existing.quantity = desiredQty;
     existing.snapshot = snapshotVariant(variant);
   } else {
-    // A different variant of the same product (or a different product
-    // entirely) always gets its own line — never merged with an existing one.
     cart.items.push({
       productId,
       variantId,
@@ -108,8 +103,6 @@ export async function updateCartItem(userId, productId, variantId, quantity) {
   const idx = cart.items.findIndex((i) => sameItem(i, productId, variantId));
 
   if (idx < 0) {
-    // Idempotent delete: if quantity <= 0 and the item is already gone,
-    // the desired end state is already achieved.
     if (qty <= 0) return serializeCart(cart);
     throw new HttpError(404, "Item not in cart");
   }

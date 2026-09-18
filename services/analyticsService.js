@@ -1,9 +1,7 @@
-import Order from "../models/orderModel.js";
-import User from "../models/userModel.js";
-import Product from "../models/productModel.js";
-import Review from "../models/reviewModel.js";
+import { query } from "../config/db.js";
 
 const REVENUE_STATUSES = ["paid", "processing", "shipped", "delivered"];
+const revenueStatusPlaceholders = () => REVENUE_STATUSES.map(() => "?").join(",");
 
 export async function getOverview() {
   const now = new Date();
@@ -11,52 +9,47 @@ export async function getOverview() {
   const last30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const [
-    totalOrders,
-    totalRevenueAgg,
-    monthlyRevenueAgg,
-    totalUsers,
-    newUsers30,
-    totalProducts,
-    outOfStock,
-    pendingOrders,
-    avgRatingAgg,
+    totalOrdersRows,
+    totalRevenueRows,
+    monthlyRevenueRows,
+    totalUsersRows,
+    newUsers30Rows,
+    totalProductsRows,
+    outOfStockRows,
+    pendingOrdersRows,
+    avgRatingRows,
   ] = await Promise.all([
-    Order.countDocuments({ status: { $nin: ["cancelled", "refunded"] } }),
-    Order.aggregate([
-      { $match: { status: { $in: REVENUE_STATUSES } } },
-      { $group: { _id: null, total: { $sum: "$total" } } },
-    ]),
-    Order.aggregate([
-      {
-        $match: {
-          status: { $in: REVENUE_STATUSES },
-          createdAt: { $gte: startOfMonth },
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$total" } } },
-    ]),
-    User.countDocuments(),
-    User.countDocuments({ createdAt: { $gte: last30 } }),
-    Product.countDocuments({ isActive: true }),
-    // Real schema uses variants[].stock, not the old sneaker-era sizes[].stock.
-    Product.countDocuments({
-      isActive: true,
-      $expr: { $eq: [{ $sum: "$variants.stock" }, 0] },
-    }),
-    Order.countDocuments({ status: "pending" }),
-    Review.aggregate([{ $group: { _id: null, avg: { $avg: "$rating" } } }]),
+    query("SELECT COUNT(*) AS n FROM orders WHERE status NOT IN ('cancelled', 'refunded')"),
+    query(`SELECT COALESCE(SUM(total), 0) AS total FROM orders WHERE status IN (${revenueStatusPlaceholders()})`, REVENUE_STATUSES),
+    query(
+      `SELECT COALESCE(SUM(total), 0) AS total FROM orders WHERE status IN (${revenueStatusPlaceholders()}) AND created_at >= ?`,
+      [...REVENUE_STATUSES, startOfMonth],
+    ),
+    query("SELECT COUNT(*) AS n FROM users"),
+    query("SELECT COUNT(*) AS n FROM users WHERE created_at >= ?", [last30]),
+    query("SELECT COUNT(*) AS n FROM products WHERE is_active = 1"),
+    // A product is out of stock when every one of its variants has stock 0
+    // (real schema: product_variants.stock, not the old sneaker-era
+    // sizes[].stock) — a product with zero variant rows counts as 0 total
+    // stock too, matching the old `$sum: "$variants.stock" == 0` check.
+    query(
+      `SELECT COUNT(*) AS n FROM products p WHERE p.is_active = 1
+       AND COALESCE((SELECT SUM(pv.stock) FROM product_variants pv WHERE pv.product_id = p.id), 0) = 0`,
+    ),
+    query("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'"),
+    query("SELECT AVG(rating) AS avg FROM reviews"),
   ]);
 
   return {
-    totalOrders,
-    pendingOrders,
-    totalRevenue: totalRevenueAgg[0]?.total || 0,
-    monthlyRevenue: monthlyRevenueAgg[0]?.total || 0,
-    totalUsers,
-    newUsersLast30: newUsers30,
-    totalProducts,
-    outOfStockProducts: outOfStock,
-    avgRating: Math.round((avgRatingAgg[0]?.avg || 0) * 10) / 10,
+    totalOrders: totalOrdersRows[0].n,
+    pendingOrders: pendingOrdersRows[0].n,
+    totalRevenue: Number(totalRevenueRows[0].total) || 0,
+    monthlyRevenue: Number(monthlyRevenueRows[0].total) || 0,
+    totalUsers: totalUsersRows[0].n,
+    newUsersLast30: newUsers30Rows[0].n,
+    totalProducts: totalProductsRows[0].n,
+    outOfStockProducts: outOfStockRows[0].n,
+    avgRating: Math.round((Number(avgRatingRows[0].avg) || 0) * 10) / 10,
   };
 }
 
@@ -64,77 +57,51 @@ export async function getSalesSeries(days = 30) {
   const clamped = Math.min(365, Math.max(1, Number(days) || 30));
   const since = new Date(Date.now() - clamped * 24 * 60 * 60 * 1000);
 
-  const series = await Order.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: since },
-        status: { $in: REVENUE_STATUSES },
-      },
-    },
-    {
-      $group: {
-        _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-        revenue: { $sum: "$total" },
-        orders: { $sum: 1 },
-      },
-    },
-    { $sort: { _id: 1 } },
-    { $project: { _id: 0, date: "$_id", revenue: 1, orders: 1 } },
-  ]);
+  const rows = await query(
+    `SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COALESCE(SUM(total), 0) AS revenue, COUNT(*) AS orders
+     FROM orders
+     WHERE created_at >= ? AND status IN (${revenueStatusPlaceholders()})
+     GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+     ORDER BY date ASC`,
+    [since, ...REVENUE_STATUSES],
+  );
 
-  return { days: clamped, series };
+  return { days: clamped, series: rows.map((r) => ({ date: r.date, revenue: Number(r.revenue), orders: r.orders })) };
 }
 
 export async function getTopProducts(limit = 10) {
   const clamped = Math.min(50, Number(limit) || 10);
 
-  const products = await Order.aggregate([
-    { $match: { status: { $in: REVENUE_STATUSES } } },
-    { $unwind: "$items" },
-    {
-      $group: {
-        _id: "$items.product",
-        // Real schema denormalizes name/image/price under items.snapshot,
-        // not flat on the item — see models/orderModel.js.
-        name: { $first: "$items.snapshot.name" },
-        image: { $first: "$items.snapshot.image" },
-        totalSold: { $sum: "$items.quantity" },
-        revenue: { $sum: { $multiply: ["$items.snapshot.price", "$items.quantity"] } },
-      },
-    },
-    { $sort: { totalSold: -1 } },
-    { $limit: clamped },
-  ]);
+  const rows = await query(
+    `SELECT oi.product_id AS _id,
+            SUBSTRING_INDEX(GROUP_CONCAT(oi.snapshot_name ORDER BY o.created_at DESC SEPARATOR ''), '', 1) AS name,
+            SUBSTRING_INDEX(GROUP_CONCAT(oi.snapshot_image ORDER BY o.created_at DESC SEPARATOR ''), '', 1) AS image,
+            SUM(oi.quantity) AS totalSold,
+            SUM(oi.snapshot_price * oi.quantity) AS revenue
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE o.status IN (${revenueStatusPlaceholders()})
+     GROUP BY oi.product_id
+     ORDER BY totalSold DESC
+     LIMIT ?`,
+    [...REVENUE_STATUSES, clamped],
+  );
 
-  return products;
+  return rows.map((r) => ({ _id: r._id, name: r.name, image: r.image, totalSold: r.totalSold, revenue: Number(r.revenue) }));
 }
 
 export async function getStatusBreakdown() {
-  return Order.aggregate([
-    { $group: { _id: "$status", count: { $sum: 1 } } },
-    { $project: { _id: 0, status: "$_id", count: 1 } },
-  ]);
+  const rows = await query("SELECT status, COUNT(*) AS count FROM orders GROUP BY status");
+  return rows.map((r) => ({ status: r.status, count: r.count }));
 }
 
 export async function getRevenueByMethod() {
-  return Order.aggregate([
-    { $match: { status: { $in: REVENUE_STATUSES } } },
-    {
-      $lookup: {
-        from: "payments",
-        localField: "_id",
-        foreignField: "order",
-        as: "payment",
-      },
-    },
-    { $unwind: { path: "$payment", preserveNullAndEmptyArrays: true } },
-    {
-      $group: {
-        _id: "$payment.method",
-        revenue: { $sum: "$total" },
-        count: { $sum: 1 },
-      },
-    },
-    { $project: { _id: 0, method: { $ifNull: ["$_id", "unknown"] }, revenue: 1, count: 1 } },
-  ]);
+  const rows = await query(
+    `SELECT COALESCE(p.method, 'unknown') AS method, SUM(o.total) AS revenue, COUNT(*) AS count
+     FROM orders o LEFT JOIN payments p ON p.order_id = o.id
+     WHERE o.status IN (${revenueStatusPlaceholders()})
+     GROUP BY COALESCE(p.method, 'unknown')`,
+    REVENUE_STATUSES,
+  );
+  return rows.map((r) => ({ method: r.method, revenue: Number(r.revenue), count: r.count }));
 }

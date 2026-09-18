@@ -12,10 +12,13 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
+  rawQuery,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -25,10 +28,14 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
   let loginPOST, logoutPOST, mePOST_GET, meUpdatePUT, couponsGET, couponsPOST;
   let adminEventsGET, orderEventsGET, orderCreatePOST;
   let resetPasswordPOST;
-  let User, Session, Coupon;
 
   before(async () => {
     await connectTestDb();
+    // A real MySQL test database persists across runs (unlike the old
+    // throwaway per-CI-run Mongo instance) — start from a clean slate so
+    // rate-limit counters, leftover fixtures, etc. from a previous run (or
+    // a previous test file) can never change this file's outcome.
+    await truncateAll();
     ({ POST: loginPOST } = await import("../app/api/users/login/route.js"));
     ({ POST: logoutPOST } = await import("../app/api/users/logout/route.js"));
     ({ GET: mePOST_GET, PUT: meUpdatePUT } = await import("../app/api/users/me/route.js"));
@@ -37,9 +44,6 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
     ({ GET: orderEventsGET } = await import("../app/api/orders/[id]/events/route.js"));
     ({ POST: orderCreatePOST } = await import("../app/api/orders/route.js"));
     ({ POST: resetPasswordPOST } = await import("../app/api/users/reset-password/[token]/route.js"));
-    ({ default: User } = await import("../models/userModel.js"));
-    ({ default: Session } = await import("../models/sessionModel.js"));
-    ({ default: Coupon } = await import("../models/couponModel.js"));
   });
 
   after(async () => {
@@ -70,7 +74,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       assert.ok(session.attrs.some((a) => a === "samesite=lax"), "must be SameSite=Lax");
       assert.ok(session.attrs.includes("path=/"), "must be Path=/");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -114,13 +118,13 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       assert.ok(cookies.tahos_session, "plain tahos_session name in non-production");
       assert.ok(!cookies.tahos_session.attrs.includes("secure"), "not Secure over plain HTTP in dev/test");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
   // ===================== 8-10: what's actually stored/returned =====================
 
-  test("raw session token is absent from the response JSON; database stores only its hash; CSRF raw value is not stored anywhere in the database", async () => {
+  test("raw session token is absent from the response JSON; database stores only its hash (never the raw value)", async () => {
     const user = await createTestUser();
     try {
       const req = requestAs({ method: "POST", url: "http://test/api/users/login", body: { email: user.email, password: "TestPassword123!" } });
@@ -135,28 +139,22 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       assert.ok(!bodyText.includes(rawSessionToken));
       assert.ok(!bodyText.includes(rawCsrfToken));
 
-      // A DEFAULT find (no explicit .select()) must not even return
-      // tokenHash/csrfTokenHash at all — models/sessionModel.js marks both
-      // select:false specifically so an unrelated future query elsewhere in
-      // the codebase can't accidentally leak either hash by omission.
-      const storedDefault = await Session.findOne({ user: user._id });
-      assert.equal(storedDefault.tokenHash, undefined, "tokenHash must be excluded from a normal query by default");
-      assert.equal(storedDefault.csrfTokenHash, undefined, "csrfTokenHash must be excluded from a normal query by default");
-      const storedDefaultText = JSON.stringify(storedDefault.toObject());
-      assert.ok(!storedDefaultText.includes(rawSessionToken));
-      assert.ok(!storedDefaultText.includes(rawCsrfToken));
-
-      // Opting in explicitly (as lib/session.js itself must, and does, for
-      // csrfTokenHash) to verify the underlying stored values are actually
-      // hashes, not the raw tokens.
-      const stored = await Session.findOne({ user: user._id }).select("+tokenHash +csrfTokenHash");
-      assert.notEqual(stored.tokenHash, rawSessionToken);
-      assert.notEqual(stored.csrfTokenHash, rawCsrfToken);
-      const storedText = JSON.stringify(stored.toObject());
+      // Reads the raw stored row directly via SQL — the SQL model itself
+      // has no Mongoose-style select:false field hiding (every model
+      // returns a full row; see models/README-migration.md), so the
+      // property this test actually protects — the raw token/CSRF value is
+      // never stored in plaintext, only its SHA-256 hash — is checked
+      // directly against the stored hash instead of against a
+      // field-omitted-by-default query shape that no longer exists.
+      const rows = await rawQuery("SELECT token_hash, csrf_token_hash FROM sessions WHERE user_id = ?", [user._id]);
+      assert.equal(rows.length, 1);
+      assert.notEqual(rows[0].token_hash, rawSessionToken, "stored token_hash must not equal the raw token");
+      assert.notEqual(rows[0].csrf_token_hash, rawCsrfToken, "stored csrf_token_hash must not equal the raw CSRF token");
+      const storedText = JSON.stringify(rows[0]);
       assert.ok(!storedText.includes(rawSessionToken));
       assert.ok(!storedText.includes(rawCsrfToken));
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -177,10 +175,10 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const replayRes = await mePOST_GET(replayReq);
       assert.equal(replayRes.status, 401, "the exact same cookie must be rejected after logout");
 
-      const stored = await Session.findOne({ user: user._id });
-      assert.ok(stored.revokedAt, "the session record itself is marked revoked");
+      const rows = await rawQuery("SELECT revoked_at FROM sessions WHERE user_id = ?", [user._id]);
+      assert.ok(rows[0].revoked_at, "the session record itself is marked revoked");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -212,10 +210,10 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const newRawToken = cookies.split(";")[0].split("=")[1];
       assert.notEqual(newRawToken, oldRawToken, "a fresh session is issued, never the presented one");
 
-      const oldSession = await Session.findOne({ tokenHash: await sha256Hex(oldRawToken) });
-      assert.ok(oldSession.revokedAt, "the pre-existing session is revoked, not left valid");
+      const rows = await rawQuery("SELECT revoked_at FROM sessions WHERE token_hash = ?", [await sha256Hex(oldRawToken)]);
+      assert.ok(rows[0].revoked_at, "the pre-existing session is revoked, not left valid");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -234,24 +232,36 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const reqB = requestAs({ method: "GET", url: "http://test/api/users/me", session: sessionB });
       assert.equal((await mePOST_GET(reqB)).status, 200, "session B is untouched by A's revocation");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
-  // ===================== 26: TTL / index configuration =====================
+  // ===================== 26: index configuration =====================
 
-  test("session schema declares a TTL index on expiresAt, a unique index on tokenHash, and a compound index on {user, revokedAt}", async () => {
-    const indexes = await Session.collection.indexes();
-    const byName = Object.fromEntries(indexes.map((i) => [JSON.stringify(i.key), i]));
+  test("sessions table has a unique index on token_hash and a compound index on (user_id, revoked_at)", async () => {
+    // MySQL has no direct equivalent of Mongo's TTL index — expiry here is
+    // enforced explicitly (validateSessionToken() re-checks expires_at on
+    // every request, see lib/session.js), which the 401-after-logout and
+    // session-limit tests in this file already exercise; a periodic
+    // DELETE-past-expires_at sweep (the storage-reclamation backstop, same
+    // role the old TTL index played) is documented in sql/schema.sql
+    // rather than asserted here, since it's an operational job, not
+    // query-time behavior.
+    const rows = await rawQuery("SHOW INDEX FROM sessions");
+    const byName = {};
+    for (const r of rows) {
+      byName[r.Key_name] = byName[r.Key_name] || [];
+      byName[r.Key_name].push(r);
+    }
 
-    const ttl = indexes.find((i) => i.key.expiresAt === 1);
-    assert.ok(ttl, "expiresAt index must exist");
-    assert.equal(ttl.expireAfterSeconds, 0, "TTL index configured to expire exactly at the stored date");
+    const tokenHashIndex = Object.values(byName).find((cols) => cols.length === 1 && cols[0].Column_name === "token_hash");
+    assert.ok(tokenHashIndex, "token_hash must be indexed");
+    assert.equal(tokenHashIndex[0].Non_unique, 0, "token_hash index must be unique");
 
-    const tokenHashIndex = indexes.find((i) => i.key.tokenHash === 1);
-    assert.ok(tokenHashIndex?.unique, "tokenHash must be uniquely indexed");
-
-    assert.ok(byName[JSON.stringify({ user: 1, revokedAt: 1 })], "compound {user, revokedAt} index must exist");
+    const compound = Object.values(byName).find(
+      (cols) => cols.some((c) => c.Column_name === "user_id") && cols.some((c) => c.Column_name === "revoked_at"),
+    );
+    assert.ok(compound, "compound (user_id, revoked_at) index must exist");
   });
 
   // ===================== 28: no token in logs (characterized, not exhaustively proven) =====================
@@ -291,7 +301,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const reqB = requestAs({ method: "GET", url: "http://test/api/users/me", session: sessionB });
       assert.equal((await mePOST_GET(reqB)).status, 401, "a completely different, previously-valid session for the same user is ALSO revoked");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -321,9 +331,8 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const strangerRes = await orderGET(strangerReq, { params: Promise.resolve({ id: created.order._id }) });
       assert.equal(strangerRes.status, 403);
     } finally {
-      const { default: Order } = await import("../models/orderModel.js");
-      await Order.deleteMany({ user: owner._id });
-      await User.deleteMany({ _id: { $in: [owner._id, stranger._id] } });
+      await deleteRows("orders", "user_id", owner._id);
+      await deleteRows("users", "id", [owner._id, stranger._id]);
     }
   });
 
@@ -345,9 +354,9 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       });
       const res = await couponsPOST(req);
       assert.equal(res.status, 201);
-      await Coupon.deleteOne({ _id: (await res.json()).coupon._id });
+      await deleteRows("coupons", "id", (await res.json()).coupon._id);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -364,7 +373,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const res = await couponsPOST(req);
       assert.equal(res.status, 403);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -381,7 +390,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const res = await couponsPOST(req);
       assert.equal(res.status, 403);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -398,7 +407,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const res = await couponsPOST(req);
       assert.equal(res.status, 403);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -420,7 +429,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const res = await couponsGET(req);
       assert.equal(res.status, 200, "GET is exempt from CSRF entirely — no X-CSRF-Token attached here");
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -455,7 +464,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
         staffController.abort();
       }
     } finally {
-      await User.deleteMany({ _id: { $in: [customer._id, employee._id] } });
+      await deleteRows("users", "id", [customer._id, employee._id]);
     }
   });
 
@@ -506,9 +515,8 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const ignoredRes = await orderEventsGET(withStaleQueryParam, { params: Promise.resolve({ id: orderId }) });
       assert.equal(ignoredRes.status, 401, "no cookie was presented, so this is unauthenticated regardless of the query string");
     } finally {
-      const { default: Order } = await import("../models/orderModel.js");
-      await Order.deleteMany({ user: owner._id });
-      await User.deleteMany({ _id: { $in: [owner._id, stranger._id] } });
+      await deleteRows("orders", "user_id", owner._id);
+      await deleteRows("users", "id", [owner._id, stranger._id]);
     }
   });
 
@@ -523,7 +531,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const sessions = [];
       for (let i = 0; i < 11; i++) {
         sessions.push(await createTestSession(user._id));
-        // createdAt has whole-millisecond resolution; without this, 11
+        // created_at has whole-millisecond resolution; without this, 11
         // rapid same-tick creates could tie on sort order and make "the
         // oldest" ambiguous.
         await new Promise((r) => setTimeout(r, 5));
@@ -535,10 +543,10 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const newestReq = requestAs({ method: "GET", url: "http://test/api/users/me", session: sessions[10] });
       assert.equal((await mePOST_GET(newestReq)).status, 200, "the newest session is unaffected");
 
-      const activeCount = await Session.countDocuments({ user: user._id, revokedAt: null });
+      const [{ n: activeCount }] = await rawQuery("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND revoked_at IS NULL", [user._id]);
       assert.equal(activeCount, 10, "exactly MAX_SESSIONS_PER_USER sessions remain active");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -547,14 +555,14 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
     try {
       // 5 already-revoked and 5 already-expired sessions — none of these
       // should ever be counted by pruneExcessSessions()'s own query filter
-      // ({revokedAt: null, expiresAt: {$gt: new Date()}}).
+      // (revoked_at IS NULL AND expires_at > NOW()).
       for (let i = 0; i < 5; i++) {
         const s = await createTestSession(user._id);
-        await Session.updateOne({ tokenHash: await sha256Hex(s.rawToken) }, { $set: { revokedAt: new Date() } });
+        await rawQuery("UPDATE sessions SET revoked_at = NOW(3) WHERE token_hash = ?", [await sha256Hex(s.rawToken)]);
       }
       for (let i = 0; i < 5; i++) {
         const s = await createTestSession(user._id);
-        await Session.updateOne({ tokenHash: await sha256Hex(s.rawToken) }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+        await rawQuery("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), await sha256Hex(s.rawToken)]);
       }
 
       // Now create exactly MAX_ACTIVE (10) genuinely active sessions — if
@@ -571,10 +579,13 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
         assert.equal(res.status, 200, "every one of the 10 active sessions must still be valid — the 10 dead rows must not have consumed any of the limit");
       }
 
-      const activeCount = await Session.countDocuments({ user: user._id, revokedAt: null, expiresAt: { $gt: new Date() } });
+      const [{ n: activeCount }] = await rawQuery(
+        "SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)",
+        [user._id],
+      );
       assert.equal(activeCount, 10);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -589,13 +600,16 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       // not about any intermediate moment during the race.
       await Promise.all(Array.from({ length: 15 }, () => createTestSession(user._id)));
 
-      const finalActiveCount = await Session.countDocuments({ user: user._id, revokedAt: null, expiresAt: { $gt: new Date() } });
+      const [{ n: finalActiveCount }] = await rawQuery(
+        "SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)",
+        [user._id],
+      );
       assert.equal(finalActiveCount, 10, "once every concurrent create+prune has fully settled, the population converges to exactly the configured limit, regardless of the race");
 
-      const totalCreated = await Session.countDocuments({ user: user._id });
+      const [{ n: totalCreated }] = await rawQuery("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?", [user._id]);
       assert.equal(totalCreated, 15, "all 15 sessions were genuinely created — the limit revokes excess rows, it never silently drops/fails a concurrent createSession() call itself");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -634,7 +648,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const res = await couponsPOST(req);
       assert.equal(res.status, 403, "a real CSRF token from a different session must not authorize this one");
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -656,7 +670,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const stillGoodReq = requestAs({ method: "GET", url: "http://test/api/users/me", session });
       assert.equal((await mePOST_GET(stillGoodReq)).status, 200, "the failed reset attempt must not have touched this valid, unrelated session");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -677,7 +691,7 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
       const stillGoodReq = requestAs({ method: "GET", url: "http://test/api/users/me", session });
       assert.equal((await mePOST_GET(stillGoodReq)).status, 200, "the session used for the failed attempt remains valid — nothing was revoked");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 });

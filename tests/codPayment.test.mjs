@@ -21,10 +21,13 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
+  rawQuery,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -36,6 +39,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: codPOST } = await import("../app/api/payments/cod/[orderId]/route.js"));
     ({ GET: orderPaymentGET } = await import("../app/api/payments/order/[orderId]/route.js"));
     ({ POST: createOrderPOST } = await import("../app/api/orders/route.js"));
@@ -83,14 +87,14 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(json.order.status, "processing");
       assert.equal(json.order.paymentMethod, "cod");
 
-      const payments = await Payment.find({ order: order._id });
+      const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1);
       assert.equal(payments[0].status, "pending");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -105,12 +109,12 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
 
       const unchanged = await Order.findById(order._id);
       assert.equal(unchanged.status, "pending");
-      assert.equal(await Payment.findOne({ order: order._id }), null);
+      assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [buyer._id, stranger._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [buyer._id, stranger._id]);
     }
   });
 
@@ -121,7 +125,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const res = await codPOST(codRequest(fakeId, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: fakeId }) });
       assert.equal(res.status, 404);
     } finally {
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -130,18 +134,18 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     const product = await createTestProduct({ stock: 10 });
     try {
       const order = await makeOrder(buyer, product);
-      await Order.updateOne({ _id: order._id }, { $set: { status: "delivered" } });
+      await rawQuery("UPDATE orders SET status = ? WHERE id = ?", ["delivered", order._id]);
 
       const res = await codPOST(codRequest(order._id, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 409, "codCreate() now guards the order's current status before creating a first Payment");
       const after_ = await Order.findById(order._id);
       assert.equal(after_.status, "delivered", "the order status must be untouched by the rejected attempt");
-      assert.equal(await Payment.findOne({ order: order._id }), null, "no Payment must have been created for the rejected attempt");
+      assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0, "no Payment must have been created for the rejected attempt");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -150,18 +154,18 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     const product = await createTestProduct({ stock: 10 });
     try {
       const order = await makeOrder(buyer, product);
-      await Order.updateOne({ _id: order._id }, { $set: { status: "cancelled" } });
+      await rawQuery("UPDATE orders SET status = ? WHERE id = ?", ["cancelled", order._id]);
 
       const res = await codPOST(codRequest(order._id, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 409);
       const after_ = await Order.findById(order._id);
       assert.equal(after_.status, "cancelled");
-      assert.equal(await Payment.findOne({ order: order._id }), null);
+      assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -181,14 +185,14 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const secondJson = await second.json();
       assert.equal(secondJson.order.status, "processing");
 
-      const payments = await Payment.find({ order: order._id });
+      const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1, "exactly one Payment row ever exists per order, enforced by paymentModel's unique `order` index");
       assert.equal(String(firstJson.order._id), String(secondJson.order._id));
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -198,22 +202,22 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     try {
       const order = await makeOrder(buyer, product);
       await codPOST(codRequest(order._id, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: order._id }) });
-      const originalPayment = await Payment.findOne({ order: order._id });
-      await Order.updateOne({ _id: order._id }, { $set: { status: "shipped" } });
+      const [originalPayment] = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
+      await rawQuery("UPDATE orders SET status = ? WHERE id = ?", ["shipped", order._id]);
 
       const res = await codPOST(codRequest(order._id, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 200);
       const json = await res.json();
       assert.equal(json.order.status, "shipped", "shipped must remain shipped — no regression to processing");
 
-      const payments = await Payment.find({ order: order._id });
+      const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1);
-      assert.equal(String(payments[0]._id), String(originalPayment._id));
+      assert.equal(String(payments[0].id), String(originalPayment.id));
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -223,19 +227,19 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     try {
       const order = await makeOrder(buyer, product);
       await codPOST(codRequest(order._id, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: order._id }) });
-      await Order.updateOne({ _id: order._id }, { $set: { status: "delivered", deliveredAt: new Date() } });
+      await rawQuery("UPDATE orders SET status = ?, delivered_at = ? WHERE id = ?", ["delivered", new Date(), order._id]);
 
       const res = await codPOST(codRequest(order._id, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 200);
       const json = await res.json();
       assert.equal(json.order.status, "delivered", "delivered must never regress back to processing on a COD retry");
 
-      assert.equal((await Payment.find({ order: order._id })).length, 1);
+      assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 1);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -262,13 +266,13 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(json1.order.status, "processing");
       assert.equal(json2.order.status, "processing");
 
-      const payments = await Payment.find({ order: order._id });
+      const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1, "concurrent duplicate COD creation must still leave exactly one Payment row");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -278,18 +282,24 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
     try {
       const order = await makeOrder(buyer, product);
 
-      // Deterministically force order.save() to fail INSIDE codCreate()'s
-      // transaction, strictly after Payment.create() has already run in
-      // that same (still-uncommitted) transaction — a real, test-controlled
-      // failure of "the Order half of the transaction fails", not just a
-      // documented possibility. Restored in `finally` no matter what.
-      const originalSave = Order.prototype.save;
-      Order.prototype.save = function patchedSave(...args) {
-        if (String(this._id) === String(order._id)) {
-          Order.prototype.save = originalSave;
+      // Deterministically force the Order status write to fail INSIDE
+      // codCreate()'s transaction, strictly after the Payment insert has
+      // already run in that same (still-uncommitted) transaction — a real,
+      // test-controlled failure of "the Order half of the transaction
+      // fails", not just a documented possibility. Restored in `finally`
+      // no matter what. (The SQL models have no shared prototype the way
+      // Mongoose documents did — each order object gets its own `.save()`
+      // closure, see models/README-migration.md — so the equivalent choke
+      // point is `Order.saveOrderOnConnection`, the one function
+      // services/paymentService.js's codCreate() actually calls inside its
+      // transaction to persist the status change.)
+      const originalSaveOnConnection = Order.saveOrderOnConnection;
+      Order.saveOrderOnConnection = function patchedSave(conn, orderArg) {
+        if (String(orderArg._id) === String(order._id)) {
+          Order.saveOrderOnConnection = originalSaveOnConnection;
           return Promise.reject(new Error("Simulated Order.save failure for deterministic rollback test"));
         }
-        return originalSave.apply(this, args);
+        return originalSaveOnConnection.call(this, conn, orderArg);
       };
 
       // lib/http.js's toResponse() deliberately console.error()s any
@@ -309,19 +319,19 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
         assert.equal(res.status, 500, "the forced save failure surfaces as a server error, not a silently-swallowed partial write");
       } finally {
         console.error = originalConsoleError;
-        Order.prototype.save = originalSave;
+        Order.saveOrderOnConnection = originalSaveOnConnection;
       }
       assert.equal(consoleErrorCalls, 1, "the forced failure must actually reach lib/http.js's error-logging path exactly once");
 
       const persisted = await Order.findById(order._id);
       assert.equal(persisted.status, "pending", "the order must remain in its prior status after the transaction rolled back");
       assert.equal(persisted.total, order.total, "the order's own fields must be unaffected by the aborted in-transaction mutation");
-      assert.equal(await Payment.findOne({ order: order._id }), null, "no Payment may remain when the Order half of the transaction failed");
+      assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0, "no Payment may remain when the Order half of the transaction failed");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -352,10 +362,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       });
       assert.equal(adminRes.status, 200);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [buyer._id, stranger._id, admin._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [buyer._id, stranger._id, admin._id]);
     }
   });
 
@@ -368,9 +378,9 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const res = await codPOST(req, { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 401);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 });

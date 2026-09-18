@@ -1,34 +1,17 @@
-// Populates the real MongoDB catalog for the modest-fashion taxonomy:
-// categories (2-level: department -> style), attribute definitions (drive
-// the dynamic filter panel), and a handful of representative products with
-// variants. Safe to re-run — every write is an upsert keyed by a stable
-// natural key (category/attribute: slug/key; product: name).
+// Populates the MySQL catalog for the modest-fashion taxonomy: categories
+// (2-level: department -> style), attribute definitions (drive the dynamic
+// filter panel), and a handful of representative products with variants.
+// Safe to re-run — every write is an upsert keyed by a stable natural key
+// (category/attribute: slug/key; product: name).
 //
 // Usage: node --env-file=.env scripts/seedCatalog.mjs
+// (Import sql/schema.sql into your MySQL database FIRST — see its own
+// header comment — this script only inserts rows, it never creates tables.)
 
-import mongoose from "mongoose";
+import connectDB, { closePool } from "../config/db.js";
 import Category from "../models/categoryModel.js";
 import AttributeDefinition from "../models/attributeDefinitionModel.js";
 import Product from "../models/productModel.js";
-
-// Connects directly rather than via config/db.js so this script stays
-// self-contained and dependency-free, independent of the app's own
-// connection caching (which is only useful inside a live Next.js server
-// process, not a one-shot script).
-async function connectDB() {
-  const uri =
-    process.env.NODE_ENV === "test"
-      ? process.env.MONGO_URI_TEST
-      : process.env.MONGO_URI;
-  if (!uri) {
-    throw new Error(
-      `${process.env.NODE_ENV === "test" ? "MONGO_URI_TEST" : "MONGO_URI"} is not set`,
-    );
-  }
-  mongoose.set("strictQuery", true);
-  const conn = await mongoose.connect(uri);
-  console.log(`MongoDB connected: ${conn.connection.host}`);
-}
 
 // `.png` (not the bare, extension-less URL) — placehold.co's default
 // response is `image/svg+xml`, which Next's image optimizer rejects
@@ -156,35 +139,36 @@ const CLOTHES_DEPARTMENTS = [
 // fabric AttributeDefinitions to real departments.
 const CLOTHING_DEPARTMENT_SLUGS = ["burqa", "hijab", "niqab", "abaya", "khimar", "modest-sets", "t-shirt", "shirts", "jeans"];
 
+// Upsert-by-slug: models/categoryModel.js has no findBySlug-based upsert of
+// its own (slugs are normally auto-derived from `name`, not a natural key
+// admins manage directly) — this seed script is the one place that treats
+// slug as the stable identity, so the upsert logic lives here rather than
+// in the model.
+async function upsertCategoryBySlug(slug, fields) {
+  const existing = await Category.findBySlug(slug);
+  if (existing) {
+    Object.assign(existing, fields);
+    await existing.save();
+    return existing;
+  }
+  return Category.create({ ...fields, slug });
+}
+
 async function seedCategories() {
   const topBySlug = new Map();
   let sortOrder = 0;
 
   for (const dept of CLOTHES_DEPARTMENTS) {
-    const top = await Category.findOneAndUpdate(
-      { slug: dept.slug },
-      { $set: { name: dept.name, parent: null, sortOrder: sortOrder++ } },
-      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
-    );
+    const top = await upsertCategoryBySlug(dept.slug, { name: dept.name, parent: null, sortOrder: sortOrder++ });
     topBySlug.set(dept.slug, top);
 
     let childOrder = 0;
     for (const child of dept.children) {
-      await Category.findOneAndUpdate(
-        { slug: child.slug },
-        {
-          $set: {
-            name: child.name,
-            parent: top._id,
-            sortOrder: childOrder++,
-          },
-        },
-        { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
-      );
+      await upsertCategoryBySlug(child.slug, { name: child.name, parent: top._id, sortOrder: childOrder++ });
     }
   }
 
-  const all = await Category.find({}).lean();
+  const all = await Category.findAll();
   return { topBySlug, bySlug: new Map(all.map((c) => [c.slug, c])) };
 }
 
@@ -329,11 +313,13 @@ function buildAttributeDefs(topBySlug) {
 async function seedAttributeDefinitions(topBySlug) {
   const defs = buildAttributeDefs(topBySlug);
   for (const def of defs) {
-    await AttributeDefinition.findOneAndUpdate(
-      { key: def.key },
-      { $set: def },
-      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
-    );
+    const [existing] = await AttributeDefinition.findByKeys([def.key]);
+    if (existing) {
+      Object.assign(existing, def);
+      await existing.save();
+    } else {
+      await AttributeDefinition.create(def);
+    }
   }
   return defs.length;
 }
@@ -705,13 +691,13 @@ async function seedProducts(categoryBySlug) {
   let updated = 0;
 
   for (const data of products) {
-    const existing = await Product.findOne({ name: data.name });
+    const existing = await Product.findByName(data.name);
     if (existing) {
       Object.assign(existing, data);
       await existing.save();
       updated++;
     } else {
-      await new Product(data).save();
+      await Product.create(data);
       created++;
     }
   }
@@ -734,14 +720,7 @@ async function main() {
     `Products: ${productResult.created} created, ${productResult.updated} updated (${productResult.total} total).`,
   );
 
-  // MongoDB allows only one text index per collection — Phase 3 added
-  // "attributes.values" to the compound text index in productModel.js, but
-  // that schema change alone doesn't touch what's already built on Atlas.
-  // syncIndexes() drops the old text index and builds the new one to match.
-  await Product.syncIndexes();
-  console.log("Product indexes synced.");
-
-  await mongoose.disconnect();
+  await closePool();
   console.log("Done.");
   process.exit(0);
 }

@@ -1,6 +1,12 @@
 // Phase 11, section F — unit tests for scripts/validateProductionEnv.mjs's
 // pure `validateProductionEnv()` function against synthetic env fixtures.
 // Never touches the real process.env, never connects to anything.
+//
+// Rewritten for the Mongo -> MySQL migration: scripts/validateProductionEnv.mjs
+// now validates DB_HOST/DB_PORT/DB_NAME/DB_USER (a real production MySQL
+// deployment) in place of the old MONGO_URI shape/transaction-capability
+// checks, and its cross-check now guards against DB_NAME ending in
+// "_test"/"_ci" instead of MONGO_URI === MONGO_URI_TEST.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
@@ -11,7 +17,10 @@ import { validateProductionEnv } from "../scripts/validateProductionEnv.mjs";
 const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 const VALID_ENV = {
-  MONGO_URI: "mongodb+srv://user:pass@cluster0.mongodb.net/tahos_prod",
+  DB_HOST: "db.internal.tahos.store",
+  DB_PORT: "3306",
+  DB_NAME: "ladies_multi_ecomm",
+  DB_USER: "tahos_app",
   APP_ORIGIN: "https://tahos.store",
   CLIENT_URL: "https://tahos.store",
   CLOUDINARY_CLOUD_NAME: "tahos-real-cloud",
@@ -41,10 +50,28 @@ describe("validateProductionEnv — missing variables", () => {
 });
 
 describe("validateProductionEnv — rejects localhost/placeholder/example values", () => {
-  test("rejects a localhost MONGO_URI", () => {
-    const env = { ...VALID_ENV, MONGO_URI: "mongodb://127.0.0.1:27017/tahos" };
+  test("rejects a localhost DB_HOST", () => {
+    const env = { ...VALID_ENV, DB_HOST: "127.0.0.1" };
     const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => p.startsWith("MONGO_URI:")));
+    assert.ok(problems.some((p) => p.startsWith("DB_HOST:")));
+  });
+
+  test("rejects a non-numeric DB_PORT", () => {
+    const env = { ...VALID_ENV, DB_PORT: "not-a-port" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("DB_PORT:")));
+  });
+
+  test("rejects a DB_NAME with characters outside letters/digits/underscore", () => {
+    const env = { ...VALID_ENV, DB_NAME: "ladies multi-ecomm!" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("DB_NAME:")));
+  });
+
+  test("rejects a placeholder DB_USER", () => {
+    const env = { ...VALID_ENV, DB_USER: "changeme" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => p.startsWith("DB_USER:")));
   });
 
   test("rejects an http:// (non-TLS) APP_ORIGIN", () => {
@@ -63,17 +90,6 @@ describe("validateProductionEnv — rejects localhost/placeholder/example values
     const env = { ...VALID_ENV, SMTP_PASS: "1234" };
     const problems = validateProductionEnv(env);
     assert.ok(problems.some((p) => p.startsWith("SMTP_PASS:")));
-  });
-
-  test("rejects a non-transaction-capable plain mongodb:// URI (no replicaSet=)", () => {
-    const env = { ...VALID_ENV, MONGO_URI: "mongodb://real-prod-host.internal:27017/tahos_prod" };
-    const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => p.startsWith("MONGO_URI:") && /transaction-capable/.test(p)));
-  });
-
-  test("accepts a plain mongodb:// URI that explicitly names replicaSet=", () => {
-    const env = { ...VALID_ENV, MONGO_URI: "mongodb://real-prod-host.internal:27017/tahos_prod?replicaSet=rs0" };
-    assert.deepEqual(validateProductionEnv(env), []);
   });
 });
 
@@ -119,10 +135,16 @@ describe("validateProductionEnv — CLOUDINARY_API_KEY is a non-secret identifie
 });
 
 describe("validateProductionEnv — cross-variable checks", () => {
-  test("rejects MONGO_URI equal to MONGO_URI_TEST", () => {
-    const env = { ...VALID_ENV, MONGO_URI_TEST: VALID_ENV.MONGO_URI };
+  test("rejects a DB_NAME ending in _test", () => {
+    const env = { ...VALID_ENV, DB_NAME: "ladies_multi_ecomm_test" };
     const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => /MONGO_URI_TEST/.test(p)));
+    assert.ok(problems.some((p) => /DB_NAME/.test(p) && /_test/.test(p)));
+  });
+
+  test("rejects a DB_NAME ending in _ci", () => {
+    const env = { ...VALID_ENV, DB_NAME: "ladies_multi_ecomm_ci" };
+    const problems = validateProductionEnv(env);
+    assert.ok(problems.some((p) => /DB_NAME/.test(p) && /_ci/.test(p)));
   });
 
   test("rejects APP_ORIGIN/CLIENT_URL disagreement", () => {

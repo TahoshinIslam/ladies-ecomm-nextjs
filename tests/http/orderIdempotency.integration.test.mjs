@@ -29,7 +29,15 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestProduct } from "../helpers/testDb.mjs";
+import {
+  dbReady,
+  skipReason,
+  connectTestDb,
+  disconnectTestDb,
+  createTestProduct,
+  deleteRows,
+  rawQuery,
+} from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -54,7 +62,7 @@ if (serverUp && dbReady) {
 const skip = !serverUp
   ? "test server not reachable — run via `npm run test:http`"
   : !dbConnectable
-    ? skipReason || "MONGO_URI_TEST not reachable — see .env.test.example"
+    ? skipReason || "database not reachable — check DB_NAME/DB_HOST in .env.test (see .env.test.example)"
     : false;
 
 class CookieJar {
@@ -131,12 +139,9 @@ async function createOrderReq(jar, product, { idempotencyKey, body, omitKey = fa
 }
 
 describe("Phase 4B closure — real HTTP: order-request and COD idempotency requirement matrix", { skip }, () => {
-  let User, Order, Payment, Product;
+  let Product;
 
   before(async () => {
-    ({ default: User } = await import("../../models/userModel.js"));
-    ({ default: Order } = await import("../../models/orderModel.js"));
-    ({ default: Payment } = await import("../../models/paymentModel.js"));
     ({ default: Product } = await import("../../models/productModel.js"));
   });
 
@@ -146,48 +151,47 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
 
   // ---- 1: missing Idempotency-Key -> 400 ----
   test("1. real HTTP: missing Idempotency-Key -> 400", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const res = await createOrderReq(jar, product, { omitKey: true });
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 2: malformed Idempotency-Key -> 400 ----
   test("2. real HTTP: malformed Idempotency-Key -> 400", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const res = await createOrderReq(jar, product, { idempotencyKey: "too short" });
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 3: first valid request succeeds ----
   test("3. real HTTP: first valid request succeeds (201)", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const res = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
       assert.equal(res.status, 201);
     } finally {
-      const user = await User.findOne({ email });
-      if (user) await Order.deleteMany({ user: user._id });
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 4/5/7/11: same-key replay -> same Order ID, 200 + Idempotency-Replayed:true, stock once, no internal fields ----
   test("4/5/7/11. real HTTP: a same-key replay returns the same Order ID with 200 + Idempotency-Replayed:true, stock decremented only once, no internal fields leak", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const key = freshKey();
@@ -209,16 +213,15 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const p = await Product.findById(product._id);
       assert.equal(p.variants[0].stock, 4, "requirement 7: stock decremented exactly once across the real request + its replay");
     } finally {
-      const registeredUser = await User.findOne({ email });
-      if (registeredUser) await Order.deleteMany({ user: registeredUser._id });
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 6: concurrent same-key requests create one Order ----
   test("6. real HTTP: concurrent same-key requests create exactly one Order", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const key = freshKey();
@@ -231,19 +234,18 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const [json1, json2] = await Promise.all([res1.json(), res2.json()]);
       assert.equal(String(json1.order._id), String(json2.order._id));
 
-      const user = await User.findOne({ email });
-      assert.equal(await Order.countDocuments({ user: user._id }), 1);
+      const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [userId]);
+      assert.equal(n, 1);
     } finally {
-      const user = await User.findOne({ email });
-      if (user) await Order.deleteMany({ user: user._id });
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 8: same key with changed payload -> 422 ----
   test("8. real HTTP: the same key with a changed body -> 422", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const key = freshKey();
@@ -256,16 +258,15 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       });
       assert.equal(res2.status, 422);
     } finally {
-      const user = await User.findOne({ email });
-      if (user) await Order.deleteMany({ user: user._id });
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 9: different key creates a distinct Order ----
   test("9. real HTTP: a different key creates a distinct, legitimate Order", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const res1 = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
@@ -275,10 +276,9 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const [json1, json2] = await Promise.all([res1.json(), res2.json()]);
       assert.notEqual(json1.order._id, json2.order._id);
     } finally {
-      const user = await User.findOne({ email });
-      if (user) await Order.deleteMany({ user: user._id });
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
@@ -296,18 +296,16 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const [jsonA, jsonB] = await Promise.all([resA.json(), resB.json()]);
       assert.notEqual(jsonA.order._id, jsonB.order._id);
     } finally {
-      for (const { email } of [buyerA, buyerB]) {
-        const user = await User.findOne({ email });
-        if (user) await Order.deleteMany({ user: user._id });
-        await User.deleteOne({ email });
-      }
-      await Product.deleteOne({ _id: product._id });
+      const ids = [buyerA.userId, buyerB.userId];
+      await deleteRows("orders", "user_id", ids);
+      await deleteRows("users", "id", ids);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 12/13: CSRF still required, security headers still present ----
   test("12/13. real HTTP: CSRF remains mandatory for order creation, and existing security headers remain present", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const withCsrf = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
@@ -321,16 +319,15 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       });
       assert.equal(noCsrf.status, 403, "requirement 12: CSRF remains mandatory for order creation");
     } finally {
-      const user = await User.findOne({ email });
-      if (user) await Order.deleteMany({ user: user._id });
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 14: COD duplicate returns the same Payment ----
   test("14. real HTTP: a duplicate COD request returns the same Payment, not a second row", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const orderRes = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
@@ -349,22 +346,19 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const cod2Json = await cod2.json();
       assert.equal(String(cod2Json.order._id), String(cod1Json.order._id));
 
-      const payments = await Payment.find({ order: order._id });
+      const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1, "exactly one Payment row over real HTTP duplicate COD requests");
     } finally {
-      const user = await User.findOne({ email });
-      if (user) {
-        await Order.deleteMany({ user: user._id });
-        await Payment.deleteMany({ user: user._id });
-      }
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("payments", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 15: COD concurrent requests leave one Payment ----
   test("15. real HTTP: concurrent duplicate COD requests for the same order leave exactly one Payment, no duplicate-key 500", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const orderRes = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
@@ -374,22 +368,19 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const [c1, c2] = await Promise.all([codReq(), codReq()]);
       assert.ok([c1.status, c2.status].every((s) => s === 200), "no raw duplicate-key 500 over real HTTP concurrency");
 
-      const payments = await Payment.find({ order: order._id });
+      const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1);
     } finally {
-      const user = await User.findOne({ email });
-      if (user) {
-        await Order.deleteMany({ user: user._id });
-        await Payment.deleteMany({ user: user._id });
-      }
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("payments", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 
   // ---- 16: delivered/shipped status never regresses ----
   test("16. real HTTP: delivered and shipped orders never regress to processing on a COD retry", async () => {
-    const { jar, email } = await registerNewUser();
+    const { jar, userId } = await registerNewUser();
     const product = await createTestProduct({ stock: 5 });
     try {
       const orderRes = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
@@ -397,23 +388,20 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const codReq = () => req(jar, `/api/payments/cod/${order._id}`, { method: "POST", extraHeaders: { "x-csrf-token": jar.get("tahos_csrf") } });
       await codReq();
 
-      await Order.updateOne({ _id: order._id }, { $set: { status: "shipped" } });
+      await rawQuery("UPDATE orders SET status = ? WHERE id = ?", ["shipped", order._id]);
       const shippedRetry = await codReq();
       assert.equal(shippedRetry.status, 200);
       assert.equal((await shippedRetry.json()).order.status, "shipped", "shipped must never regress to processing");
 
-      await Order.updateOne({ _id: order._id }, { $set: { status: "delivered", deliveredAt: new Date() } });
+      await rawQuery("UPDATE orders SET status = ?, delivered_at = ? WHERE id = ?", ["delivered", new Date(), order._id]);
       const deliveredRetry = await codReq();
       assert.equal(deliveredRetry.status, 200);
       assert.equal((await deliveredRetry.json()).order.status, "delivered", "delivered must never regress to processing");
     } finally {
-      const user = await User.findOne({ email });
-      if (user) {
-        await Order.deleteMany({ user: user._id });
-        await Payment.deleteMany({ user: user._id });
-      }
-      await User.deleteOne({ email });
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("orders", "user_id", userId);
+      await deleteRows("payments", "user_id", userId);
+      await deleteRows("users", "id", userId);
+      await deleteRows("products", "id", product._id);
     }
   });
 });

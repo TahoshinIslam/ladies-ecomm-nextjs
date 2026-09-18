@@ -3,28 +3,32 @@
 // `next start` server processes, both pointed at the SAME disposable test
 // database, and runs tests/http/multiInstanceEvents.integration.test.mjs
 // against them. This is the one piece of real, executable evidence that
-// the MongoDB-backed durable event outbox (lib/events.js,
-// models/eventModel.js) actually solves the cross-instance problem the
-// old process-local EventEmitter (lib/events.js, pre-Phase-11) could
-// never solve: a client's SSE connection can land on either process, and
-// an event committed by ONE process must still reach a client connected
-// to the OTHER.
+// the MySQL-backed durable event outbox (lib/events.js, models/eventModel.js,
+// the `events` table — see sql/schema.sql) actually solves the
+// cross-instance problem a process-local EventEmitter never could: a
+// client's SSE connection can land on either process, and an event
+// committed by ONE process must still reach a client connected to the
+// OTHER.
 //
 // Deliberately a separate script from scripts/httpTestServer.mjs (never
 // modified) — this reuses that script's exact safety patterns
-// (isolated-test-URI assertion, findFreePort, spawn/readiness-poll/
-// cleanup) but needs to run TWO server processes at once instead of one,
-// which is a large enough shape difference to warrant its own file rather
-// than bolting a "how many instances" parameter onto the existing one.
+// (lib/testDbSafety.js's checkTestDbConfig, findFreePort,
+// spawn/readiness-poll/cleanup) but needs to run TWO server processes at
+// once instead of one, which is a large enough shape difference to
+// warrant its own file rather than bolting a "how many instances"
+// parameter onto the existing one.
 //
-// Usage: node scripts/multiInstanceHttpTestServer.mjs run
+// Usage: node --env-file-if-exists=.env.test scripts/multiInstanceHttpTestServer.mjs run
+
+process.env.NODE_ENV = "test";
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import mongoose from "mongoose";
+
+import { checkTestDbConfig, assertConnectedDbMatches } from "../lib/testDbSafety.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -35,26 +39,6 @@ function log(message) {
 }
 function fail(message) {
   console.error(`\n✖ ${message}\n`);
-}
-
-// Same isolation rule as scripts/httpTestServer.mjs's assertIsolatedTestUri.
-function assertIsolatedTestUri(uri) {
-  const prodUri = process.env.MONGO_URI;
-  if (!uri) throw new Error("MONGO_URI_TEST is not set");
-  if (prodUri && uri === prodUri) throw new Error("MONGO_URI_TEST equals MONGO_URI — refusing to use it");
-  const hostPatterns = [/mongodb\.net/i, /\.mongodb\.com/i, /amazonaws\.com/i, /compute\.internal/i];
-  for (const p of hostPatterns) {
-    if (p.test(uri)) throw new Error(`MONGO_URI_TEST matches a hosted-provider pattern (${p}) — refusing to use it`);
-  }
-  let dbName;
-  try {
-    dbName = decodeURIComponent(new URL(uri).pathname.replace(/^\//, ""));
-  } catch {
-    throw new Error("MONGO_URI_TEST is not a parseable URI");
-  }
-  if (!dbName || !/test/i.test(dbName)) {
-    throw new Error(`MONGO_URI_TEST's database name ("${dbName}") does not contain "test" — refusing to use it`);
-  }
 }
 
 function findFreePort() {
@@ -69,6 +53,18 @@ function findFreePort() {
   });
 }
 
+// Same "never let a spawned child fall back to its own .env/.env.local
+// resolution" rationale as scripts/httpTestServer.mjs's own testDbEnv().
+function testDbEnv() {
+  return {
+    DB_HOST: process.env.DB_HOST,
+    DB_PORT: process.env.DB_PORT,
+    DB_NAME: process.env.DB_NAME,
+    DB_USER: process.env.DB_USER,
+    DB_PASSWORD: process.env.DB_PASSWORD ?? "",
+  };
+}
+
 async function spawnInstance(label, port, logFile) {
   const baseUrl = `http://127.0.0.1:${port}`;
   const logFd = openSync(logFile, "a");
@@ -76,9 +72,8 @@ async function spawnInstance(label, port, logFile) {
     cwd: ROOT,
     env: {
       ...process.env,
+      ...testDbEnv(),
       PORT: String(port),
-      ALLOW_TEST_DB_OVERRIDE: "true",
-      TEST_SERVER_MONGO_URI: process.env.MONGO_URI_TEST,
       APP_ORIGIN: baseUrl,
       TRUST_PROXY_HEADERS: "true",
       TRUSTED_PROXY_HOP_COUNT: "1",
@@ -126,10 +121,15 @@ async function main() {
   writeFileSync(logA, "");
   writeFileSync(logB, "");
 
-  try {
-    assertIsolatedTestUri(process.env.MONGO_URI_TEST);
-  } catch (err) {
-    fail(err.message);
+  const dbName = process.env.DB_NAME;
+  const dbHost = process.env.DB_HOST || "127.0.0.1";
+  const configCheck = checkTestDbConfig({
+    dbName,
+    host: dbHost,
+    allowRemoteHost: process.env.ALLOW_REMOTE_TEST_DB === "true",
+  });
+  if (!configCheck.ok) {
+    fail(configCheck.reason);
     process.exitCode = 1;
     return;
   }
@@ -137,7 +137,8 @@ async function main() {
   let instanceA;
   let instanceB;
   let cleanedUp = false;
-  const cleanup = () => {
+  let closePool;
+  const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
     for (const inst of [instanceA, instanceB]) {
@@ -146,27 +147,39 @@ async function main() {
         inst.child.kill("SIGTERM");
       }
     }
+    if (closePool) await closePool().catch(() => {});
   };
-  process.once("SIGINT", () => {
-    cleanup();
+  process.once("SIGINT", async () => {
+    await cleanup();
     process.exit(130);
   });
-  process.once("SIGTERM", () => {
-    cleanup();
+  process.once("SIGTERM", async () => {
+    await cleanup();
     process.exit(143);
   });
 
   let exitCode = 1;
   try {
-    // Clean event/order/user collections from any prior run — this
-    // harness does not run the full catalog seed (unnecessary for this
-    // test), just ensures the collections this test writes to start
-    // empty.
-    await mongoose.connect(process.env.MONGO_URI_TEST);
-    for (const coll of ["events", "orders", "users", "products", "categories"]) {
-      await mongoose.connection.db.collection(coll).deleteMany({}).catch(() => {});
-    }
-    await mongoose.disconnect();
+    // Clean event/order/user/product/category rows from any prior run —
+    // this harness doesn't need the full catalog seed (unnecessary for
+    // this test), just a clean slate for the tables this test writes to.
+    // truncateAll() (tests/helpers/testDb.mjs) truncates every app table,
+    // which is safe and simpler than hand-picking a subset — it carries
+    // its own independent dbReady/TEST_DB_NAME_PATTERN guard on top of the
+    // checkTestDbConfig() check above.
+    const dbModule = await import("../config/db.js");
+    closePool = dbModule.closePool;
+    await dbModule.default();
+    await assertConnectedDbMatches(dbModule.query, dbName);
+    const { truncateAll } = await import("../tests/helpers/testDb.mjs");
+    await truncateAll();
+
+    // See scripts/httpTestServer.mjs's own comment on this exact line —
+    // unstable_cache() persists to disk at .next/cache/fetch-cache across
+    // `next start` invocations; without clearing it, either spawned
+    // instance could serve a page from a stale entry this run's own
+    // truncate+reseed never gets a chance to invalidate.
+    rmSync(path.join(ROOT, ".next/cache/fetch-cache"), { recursive: true, force: true });
 
     const [portA, portB] = await Promise.all([findFreePort(), findFreePort()]);
     [instanceA, instanceB] = await Promise.all([
@@ -187,6 +200,7 @@ async function main() {
         cwd: ROOT,
         env: {
           ...process.env,
+          ...testDbEnv(),
           NODE_ENV: "test",
           HTTP_TEST_BASE_URL_A: instanceA.baseUrl,
           HTTP_TEST_BASE_URL_B: instanceB.baseUrl,
@@ -203,7 +217,7 @@ async function main() {
     fail(err.message);
     exitCode = 1;
   } finally {
-    cleanup();
+    await cleanup();
   }
 
   process.exitCode = exitCode;

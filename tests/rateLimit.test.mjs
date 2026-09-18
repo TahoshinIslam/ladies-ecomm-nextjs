@@ -9,7 +9,7 @@ import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, requestAs, createTestUser } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestSession, requestAs, createTestUser, deleteRows, rawQuery } from "./helpers/testDb.mjs";
 
 // forgotPassword() sends a real email via nodemailer for an EXISTING
 // account (see services/userService.js) — mocked here the same way
@@ -60,27 +60,27 @@ const reason = !moduleMockUsable ? "node:test module mocking unavailable — run
 
 describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun && reason }, () => {
   let loginPOST, registerPOST, forgotPasswordPOST, resetPasswordPOST, couponValidatePOST;
-  let User, RateLimitCounter, Coupon;
+  let User, Coupon;
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: loginPOST } = await import("../app/api/users/login/route.js"));
     ({ POST: registerPOST } = await import("../app/api/users/register/route.js"));
     ({ POST: forgotPasswordPOST } = await import("../app/api/users/forgot-password/route.js"));
     ({ POST: resetPasswordPOST } = await import("../app/api/users/reset-password/[token]/route.js"));
     ({ POST: couponValidatePOST } = await import("../app/api/coupons/validate/route.js"));
     ({ default: User } = await import("../models/userModel.js"));
-    ({ default: RateLimitCounter } = await import("../models/rateLimitModel.js"));
     ({ default: Coupon } = await import("../models/couponModel.js"));
   });
 
   after(async () => {
-    await RateLimitCounter.deleteMany({});
+    await rawQuery("DELETE FROM rate_limit_counters");
     await disconnectTestDb();
   });
 
   async function clearCounters() {
-    await RateLimitCounter.deleteMany({});
+    await rawQuery("DELETE FROM rate_limit_counters");
   }
 
   function loginReq(email, password, extraHeaders = {}) {
@@ -113,7 +113,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.equal(sixth.allowed, false, "the 6th request in the same window must be blocked");
       assert.ok(Number.isInteger(sixth.retryAfterSeconds) && sixth.retryAfterSeconds > 0, "retryAfterSeconds must be a valid positive integer");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -143,7 +143,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     } finally {
       delete process.env.TRUST_PROXY_HEADERS;
       delete process.env.TRUSTED_PROXY_HOP_COUNT;
-      await User.deleteMany({ email: { $regex: /^ratetest-/ } });
+      await rawQuery("DELETE FROM users WHERE email LIKE 'ratetest-%'");
     }
   });
 
@@ -243,13 +243,10 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     // exactly the scenario correctness must not depend on cleanup for.
     const oldWindowStart = new Date(Date.now() - 10 * 60_000);
     const rawKeyHash = crypto.createHash("sha256").update(identity).digest("hex");
-    await RateLimitCounter.create({
-      keyHash: rawKeyHash,
-      action: "test:stale-row",
-      windowStart: oldWindowStart,
-      count: 999,
-      expiresAt: new Date(Date.now() - 5 * 60_000), // already "expired" by our own field, TTL just hasn't swept it yet
-    });
+    await rawQuery(
+      "INSERT INTO rate_limit_counters (key_hash, action, window_start, count, expires_at) VALUES (?, ?, ?, ?, ?)",
+      [rawKeyHash, "test:stale-row", oldWindowStart, 999, new Date(Date.now() - 5 * 60_000)], // already "expired" by our own field — MySQL has no TTL-index sweep at all, cleanup is an explicit periodic job (see sql/schema.sql), so correctness must not depend on it either way
+    );
 
     const current = await checkRateLimit({ identity, action: "test:stale-row", limit: 5, windowMs: 60_000 });
     assert.equal(current.allowed, true, "a stale, maxed-out row from an old window must not affect the CURRENT window's count at all");
@@ -265,12 +262,12 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     await checkRateLimit({ identity: normalizeEmail(rawEmail), action: "test:no-raw-storage", limit: 5, windowMs: 60_000 });
     await checkRateLimit({ identity: rawIp, action: "test:no-raw-storage-ip", limit: 5, windowMs: 60_000 });
 
-    const allDocs = await RateLimitCounter.find({ action: { $in: ["test:no-raw-storage", "test:no-raw-storage-ip"] } }).lean();
+    const allDocs = await rawQuery("SELECT * FROM rate_limit_counters WHERE action IN (?, ?)", ["test:no-raw-storage", "test:no-raw-storage-ip"]);
     const dump = JSON.stringify(allDocs);
     assert.ok(!dump.includes(rawEmail) && !dump.toLowerCase().includes(rawEmail.toLowerCase()), "the raw email must never appear in a stored document");
     assert.ok(!dump.includes(rawIp), "the raw IP must never appear in a stored document");
     for (const doc of allDocs) {
-      assert.equal(doc.keyHash.length, 64, "keyHash must be a SHA-256 hex digest, not the raw identity");
+      assert.equal(doc.key_hash.length, 64, "key_hash must be a SHA-256 hex digest, not the raw identity");
     }
   });
 
@@ -353,7 +350,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.notEqual(fpRes.status, 503, "forgot-password is NOT IP-only either — same guarantee");
     } finally {
       process.env.NODE_ENV = originalNodeEnv;
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -389,7 +386,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     const email = `p3b-nonprod-${crypto.randomBytes(4).toString("hex")}@example.invalid`;
     const res = await registerPOST(requestAs({ method: "POST", url: "http://test/api/users/register", body: { name: "Non-Prod Test", email, password: "NonProdTest123!" } }));
     assert.equal(res.status, 201, "in the test environment, with no trust configured, register must behave exactly as before this closure — this is what keeps the rest of the test suite (which calls register directly, all over both prior phases) working without every file configuring a full proxy trust chain");
-    await User.deleteOne({ email });
+    await rawQuery("DELETE FROM users WHERE email = ?", [email]);
   });
 
   // ===================== Phase 3B: IP-shape validation, hop-count hardening =====================
@@ -629,7 +626,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     vercelMockState.ip = rawIp;
     try {
       await registerPOST(requestAs({ method: "POST", url: "http://test/api/users/register", body: { name: "x", email: `p3c-rawip-${crypto.randomBytes(3).toString("hex")}@example.invalid`, password: "VercelIp123!" } }));
-      const docs = await RateLimitCounter.find({ action: "register:ip" }).lean();
+      const docs = await rawQuery("SELECT * FROM rate_limit_counters WHERE action = ?", ["register:ip"]);
       const dump = JSON.stringify(docs);
       assert.ok(!dump.includes(rawIp), "the raw Vercel-provided IP must never appear in a stored document — only its SHA-256 hash");
     } finally {
@@ -655,7 +652,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.deepEqual(Object.keys(existingJson).sort(), Object.keys(nonexistentJson).sort());
       assert.equal(existingJson.message, nonexistentJson.message, "the response message must not differ based on account existence — the rate limiter must not introduce a new enumeration signal on top of the existing generic response");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -669,8 +666,8 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
         const res = await loginPOST(loginReq(user.email, "wrong"));
         assert.equal(res.status, 401, `attempt ${i + 1} should be a plain 401, not yet locked or rate-limited`);
       }
-      const lockedCheck = await User.findById(user._id).select("+lockUntil");
-      assert.ok(lockedCheck.lockUntil && lockedCheck.lockUntil > Date.now(), "lockout must still engage exactly as before — the rate limiter is a separate, additional layer, not a replacement");
+      const lockedCheck = await User.findById(user._id);
+      assert.ok(lockedCheck.lockUntil && new Date(lockedCheck.lockUntil).getTime() > Date.now(), "lockout must still engage exactly as before — the rate limiter is a separate, additional layer, not a replacement");
 
       // The regression this guards against: LOGIN_ACCOUNT_LIMIT must stay
       // strictly greater than the lockout threshold (5), or this 6th
@@ -681,7 +678,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       const sixthRes = await loginPOST(loginReq(user.email, "TestPassword123!"));
       assert.equal(sixthRes.status, 423, "lockout's specific 423 must still be observable — the rate limiter must not mask it with a generic 429 at this threshold");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -715,8 +712,8 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       const json = await blockedRes.json();
       assert.doesNotMatch(json.message, /coupon|code|exist/i, "the 429 body must say nothing coupon-specific");
     } finally {
-      await Coupon.deleteOne({ _id: coupon._id });
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("coupons", "id", coupon._id);
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -731,7 +728,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       const res = await couponValidatePOST(req);
       assert.equal(res.status, 403, "CSRF is still enforced even though the request would otherwise be within the rate limit");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -747,7 +744,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
         assert.equal(res.status, 200);
       }
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -770,7 +767,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       }
       assert.equal(lastRes.status, 429, "the 11th attempt from the same IP (limit defaults to 10) must be rate-limited");
 
-      const docs = await RateLimitCounter.find({ action: "reset-password:ip" }).lean();
+      const docs = await rawQuery("SELECT * FROM rate_limit_counters WHERE action = ?", ["reset-password:ip"]);
       const dump = JSON.stringify(docs);
       assert.ok(!dump.includes("bad-token"), "no raw reset token ever appears in a stored rate-limit document");
     } finally {

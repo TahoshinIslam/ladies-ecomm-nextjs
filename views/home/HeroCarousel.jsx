@@ -143,13 +143,17 @@ export default function HeroCarousel({ departments, heroImageBySlug, promotions 
                     not the many-cards-at-once shape (ProductCard.jsx) that
                     actually needs an index-conditional `priority && index
                     === 0` guard. */}
+                {/* object-contain (not object-cover): shows the complete,
+                    uncropped original image on every screen size — any
+                    leftover space letterboxes against this panel's own
+                    bg-media instead of cutting off part of the photo. */}
                 <Image
                   src={resolveImage(active.desktopImage, 1600)}
                   alt=""
                   fill
                   sizes="(max-width: 640px) 0px, 70vw"
                   fetchPriority="high"
-                  className="hidden object-cover object-top sm:block"
+                  className="hidden object-contain object-top sm:block"
                 />
                 <Image
                   src={resolveImage(active.mobileImage || active.desktopImage, 900)}
@@ -157,7 +161,7 @@ export default function HeroCarousel({ departments, heroImageBySlug, promotions 
                   fill
                   sizes="(max-width: 640px) 100vw, 0px"
                   fetchPriority="high"
-                  className="object-cover object-top sm:hidden"
+                  className="object-contain object-top sm:hidden"
                 />
               </>
             ) : (

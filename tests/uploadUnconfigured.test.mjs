@@ -11,7 +11,7 @@
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, sessionCookieHeader, createTestUser } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, sessionCookieHeader, createTestUser, deleteRows } from "./helpers/testDb.mjs";
 
 let moduleMockUsable = false;
 try {
@@ -35,12 +35,11 @@ const reason = !moduleMockUsable
   : skipReason;
 
 describe("POST /api/upload — Cloudinary unconfigured (503, no credential/stack leakage)", { skip: !canRun && reason }, () => {
-  let uploadPOST, User;
+  let uploadPOST;
 
   before(async () => {
     await connectTestDb();
     ({ POST: uploadPOST } = await import("../app/api/upload/route.js"));
-    ({ default: User } = await import("../models/userModel.js"));
   });
 
   after(async () => {
@@ -71,7 +70,7 @@ describe("POST /api/upload — Cloudinary unconfigured (503, no credential/stack
       assert.ok(!json.message.includes("/Users/"), "no filesystem path leaked");
       assert.ok(!("stack" in json), "no stack trace field in the response body");
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 });

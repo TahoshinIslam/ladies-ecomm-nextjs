@@ -5,7 +5,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, requestAs, createTestUser } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, requestAs, createTestUser, deleteRows } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -49,9 +49,9 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await categoriesPOST(await adminReq(admin, "POST", "http://test/api/categories", { name: "Test Dept" }));
       assert.equal(res.status, 201);
       const { category } = await res.json();
-      await Category.deleteOne({ _id: category._id });
+      await deleteRows("categories", "id", category._id);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -61,7 +61,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await categoriesPOST(await adminReq(admin, "POST", "http://test/api/categories", { name: "X", notReal: 1 }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -71,7 +71,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await categoriesPOST(await adminReq(admin, "POST", "http://test/api/categories", { name: "X", parent: "not-an-id" }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -81,7 +81,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await categoryPUT(await adminReq(admin, "PUT", "http://test/api/categories/not-a-valid-id", { name: "X" }), { params: Promise.resolve({ id: "not-a-valid-id" }) });
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -91,7 +91,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await attributesPOST(await adminReq(admin, "POST", "http://test/api/attributes", { key: "color", label: "Color", options: { $gt: "" } }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -107,9 +107,9 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       );
       assert.equal(res.status, 201);
       const { attribute } = await res.json();
-      await AttributeDefinition.deleteOne({ _id: attribute._id });
+      await deleteRows("attribute_definitions", "id", attribute._id);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -119,7 +119,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await themePOST(await adminReq(admin, "POST", "http://test/api/theme", { name: "Test Theme", shadowStyle: "extreme" }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -134,8 +134,8 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const badRes = await themePUT(await adminReq(admin, "PUT", `http://test/api/theme/${theme._id}`, { notAField: true }), { params: Promise.resolve({ id: theme._id }) });
       assert.equal(badRes.status, 400);
     } finally {
-      if (theme) await Theme.deleteOne({ _id: theme._id });
-      await User.deleteOne({ _id: admin._id });
+      if (theme) await deleteRows("themes", "id", theme._id);
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -145,7 +145,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await settingsPUT(await adminReq(admin, "PUT", "http://test/api/settings", { taxRules: [{ region: "BD", rate: 1.5 }] }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -157,7 +157,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       );
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -167,7 +167,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await settingsPUT(await adminReq(admin, "PUT", "http://test/api/settings", {}));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -181,7 +181,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       settings.promotions.firstOrderFreeShipping = false;
       await settings.save();
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -191,7 +191,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await salesSeriesGET(requestAs({ method: "GET", url: "http://test/api/analytics/sales-series?days=999999", session: await createTestSession(admin._id) }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -201,7 +201,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await topProductsGET(requestAs({ method: "GET", url: "http://test/api/analytics/top-products?limit=abc", session: await createTestSession(admin._id) }));
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -222,7 +222,7 @@ describe("Phase 5B — deferred route family validation", { skip: !canRun && rea
       const res = await uploadPOST(req);
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 });

@@ -225,11 +225,3 @@ describe("schemas/promotionSchemas.js stays client-safe (importable from a Clien
     assert.doesNotMatch(content, /from ["']node:/);
   });
 });
-
-describe("scripts/auditIndexes.mjs covers the new Promotion model (Section D requirement)", () => {
-  test("imports and lists Promotion", () => {
-    const content = read("scripts/auditIndexes.mjs");
-    assert.match(content, /import Promotion from "\.\.\/models\/promotionModel\.js";/);
-    assert.match(content, /const MODELS = \[[\s\S]*Promotion,?\s*\];/);
-  });
-});

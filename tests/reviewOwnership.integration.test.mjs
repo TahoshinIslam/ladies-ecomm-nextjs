@@ -19,11 +19,13 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
   createDeliveredOrderFor,
+  deleteRows,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -36,6 +38,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ PUT, DELETE } = await import("../app/api/reviews/[id]/route.js"));
     ({ POST: helpfulPOST } = await import("../app/api/reviews/[id]/helpful/route.js"));
     ({ POST: replyPOST } = await import("../app/api/reviews/[id]/reply/route.js"));
@@ -49,10 +52,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
   });
 
   after(async () => {
-    for (const u of [owner, otherCustomer, employeeWithReviews, employeeWithoutReviews, admin]) {
-      const { default: User } = await import("../models/userModel.js");
-      await User.deleteOne({ _id: u._id }).catch(() => {});
-    }
+    await deleteRows("users", "id", [owner._id, otherCustomer._id, employeeWithReviews._id, employeeWithoutReviews._id, admin._id]).catch(() => {});
     await disconnectTestDb();
   });
 
@@ -211,7 +211,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     const { review } = await makeReview();
     const req = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(otherCustomer._id) });
     await helpfulPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    const stored = await Review.findById(review._id).lean();
+    const stored = await Review.findById(review._id);
     assert.equal(typeof stored.helpfulCount, "number");
     assert.equal(stored.helpfulBy, undefined, "confirmed: no field recording which users voted exists on the schema at all");
   });
@@ -226,7 +226,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     const results = await Promise.all(Array.from({ length: CONCURRENT }, fire));
     for (const res of results) assert.equal(res.status, 200);
 
-    const final = await Review.findById(review._id).lean();
+    const final = await Review.findById(review._id);
     assert.equal(
       final.helpfulCount,
       CONCURRENT,

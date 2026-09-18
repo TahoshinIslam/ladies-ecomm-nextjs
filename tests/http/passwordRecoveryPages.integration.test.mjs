@@ -97,6 +97,6 @@ describe("Phase 11 — password recovery pages served over real HTTP", { skip },
     const body = await res.json();
     const serialized = JSON.stringify(body);
     assert.ok(!/stack/i.test(serialized), "must never leak a stack trace");
-    assert.ok(!/mongo/i.test(serialized), "must never leak internal DB detail");
+    assert.ok(!/mongo|mysql|ER_[A-Z_]+/i.test(serialized), "must never leak internal DB detail");
   });
 });

@@ -27,10 +27,12 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -94,6 +96,7 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: createOrderPOST } = await import("../app/api/orders/route.js"));
     ({ POST: codPOST } = await import("../app/api/payments/cod/[orderId]/route.js"));
     ({ default: Order } = await import("../models/orderModel.js"));
@@ -130,9 +133,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.equal(notificationCalls.length, 1, "createAdminNotification must be called exactly once across the real request + its replay");
       assert.equal(newOrderEvents.length, 1, "the NEW_ORDER admin event must be emitted exactly once");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -156,9 +159,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.equal(notificationCalls.length, 1, "concurrent replay must still only create one admin notification");
       assert.equal(newOrderEvents.length, 1, "concurrent replay must still only emit one NEW_ORDER event");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -179,9 +182,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.equal(notificationCalls.length, 2);
       assert.equal(newOrderEvents.length, 2);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -218,10 +221,10 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.ok([c1.status, c2.status].every((s) => s === 200));
       assert.equal(orderEventCalls.length, 1, "concurrent duplicate COD creation must still emit exactly one status event");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -257,9 +260,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         assert.equal(lowStockEvents.length, 1, "exactly one LOW_STOCK_ALERT event for a genuine new order");
       } finally {
         notificationDelayMs = 0;
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteOne({ _id: buyer._id });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", buyer._id);
       }
     });
 
@@ -287,14 +290,14 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         const responseText = JSON.stringify(json);
         assert.doesNotMatch(responseText, /simulated failure/, "the client response must never carry the raw internal error message");
 
-        const persisted = await Product.findById(product._id).lean();
+        const persisted = await Product.findById(product._id);
         assert.equal(persisted.variants[0].stock, 3, "stock must still be correctly decremented despite the low-stock alert failing");
         assert.equal(loggedFailures.length, 1, "the failure must be observed/logged (via emitBestEffort), not silently swallowed with no trace at all");
       } finally {
         failAdminEventTypes = new Set();
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteOne({ _id: buyer._id });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", buyer._id);
       }
     });
 
@@ -318,9 +321,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
         assert.equal(lowStockEvents.length, 1, "a replayed request must not re-run low-stock processing");
       } finally {
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteOne({ _id: buyer._id });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", buyer._id);
       }
     });
 
@@ -345,9 +348,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
         assert.equal(lowStockEvents.length, 1, "concurrent replay must not duplicate the low-stock alert");
       } finally {
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteOne({ _id: buyer._id });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", buyer._id);
       }
     });
 

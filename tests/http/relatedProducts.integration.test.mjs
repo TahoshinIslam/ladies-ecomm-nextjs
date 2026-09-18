@@ -22,7 +22,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "../helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -83,7 +83,7 @@ describe("related-products and batch endpoints (real MongoDB, via HTTP)", { skip
   });
 
   after(async () => {
-    if (tempInactiveId && Product) await Product.deleteOne({ _id: tempInactiveId });
+    if (tempInactiveId) await deleteRows("products", "id", tempInactiveId);
     await disconnectTestDb();
   });
 

@@ -14,14 +14,24 @@ import {
   Gem,
   Grid3x3,
   Home,
+  Layers,
+  Layers2,
+  Layers3,
+  Mars,
+  Package,
   PawPrint,
   PenLine,
+  PersonStanding,
   Puzzle,
   Shirt,
   Smartphone,
   Sparkles,
   SprayCan,
+  SquareSplitVertical,
   UtensilsCrossed,
+  VenetianMask,
+  Venus,
+  Wind,
 } from "lucide-react";
 
 import { departmentName } from "../../lib/i18n/catalog.js";
@@ -45,6 +55,16 @@ export const CATEGORY_ICONS = {
   "pen-line": PenLine,
   puzzle: Puzzle,
   smartphone: Smartphone,
+  mars: Mars,
+  venus: Venus,
+  "person-standing": PersonStanding,
+  wind: Wind,
+  "venetian-mask": VenetianMask,
+  layers: Layers,
+  "layers-2": Layers2,
+  "layers-3": Layers3,
+  package: Package,
+  "square-split-vertical": SquareSplitVertical,
 };
 
 export function iconFor(iconKey) {

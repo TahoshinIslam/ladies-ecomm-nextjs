@@ -1,3 +1,17 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// One-time Mongo-era catalog-restructuring script (remaining flat-2-level
+// marketplace divisions), already applied to the source MongoDB
+// database. Imports Mongoose models directly, incompatible with the
+// current SQL model shape (models/*.js). See
+// scripts/seedCosmeticsCategoryDetail.mjs's own deprecation note for the
+// full reasoning — identical situation.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Restructures the remaining flat-2-level marketplace divisions (Baby
 // Food & Care, Home Cleaning, Pet Care, Stationeries, Gadget) into the
 // same 3-level shape (division -> department -> style) as Food/Beauty &

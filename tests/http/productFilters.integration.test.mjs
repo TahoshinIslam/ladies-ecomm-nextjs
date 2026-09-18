@@ -11,10 +11,8 @@
 //
 // Database isolation: as of the Phase 1 HTTP-test-server harness
 // (scripts/httpTestServer.mjs, invoked via `npm run test:http`), the
-// Next.js server this file talks to is started with an explicit,
-// double-gated override (config/db.js's `ALLOW_TEST_DB_OVERRIDE` +
-// `TEST_SERVER_MONGO_URI`) pointing it at the SAME database this file's
-// own direct Mongoose fixture-writes use (MONGO_URI_TEST, via
+// Next.js server this file talks to is started against the SAME database
+// this file's own direct SQL fixture-writes use (DB_NAME, via
 // tests/helpers/testDb.mjs) — both sides are the same database, and the
 // harness also seeds it (scripts/seedCatalog.mjs) before this file runs,
 // so the "Burqa"/"Hijab" department assumptions below are met
@@ -29,7 +27,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "../helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows, rawQuery } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -56,10 +54,10 @@ if (serverUp && dbReady) {
 const skip = !serverUp
   ? "test server not reachable — run via `npm run test:http` (or `npm run dev` for manual, non-isolated runs)"
   : !dbConnectable
-    ? skipReason || "MONGO_URI_TEST not reachable — see .env.test.example"
+    ? skipReason || "database not reachable — check DB_NAME/DB_HOST in .env.test (see .env.test.example)"
     : false;
 
-describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real MongoDB, via HTTP)", { skip }, () => {
+describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real MySQL, via HTTP)", { skip }, () => {
   let Product, Category;
   let leafCategoryId;
   let outOfScopeLeafCategoryId = null;
@@ -72,7 +70,7 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
 
   const makeProduct = async (overrides = {}) => {
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const product = new Product({
+    const product = await Product.create({
       name: `__test_filter_${suffix}`,
       description: "Temporary fixture created by tests/http/productFilters.integration.test.mjs — safe to delete.",
       category: leafCategoryId,
@@ -82,18 +80,17 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
       isActive: true,
       ...overrides,
     });
-    await product.save();
     createdIds.push(product._id);
     return product;
   };
 
-  // Mongoose's timestamps plugin silently strips createdAt out of
-  // Model.updateOne()'s $set (confirmed empirically: modifiedCount comes
-  // back 1, but the stored value never changes) — it's actively protected
-  // from being touched by a normal update, on purpose. Going through the
-  // raw driver collection bypasses that middleware entirely.
+  // created_at is deliberately not settable through Product.create()/save()
+  // (a real admin create/edit never backdates a product) — going straight
+  // through rawQuery bypasses the model layer entirely, same purpose the
+  // old raw Mongo driver `.collection.updateOne()` call served against
+  // Mongoose's own protected timestamps plugin.
   const backdate = async (id, daysAgo) => {
-    await Product.collection.updateOne({ _id: id }, { $set: { createdAt: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000) } });
+    await rawQuery("UPDATE products SET created_at = ? WHERE id = ?", [new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000), id]);
   };
 
   before(async () => {
@@ -104,11 +101,11 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
     // division, not top-level roots themselves (see services/
     // categoryService.js's department-vs-division distinction) — so this
     // must not constrain `parent: null`.
-    const burqa = await Category.findOne({ slug: "burqa" }).lean();
-    const hijab = await Category.findOne({ slug: "hijab" }).lean();
+    const burqa = await Category.findBySlug("burqa");
+    const hijab = await Category.findBySlug("hijab");
     assert.ok(burqa && hijab, "seed data must include Burqa and Hijab departments — the harness runs scripts/seedCatalog.mjs before this file");
 
-    const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
+    const [burqaLeaf] = await Category.findByParent(burqa._id);
     assert.ok(burqaLeaf, "Burqa needs at least one subcategory to attach test products to");
     leafCategoryId = burqaLeaf._id;
 
@@ -128,18 +125,19 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
     // pick here. Only a genuine root DEPARTMENT (children are leaves) not
     // in STOREFRONT_DEPARTMENT_SLUGS should ever match.
     const { STOREFRONT_DEPARTMENT_SLUGS } = await import("../../services/productService.js");
-    const outOfScopeDept = await Category.findOne({
-      parent: null,
-      slug: { $nin: [...STOREFRONT_DEPARTMENT_SLUGS, "clothes"] },
-    }).lean();
+    const excludedSlugs = [...STOREFRONT_DEPARTMENT_SLUGS, "clothes"];
+    const [outOfScopeDept] = await rawQuery(
+      `SELECT * FROM categories WHERE parent_id IS NULL AND slug NOT IN (${excludedSlugs.map(() => "?").join(",")}) LIMIT 1`,
+      excludedSlugs,
+    );
     if (outOfScopeDept) {
-      const outOfScopeLeaf = await Category.findOne({ parent: outOfScopeDept._id }).lean();
+      const [outOfScopeLeaf] = await Category.findByParent(outOfScopeDept.id);
       outOfScopeLeafCategoryId = outOfScopeLeaf?._id ?? null;
     }
   });
 
   after(async () => {
-    if (createdIds.length) await Product.deleteMany({ _id: { $in: createdIds } });
+    if (createdIds.length) await deleteRows("products", "id", createdIds);
     await disconnectTestDb();
   });
 
@@ -232,7 +230,7 @@ describe("shop filtering: Age Group, Product Collection, Burqa/Hijab scope (real
 
   test("requesting an out-of-scope category id directly returns zero results, not the full catalog", async () => {
     if (!outOfScopeLeafCategoryId) return;
-    const outOfScopeDept = await Category.findById(outOfScopeLeafCategoryId).lean();
+    const outOfScopeDept = await Category.findById(outOfScopeLeafCategoryId);
     const { json } = await fetchJson(`category=${outOfScopeDept.parent}&limit=10`);
     assert.equal(json.products.length, 0);
     assert.equal(json.total, 0);

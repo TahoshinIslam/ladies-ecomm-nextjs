@@ -27,7 +27,7 @@ const pickWritable = (body) => {
 // unresolved labelOverrides array to edit them) and, unfiltered, by anyone
 // wanting every definition.
 export async function listAttributes() {
-  return AttributeDefinition.find().sort("sortOrder key");
+  return AttributeDefinition.findAll();
 }
 
 // The one resolver shared by the admin product form (now) and the
@@ -35,11 +35,7 @@ export async function listAttributes() {
 // top-level category, with each one's display label already resolved via
 // labelOverrides — e.g. "size" reads as "Length" for Burqa/Khimar.
 export async function resolveAttributesForCategory(topCategoryId) {
-  const defs = await AttributeDefinition.find({
-    $or: [{ appliesToCategories: { $size: 0 } }, { appliesToCategories: topCategoryId }],
-  })
-    .sort("sortOrder key")
-    .lean();
+  const defs = await AttributeDefinition.findByCategoryOrGlobal(topCategoryId);
 
   return defs.map((def) => {
     const override = def.labelOverrides?.find(

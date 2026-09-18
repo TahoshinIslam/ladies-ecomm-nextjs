@@ -19,7 +19,7 @@
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser, deleteRows } from "./helpers/testDb.mjs";
 import { escapeHtml } from "../lib/htmlEscape.js";
 
 const MALICIOUS_NAMES = [
@@ -119,13 +119,12 @@ const partBSkipReason = !moduleMockUsable
   : skipReason;
 
 describe("Part B — services/userService.js forgotPassword(): injection is escaped by the time it reaches the real (mocked) Nodemailer call", { skip: !canRunPartB && partBSkipReason }, () => {
-  let User, forgotPassword;
+  let forgotPassword;
   let user;
 
   before(async () => {
     await connectTestDb();
 
-    ({ default: User } = await import("../models/userModel.js"));
     ({ forgotPassword } = await import("../services/userService.js"));
 
     user = await createTestUser({ role: "customer" });
@@ -135,7 +134,7 @@ describe("Part B — services/userService.js forgotPassword(): injection is esca
 
   after(async () => {
     mock.reset();
-    await User.deleteOne({ _id: user._id });
+    await deleteRows("users", "id", user._id);
     await disconnectTestDb();
   });
 

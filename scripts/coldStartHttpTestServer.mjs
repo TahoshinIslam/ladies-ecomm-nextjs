@@ -1,27 +1,32 @@
 #!/usr/bin/env node
 // Realtime-durability-class fix — regression harness for the cold-start
-// homepage 500 (MongooseError: `categories.find()` buffering timed out).
+// homepage 500 that originally motivated this test (a MongooseError from
+// an unbuffered `categories.find()` at the time; the underlying "first
+// request must not have already warmed the DB connection" scenario is
+// framework/driver-agnostic and still worth guarding for MySQL).
 //
 // Deliberately separate from scripts/httpTestServer.mjs: that harness's
 // own readiness poll hits `/api/settings/public` (a DB-backed route)
 // before handing control to the test files — which would itself
 // establish the connection this bug depends on NEVER having happened yet.
 // This harness polls ONLY `/api/health/live` (which by design never
-// touches MongoDB — see app/api/health/live/route.js), so the very first
-// real request this spawned server instance ever serves can be the
-// test's own GET / — a faithful reproduction of a genuinely cold Vercel
-// instance whose first request is a Server Component page, not an API
-// route that would have warmed the connection via lib/http.js's
-// withRoute().
+// touches the database — see app/api/health/live/route.js), so the very
+// first real request this spawned server instance ever serves can be the
+// test's own GET / — a faithful reproduction of a genuinely cold instance
+// whose first request is a Server Component page, not an API route that
+// would have warmed the connection pool via lib/http.js's withRoute().
 //
-// Usage: node scripts/coldStartHttpTestServer.mjs run [testFileGlob...]
+// Usage: node --env-file-if-exists=.env.test scripts/coldStartHttpTestServer.mjs run [testFileGlob...]
+
+process.env.NODE_ENV = "test";
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdirSync, openSync, writeFileSync, readFileSync, closeSync } from "node:fs";
+import { mkdirSync, openSync, writeFileSync, readFileSync, closeSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import mongoose from "mongoose";
+
+import { checkTestDbConfig, assertConnectedDbMatches } from "../lib/testDbSafety.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -32,26 +37,6 @@ function log(message) {
 }
 function fail(message) {
   console.error(`\n✖ ${message}\n`);
-}
-
-function assertIsolatedTestUri(uri) {
-  const prodUri = process.env.MONGO_URI;
-  if (!uri) throw new Error("MONGO_URI_TEST is not set");
-  if (prodUri && uri === prodUri) throw new Error("MONGO_URI_TEST equals MONGO_URI — refusing to use it");
-  const hostPatterns = [/mongodb\.net/i, /\.mongodb\.com/i, /amazonaws\.com/i, /compute\.internal/i];
-  for (const p of hostPatterns) {
-    if (p.test(uri)) throw new Error(`MONGO_URI_TEST matches a hosted-provider pattern (${p}) — refusing to use it`);
-  }
-  let dbName;
-  try {
-    dbName = decodeURIComponent(new URL(uri).pathname.replace(/^\//, ""));
-  } catch {
-    throw new Error("MONGO_URI_TEST is not a parseable URI");
-  }
-  if (!dbName || !/test/i.test(dbName)) {
-    throw new Error(`MONGO_URI_TEST's database name ("${dbName}") does not contain "test" — refusing to use it`);
-  }
-  return dbName;
 }
 
 function findFreePort() {
@@ -73,6 +58,18 @@ function runToCompletion(cmd, args, { env, logFile }) {
     child.on("exit", (code) => resolve(code ?? 1));
     child.on("error", () => resolve(1));
   });
+}
+
+// Same "never let a spawned child fall back to its own .env/.env.local
+// resolution" rationale as scripts/httpTestServer.mjs's own testDbEnv().
+function testDbEnv() {
+  return {
+    DB_HOST: process.env.DB_HOST,
+    DB_PORT: process.env.DB_PORT,
+    DB_NAME: process.env.DB_NAME,
+    DB_USER: process.env.DB_USER,
+    DB_PASSWORD: process.env.DB_PASSWORD ?? "",
+  };
 }
 
 // Only ever polls /api/health/live — see this file's header comment for
@@ -106,18 +103,23 @@ async function main() {
   writeFileSync(serverLogA, "");
   writeFileSync(serverLogB, "");
 
-  let dbName;
-  try {
-    dbName = assertIsolatedTestUri(process.env.MONGO_URI_TEST);
-  } catch (err) {
-    fail(err.message);
+  const dbName = process.env.DB_NAME;
+  const dbHost = process.env.DB_HOST || "127.0.0.1";
+  const configCheck = checkTestDbConfig({
+    dbName,
+    host: dbHost,
+    allowRemoteHost: process.env.ALLOW_REMOTE_TEST_DB === "true",
+  });
+  if (!configCheck.ok) {
+    fail(configCheck.reason);
     process.exitCode = 1;
     return;
   }
 
   const instances = [];
   let cleanedUp = false;
-  const cleanup = () => {
+  let closePool;
+  const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
     for (const inst of instances) {
@@ -126,28 +128,32 @@ async function main() {
         inst.kill("SIGTERM");
       }
     }
+    if (closePool) await closePool().catch(() => {});
   };
-  process.once("SIGINT", () => {
-    cleanup();
+  process.once("SIGINT", async () => {
+    await cleanup();
     process.exit(130);
   });
-  process.once("SIGTERM", () => {
-    cleanup();
+  process.once("SIGTERM", async () => {
+    await cleanup();
     process.exit(143);
   });
 
   let exitCode = 1;
   try {
     log(`isolated test database confirmed: "${dbName}"`);
-    log("wiping and reseeding the disposable test database...");
-    await mongoose.connect(process.env.MONGO_URI_TEST);
-    await mongoose.connection.dropDatabase();
-    await mongoose.disconnect();
+    log("truncating and reseeding the disposable test database...");
+    const dbModule = await import("../config/db.js");
+    closePool = dbModule.closePool;
+    await dbModule.default();
+    await assertConnectedDbMatches(dbModule.query, dbName);
+    const { truncateAll } = await import("../tests/helpers/testDb.mjs");
+    await truncateAll();
 
     const seedLog = path.join(LOG_DIR, "seed.log");
     writeFileSync(seedLog, "");
     const seedExit = await runToCompletion("node", ["scripts/seedCatalog.mjs"], {
-      env: { ...process.env, NODE_ENV: "test" },
+      env: { ...process.env, ...testDbEnv(), NODE_ENV: "test" },
       logFile: seedLog,
     });
     if (seedExit !== 0) {
@@ -157,6 +163,22 @@ async function main() {
     }
     log("seed complete");
 
+    // Close this orchestrator's own pool BEFORE spawning the "never
+    // DB-touched yet" server instances below — an open pool here is
+    // harmless in practice (each `next start` child gets its own process
+    // and its own pool), but closing it keeps this script's intent
+    // honest: nothing it does after this point may implicitly warm any
+    // connection the spawned instances will use.
+    await closePool();
+    closePool = undefined;
+
+    // See scripts/httpTestServer.mjs's own comment on this exact line —
+    // unstable_cache() persists to disk at .next/cache/fetch-cache across
+    // `next start` invocations; without clearing it, a "never DB-touched
+    // yet" instance could still serve a stale cached page on its very
+    // first request, defeating the whole point of this harness.
+    rmSync(path.join(ROOT, ".next/cache/fetch-cache"), { recursive: true, force: true });
+
     const [portA, portB] = await Promise.all([findFreePort(), findFreePort()]);
 
     async function spawnFreshInstance(label, port, logFile) {
@@ -165,9 +187,8 @@ async function main() {
         cwd: ROOT,
         env: {
           ...process.env,
+          ...testDbEnv(),
           PORT: String(port),
-          ALLOW_TEST_DB_OVERRIDE: "true",
-          TEST_SERVER_MONGO_URI: process.env.MONGO_URI_TEST,
           APP_ORIGIN: baseUrl,
         },
         stdio: ["ignore", openSync(logFile, "a"), openSync(logFile, "a")],
@@ -196,6 +217,7 @@ async function main() {
         cwd: ROOT,
         env: {
           ...process.env,
+          ...testDbEnv(),
           NODE_ENV: "test",
           COLD_START_BASE_URL_A: baseUrlA,
           COLD_START_BASE_URL_B: baseUrlB,
@@ -212,7 +234,7 @@ async function main() {
     fail(err.message);
     exitCode = 1;
   } finally {
-    cleanup();
+    await cleanup();
   }
 
   process.exitCode = exitCode;

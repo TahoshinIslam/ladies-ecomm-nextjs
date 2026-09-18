@@ -7,7 +7,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows } from "./helpers/testDb.mjs";
 import { HttpError } from "../lib/http.js";
 
 const canRun = dbReady;
@@ -73,8 +73,8 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
   });
 
   after(async () => {
-    await Product.deleteMany({ _id: { $in: [productDiscounted?._id, productPlain?._id, productOutOfStock?._id, productRated?._id, productUnrated?._id].filter(Boolean) } });
-    await Category.deleteMany({ _id: { $in: [dept?._id, leafA?._id, leafB?._id].filter(Boolean) } });
+    await deleteRows("products", "id", [productDiscounted?._id, productPlain?._id, productOutOfStock?._id, productRated?._id, productUnrated?._id].filter(Boolean));
+    await deleteRows("categories", "id", [dept?._id, leafA?._id, leafB?._id].filter(Boolean));
     await disconnectTestDb();
   });
 
@@ -264,8 +264,8 @@ describe("Shop redesign v3 — filters, facets, effective price, stale-filter re
     });
 
     after(async () => {
-      await Category.deleteMany({ _id: { $in: [otherDept?._id, otherLeaf?._id].filter(Boolean) } });
-      await AttributeDefinition.deleteOne({ _id: realAttrDef?._id });
+      await deleteRows("categories", "id", [otherDept?._id, otherLeaf?._id].filter(Boolean));
+      if (realAttrDef?._id) await deleteRows("attribute_definitions", "id", realAttrDef._id);
     });
 
     test("a real attribute key that doesn't apply to the currently-selected department is dropped server-side, not left to wrongly zero the result set", async () => {

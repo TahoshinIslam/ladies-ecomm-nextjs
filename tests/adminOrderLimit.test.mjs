@@ -19,11 +19,14 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
 } from "./helpers/testDb.mjs";
+import { withTransaction } from "../lib/db/tx.js";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -36,6 +39,7 @@ describe("GET /api/orders — limit parameter is bounded (Phase 5 fix)", { skip:
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ GET } = await import("../app/api/orders/route.js"));
     ({ default: Order } = await import("../models/orderModel.js"));
     ({ default: User } = await import("../models/userModel.js"));
@@ -46,20 +50,25 @@ describe("GET /api/orders — limit parameter is bounded (Phase 5 fix)", { skip:
     product = await createTestProduct({ stock: 100 });
 
     for (let i = 0; i < ORDER_COUNT; i++) {
-      await Order.create({
-        user: buyer._id,
-        items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 100 } }],
-        shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
-        subtotal: 100,
-        total: 100,
-      });
+      await withTransaction((conn) =>
+        Order.create(
+          {
+            user: buyer._id,
+            items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 100 } }],
+            shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
+            subtotal: 100,
+            total: 100,
+          },
+          conn,
+        ),
+      );
     }
   });
 
   after(async () => {
-    await Order.deleteMany({ user: buyer._id });
-    await Product.deleteOne({ _id: product._id });
-    await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+    await deleteRows("orders", "user_id", buyer._id);
+    await deleteRows("products", "id", product._id);
+    await deleteRows("users", "id", [admin._id, buyer._id]);
     await disconnectTestDb();
   });
 

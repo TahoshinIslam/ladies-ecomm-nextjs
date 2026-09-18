@@ -4,7 +4,6 @@ import { ArrowRight, Banknote, Gem, RefreshCw, Sparkles } from "lucide-react";
 
 import Button from "../components/ui/Button.jsx";
 import NewsletterForm from "../components/layout/NewsletterForm.jsx";
-import CategorySidebar from "../components/layout/CategorySidebar.jsx";
 import CategoryCard from "../components/product/CategoryCard.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
 import ProductShowcaseSection from "./home/ProductShowcaseSection.jsx";
@@ -185,16 +184,20 @@ export default async function HomePage() {
 
   return (
     <>
-      {/* Hero row — an always-expanded category sidebar (desktop only; no
-          click needed to see every department) beside the hero panel,
-          matching the reference layout's persistent left-hand category
-          list instead of a collapsed dropdown. */}
-      <section aria-label={t("home.heroLabel")} className="container-x pt-6 sm:pt-10">
-        <div className="mx-auto flex max-w-[1620px] items-stretch gap-6 lg:h-[460px]">
-          <CategorySidebar categories={categories} />
-          <div className="min-w-0 flex-1">
-            <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} promotions={carouselPromotions} />
-          </div>
+      {/* Hero — the always-expanded category sidebar that used to sit
+          beside this panel is gone (the header's "All Categories" trigger
+          now covers that everywhere), so the carousel spans the full
+          shared content width. A moderate landscape box (not the tall 9:12
+          crop the admin Promotions form previews for its own distinct
+          mobile creative) paired with HeroCarousel's own object-contain
+          (not object-cover) means the complete original image always
+          shows, on phones and desktop alike — nothing is cropped off,
+          only letterboxed against the panel's own background if its
+          aspect doesn't exactly match. Tight top padding keeps the banner
+          close under the header instead of floating in extra whitespace. */}
+      <section aria-label={t("home.heroLabel")} className="container-x pt-3 sm:pt-5">
+        <div className="mx-auto aspect-[4/3] w-full sm:aspect-[16/7] sm:max-h-[560px]">
+          <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} promotions={carouselPromotions} />
         </div>
       </section>
 
@@ -204,7 +207,7 @@ export default async function HomePage() {
           full-width 3-column department grid. Every remaining department
           stays one click away via the header's mega menu, nav row, and the
           "Browse all departments" link below. */}
-      <section aria-labelledby="favourites-h" className="container-x pt-14">
+      <section aria-labelledby="favourites-h" className="container-x pt-8">
         <h2 id="favourites-h" className="text-[19px] font-semibold tracking-[-0.01em]">
           {t("home.favouritesEyebrow")}
         </h2>

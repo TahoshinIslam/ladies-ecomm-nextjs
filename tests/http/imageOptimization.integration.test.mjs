@@ -10,7 +10,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "../helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -70,9 +70,9 @@ describe("Phase 9 — real HTTP: next/image produces responsive, optimized marku
     ({ default: Product } = await import("../../models/productModel.js"));
     ({ default: Category } = await import("../../models/categoryModel.js"));
 
-    const burqa = await Category.findOne({ slug: "burqa" }).lean();
+    const burqa = await Category.findBySlug("burqa");
     assert.ok(burqa, "seed data must include the Burqa department");
-    const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
+    const [burqaLeaf] = await Category.findByParent(burqa._id);
     assert.ok(burqaLeaf, "Burqa needs a subcategory to attach a test product to");
     burqaDeptId = burqa._id.toString();
     burqaLeafId = burqaLeaf._id.toString();
@@ -92,7 +92,7 @@ describe("Phase 9 — real HTTP: next/image produces responsive, optimized marku
   });
 
   after(async () => {
-    if (createdIds.length) await Product.deleteMany({ _id: { $in: createdIds } });
+    if (createdIds.length) await deleteRows("products", "id", createdIds);
     await disconnectTestDb();
   });
 

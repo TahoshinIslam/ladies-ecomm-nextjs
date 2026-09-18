@@ -10,11 +10,33 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
+  rawQuery,
 } from "./helpers/testDb.mjs";
+
+async function countNotificationsLike(fragment) {
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM notifications WHERE message LIKE ?", [`%${fragment}%`]);
+  return n;
+}
+async function deleteNotificationsLike(fragment) {
+  await rawQuery("DELETE FROM notifications WHERE message LIKE ?", [`%${fragment}%`]);
+}
+async function countEventsByPayload(channel, type, orderId, status) {
+  const clauses = ["channel = ?", "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?"];
+  const params = [channel, orderId];
+  if (type) { clauses.push("type = ?"); params.push(type); }
+  if (status) { clauses.push("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status')) = ?"); params.push(status); }
+  const [{ n }] = await rawQuery(`SELECT COUNT(*) AS n FROM events WHERE ${clauses.join(" AND ")}`, params);
+  return n;
+}
+async function deleteEventsByOrderId(orderId) {
+  await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [orderId]);
+}
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -25,6 +47,7 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ PUT: statusPUT } = await import("../app/api/orders/[id]/status/route.js"));
     ({ POST: createOrderPOST } = await import("../app/api/orders/route.js"));
     ({ default: Order } = await import("../models/orderModel.js"));
@@ -76,9 +99,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const json = await res.json();
       assert.equal(json.order.status, "processing");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -92,9 +115,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "processing" });
       assert.equal(res.status, 200);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -111,19 +134,19 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         await setStatus(admin, order._id, { status: "processing" });
         await setStatus(admin, order._id, { status: "shipped" });
         await setStatus(admin, order._id, { status: "delivered" });
-        const first = await Order.findById(order._id).lean();
+        const first = await Order.findById(order._id);
 
         await new Promise((resolve) => setTimeout(resolve, 10));
         const res = await setStatus(admin, order._id, { status: "delivered" });
         assert.equal(res.status, 200);
-        const second = await Order.findById(order._id).lean();
+        const second = await Order.findById(order._id);
 
         assert.equal(second.deliveredAt.getTime(), first.deliveredAt.getTime(), "deliveredAt must not be rewritten by a repeat 'delivered' request");
         assert.equal(second.updatedAt.getTime(), first.updatedAt.getTime(), "updatedAt must not change — no save() must occur on a true no-op");
       } finally {
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -140,18 +163,18 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         // part of this remediation's scope) — a short settle wait lets it
         // land before counting, avoiding a false negative from racing it.
         await new Promise((resolve) => setTimeout(resolve, 150));
-        const countAfterFirst = await Notification.countDocuments({ message: new RegExp(`#${order._id.toString().slice(-6)} marked as cancelled`) });
+        const countAfterFirst = await countNotificationsLike(`#${order._id.toString().slice(-6)} marked as cancelled`);
         const res = await setStatus(admin, order._id, { status: "cancelled" });
         assert.equal(res.status, 200);
         await new Promise((resolve) => setTimeout(resolve, 150));
-        const countAfterSecond = await Notification.countDocuments({ message: new RegExp(`#${order._id.toString().slice(-6)} marked as cancelled`) });
+        const countAfterSecond = await countNotificationsLike(`#${order._id.toString().slice(-6)} marked as cancelled`);
         assert.equal(countAfterSecond, countAfterFirst, "a repeated 'cancelled' request must not create a second notification");
         assert.ok(countAfterFirst >= 1);
       } finally {
-        await Notification.deleteMany({ message: new RegExp(`#${order._id?.toString?.().slice(-6)}`) });
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+        await deleteNotificationsLike(`#${order._id?.toString?.().slice(-6) ?? ""}`);
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -168,23 +191,23 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         await setStatus(admin, order._id, { status: "delivered" });
         await setStatus(admin, order._id, { status: "refunded" });
         await new Promise((resolve) => setTimeout(resolve, 150));
-        const notifBefore = await Notification.countDocuments({ message: new RegExp(`#${order._id.toString().slice(-6)} marked as refunded`) });
-        const eventsBefore = await Event.countDocuments({ channel: "admin", type: "ORDER_STATUS_CHANGED", "payload.orderId": order._id.toString(), "payload.status": "refunded" });
+        const notifBefore = await countNotificationsLike(`#${order._id.toString().slice(-6)} marked as refunded`);
+        const eventsBefore = await countEventsByPayload("admin", "ORDER_STATUS_CHANGED", order._id.toString(), "refunded");
 
         const res = await setStatus(admin, order._id, { status: "refunded" });
         assert.equal(res.status, 200);
         await new Promise((resolve) => setTimeout(resolve, 150));
 
-        const notifAfter = await Notification.countDocuments({ message: new RegExp(`#${order._id.toString().slice(-6)} marked as refunded`) });
-        const eventsAfter = await Event.countDocuments({ channel: "admin", type: "ORDER_STATUS_CHANGED", "payload.orderId": order._id.toString(), "payload.status": "refunded" });
+        const notifAfter = await countNotificationsLike(`#${order._id.toString().slice(-6)} marked as refunded`);
+        const eventsAfter = await countEventsByPayload("admin", "ORDER_STATUS_CHANGED", order._id.toString(), "refunded");
         assert.equal(notifAfter, notifBefore, "no duplicate refunded notification");
         assert.equal(eventsAfter, eventsBefore, "no duplicate ORDER_STATUS_CHANGED event");
       } finally {
-        await Notification.deleteMany({ message: new RegExp(`#${order._id?.toString?.().slice(-6)}`) });
-        await Event.deleteMany({ "payload.orderId": order._id?.toString?.() });
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+        await deleteNotificationsLike(`#${order._id?.toString?.().slice(-6) ?? ""}`);
+        await deleteEventsByOrderId(order._id?.toString?.() ?? "");
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -197,20 +220,20 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         const order = await makeOrder(buyer, product);
         await setStatus(admin, order._id, { status: "processing" });
         await setStatus(admin, order._id, { status: "shipped", trackingNumber: "TRK-001" });
-        const before = await Order.findById(order._id).lean();
-        const eventsBefore = await Event.countDocuments({ channel: `order:${order._id}` });
+        const before = await Order.findById(order._id);
+        const [{ n: eventsBefore }] = await rawQuery("SELECT COUNT(*) AS n FROM events WHERE channel = ?", [`order:${order._id}`]);
 
         const res = await setStatus(admin, order._id, { status: "shipped", trackingNumber: "TRK-001" });
         assert.equal(res.status, 200);
-        const after = await Order.findById(order._id).lean();
-        const eventsAfter = await Event.countDocuments({ channel: `order:${order._id}` });
+        const after = await Order.findById(order._id);
+        const [{ n: eventsAfter }] = await rawQuery("SELECT COUNT(*) AS n FROM events WHERE channel = ?", [`order:${order._id}`]);
 
         assert.equal(after.updatedAt.getTime(), before.updatedAt.getTime(), "no save() when tracking number is unchanged");
         assert.equal(eventsAfter, eventsBefore, "no re-emitted order-channel event for an unchanged tracking number");
       } finally {
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -223,22 +246,23 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         const order = await makeOrder(buyer, product);
         await setStatus(admin, order._id, { status: "processing" });
         await setStatus(admin, order._id, { status: "shipped", trackingNumber: "TRK-001" });
-        const adminEventsBefore = await Event.countDocuments({ channel: "admin", "payload.orderId": order._id.toString() });
+        const adminEventsBefore = await countEventsByPayload("admin", null, order._id.toString());
 
         const res = await setStatus(admin, order._id, { status: "shipped", trackingNumber: "TRK-002" });
         assert.equal(res.status, 200);
         const json = await res.json();
         assert.equal(json.order.trackingNumber, "TRK-002");
 
-        const orderEvents = await Event.find({ channel: `order:${order._id}` }).sort({ createdAt: -1 }).limit(1).lean();
-        assert.equal(orderEvents[0]?.payload?.trackingNumber, "TRK-002", "the customer channel must reflect the new tracking number");
+        const orderEvents = await rawQuery("SELECT * FROM events WHERE channel = ? ORDER BY id DESC LIMIT 1", [`order:${order._id}`]);
+        const latestPayload = orderEvents[0] ? (typeof orderEvents[0].payload === "string" ? JSON.parse(orderEvents[0].payload) : orderEvents[0].payload) : null;
+        assert.equal(latestPayload?.trackingNumber, "TRK-002", "the customer channel must reflect the new tracking number");
 
-        const adminEventsAfter = await Event.countDocuments({ channel: "admin", "payload.orderId": order._id.toString() });
+        const adminEventsAfter = await countEventsByPayload("admin", null, order._id.toString());
         assert.equal(adminEventsAfter, adminEventsBefore, "a tracking-only change must not touch the admin channel");
       } finally {
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -252,7 +276,7 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         order = await makeOrder(buyer, product);
         await setStatus(admin, order._id, { status: "cancelled" });
         await new Promise((resolve) => setTimeout(resolve, 150));
-        const before = await Notification.countDocuments({ message: new RegExp(`#${order._id.toString().slice(-6)} marked as cancelled`) });
+        const before = await countNotificationsLike(`#${order._id.toString().slice(-6)} marked as cancelled`);
 
         const [r1, r2, r3] = await Promise.all([
           setStatus(admin, order._id, { status: "cancelled" }),
@@ -262,13 +286,13 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         assert.ok([r1.status, r2.status, r3.status].every((s) => s === 200));
         await new Promise((resolve) => setTimeout(resolve, 150));
 
-        const after = await Notification.countDocuments({ message: new RegExp(`#${order._id.toString().slice(-6)} marked as cancelled`) });
+        const after = await countNotificationsLike(`#${order._id.toString().slice(-6)} marked as cancelled`);
         assert.equal(after, before, "concurrent repeats of an already-cancelled status must create zero additional notifications");
       } finally {
-        await Notification.deleteMany({ message: new RegExp(`#${order._id?.toString?.().slice(-6)}`) });
-        await Order.deleteMany({ user: buyer._id });
-        await Product.deleteOne({ _id: product._id });
-        await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+        await deleteNotificationsLike(`#${order._id?.toString?.().slice(-6) ?? ""}`);
+        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("products", "id", product._id);
+        await deleteRows("users", "id", [admin._id, buyer._id]);
       }
     });
   });
@@ -289,10 +313,10 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const persisted = await Order.findById(order._id);
       assert.equal(persisted.status, "delivered", "delivered must remain unchanged after a rejected regression attempt");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -308,9 +332,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const persisted = await Order.findById(order._id);
       assert.equal(persisted.status, "cancelled");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -325,9 +349,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "pending" });
       assert.equal(res.status, 409);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -340,9 +364,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, {});
       assert.equal(res.status, 400);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -355,9 +379,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "not-a-real-status" });
       assert.equal(res.status, 400);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -370,9 +394,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: ["processing", "shipped"] });
       assert.equal(res.status, 400);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -385,9 +409,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "Processing" });
       assert.equal(res.status, 400);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -400,9 +424,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "processing", total: 1 });
       assert.equal(res.status, 400);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -412,7 +436,7 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, "not-a-valid-id", { status: "processing" });
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -422,7 +446,7 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, "507f1f77bcf86cd799439011", { status: "processing" });
       assert.equal(res.status, 404);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -435,9 +459,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(customer, order._id, { status: "processing" });
       assert.equal(res.status, 403);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [customer._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [customer._id, buyer._id]);
     }
   });
 
@@ -453,13 +477,13 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       await setStatus(admin, order._id, { status: "shipped" });
       await setStatus(admin, order._id, { status: "delivered" });
 
-      const payment = await Payment.findOne({ order: order._id });
+      const [payment] = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payment.status, "completed");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Payment.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteMany({ _id: { $in: [admin._id, buyer._id] } });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", [admin._id, buyer._id]);
     }
   });
 });

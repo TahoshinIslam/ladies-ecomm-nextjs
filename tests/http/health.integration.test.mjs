@@ -39,7 +39,7 @@ describe("Phase 11 — health endpoints over real HTTP", { skip }, () => {
     for (const path of ["/api/health/live", "/api/health/ready"]) {
       const res = await fetch(`${BASE_URL}${path}`);
       const raw = await res.text();
-      assert.ok(!/mongo|mongoose|stack|127\.0\.0\.1|ECONNREFUSED/i.test(raw), `${path} must not leak internal detail`);
+      assert.ok(!/mongo|mongoose|mysql|stack|127\.0\.0\.1|ECONNREFUSED/i.test(raw), `${path} must not leak internal detail`);
     }
   });
 });

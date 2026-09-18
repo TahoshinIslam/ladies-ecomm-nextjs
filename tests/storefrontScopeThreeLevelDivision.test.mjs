@@ -15,7 +15,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const unique = () => crypto.randomBytes(6).toString("hex");
@@ -33,8 +33,8 @@ describe("services/productService.js — resolveScopeIdsForSlugs() covers 3-leve
   });
 
   after(async () => {
-    if (createdProductIds.length) await Product.deleteMany({ _id: { $in: createdProductIds } });
-    if (createdCategoryIds.length) await Category.deleteMany({ _id: { $in: createdCategoryIds } });
+    if (createdProductIds.length) await deleteRows("products", "id", createdProductIds);
+    if (createdCategoryIds.length) await deleteRows("categories", "id", createdCategoryIds);
     await disconnectTestDb();
   });
 
@@ -73,7 +73,7 @@ describe("services/productService.js — resolveScopeIdsForSlugs() covers 3-leve
     // Pin the real, deliberate one-level-up behavior this whole fix
     // depends on: the leaf product's topCategory is the mid-tier
     // department, never the division.
-    const saved = await Product.findById(product._id).lean();
+    const saved = await Product.findById(product._id);
     assert.equal(String(saved.topCategory), String(department._id));
     assert.notEqual(String(saved.topCategory), String(division._id));
 
@@ -93,8 +93,8 @@ describe("services/productService.js — resolveScopeIdsForSlugs() covers 3-leve
     // `?category=<division id>` request server-side before buildFilter()
     // ever runs: a genuine division (a child with its own children) is
     // expanded to that division's direct children ids.
-    const filter = buildFilter({ category: String(department._id) }, { isActive: true }, scopeIds);
-    const count = await Product.countDocuments(filter);
+    const { where, params } = buildFilter({ category: String(department._id) }, { isActive: true }, scopeIds);
+    const count = await Product.countByFilter(where, params);
     assert.equal(count, 1, "the product filed 3 levels under the division must be found when browsing the division");
   });
 });

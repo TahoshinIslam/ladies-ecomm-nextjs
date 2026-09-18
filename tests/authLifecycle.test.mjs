@@ -13,10 +13,13 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   sessionCookieHeader,
   requestAs,
   createTestUser,
+  deleteRows,
+  rawQuery,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -28,6 +31,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: registerPOST } = await import("../app/api/users/register/route.js"));
     ({ POST: loginPOST } = await import("../app/api/users/login/route.js"));
     ({ GET: mePOST_GET } = await import("../app/api/users/me/route.js"));
@@ -64,7 +68,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
     assert.equal(json.user.email, email);
     assert.equal(json.user.password, undefined, "password must never appear in the response");
     assert.ok(sessionCookieFromResponse(res), "Set-Cookie: tahos_session=... must be present");
-    await User.deleteOne({ email });
+    await rawQuery("DELETE FROM users WHERE email = ?", [email]);
   });
 
   test("successful login sets a session cookie, no token in the response body", async () => {
@@ -87,11 +91,11 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // normal find() without this explicit opt-in confirms the field-level
       // protection itself, tested separately in tests/session.test.mjs;
       // here we opt in specifically to verify the STORED VALUE is a hash.
-      const stored = await Session.findOne({ user: user._id }).select("+tokenHash");
-      assert.notEqual(stored.tokenHash, rawValue, "the stored value must be a hash, not the raw token itself");
-      assert.equal(stored.tokenHash.length, 64, "SHA-256 hex digest is 64 characters");
+      const [stored] = await rawQuery("SELECT token_hash FROM sessions WHERE user_id = ?", [user._id]);
+      assert.notEqual(stored.token_hash, rawValue, "the stored value must be a hash, not the raw token itself");
+      assert.equal(stored.token_hash.length, 64, "SHA-256 hex digest is 64 characters");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -105,7 +109,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       assert.equal(json.message, "Invalid credentials");
       assert.equal(sessionCookieFromResponse(res), undefined);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -132,14 +136,14 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
         assert.equal(res.status, 401, `attempt ${i + 1} should still be a plain 401`);
       }
 
-      const lockedCheck = await User.findById(user._id).select("+lockUntil");
-      assert.ok(lockedCheck.lockUntil && lockedCheck.lockUntil > Date.now(), "account should be locked after 5 failed attempts");
+      const lockedCheck = await User.findById(user._id);
+      assert.ok(lockedCheck.lockUntil && new Date(lockedCheck.lockUntil).getTime() > Date.now(), "account should be locked after 5 failed attempts");
 
       const correctReq = requestAs({ method: "POST", url: "http://test/api/users/login", body: { email: user.email, password: "TestPassword123!" } });
       const res = await loginPOST(correctReq);
       assert.equal(res.status, 423, "a locked account rejects even the correct password");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -150,18 +154,22 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
         const req = requestAs({ method: "POST", url: "http://test/api/users/login", body: { email: user.email, password: "wrong" } });
         await loginPOST(req);
       }
-      const midway = await User.findById(user._id).select("+loginAttempts");
+      const midway = await User.findById(user._id);
       assert.equal(midway.loginAttempts, 3);
 
       const goodReq = requestAs({ method: "POST", url: "http://test/api/users/login", body: { email: user.email, password: "TestPassword123!" } });
       const res = await loginPOST(goodReq);
       assert.equal(res.status, 200);
 
-      const after_ = await User.findById(user._id).select("+loginAttempts +lockUntil");
+      const after_ = await User.findById(user._id);
       assert.equal(after_.loginAttempts, 0, "a successful login must reset loginAttempts to 0");
-      assert.equal(after_.lockUntil, undefined);
+      // SQL NULL reads back as `null`, not `undefined` (a Mongoose-era
+      // representation this repo's other tests already adjusted for — see
+      // models/README-migration.md) — the guarantee that actually matters,
+      // "no lock is in effect," holds either way.
+      assert.equal(after_.lockUntil, null);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -197,13 +205,13 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // index's own background sweep (which runs on its own ~60s cycle).
       const crypto = await import("node:crypto");
       const tokenHash = crypto.createHash("sha256").update(session.rawToken).digest("hex");
-      await Session.updateOne({ tokenHash }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+      await rawQuery("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
 
       const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -218,14 +226,14 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
   test("a session for a user that no longer exists is rejected (401) — no server-side session to fall back on", async () => {
     const user = await createTestUser({ role: "customer" });
     const session = await createTestSession(user._id);
-    await User.deleteOne({ _id: user._id }); // delete AFTER creating the session — the session record itself is still otherwise valid
+    await deleteRows("users", "id", user._id); // delete AFTER creating the session — the session record itself is still otherwise valid
     const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
     const res = await mePOST_GET(req);
     assert.equal(res.status, 401, "lib/session.js's validateSessionToken() returns null when the referenced user no longer exists, even for an otherwise well-formed, unexpired, unrevoked session");
@@ -242,7 +250,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await couponsGET(req);
       assert.equal(res.status, 200);
     } finally {
-      await User.deleteOne({ _id: admin._id });
+      await deleteRows("users", "id", admin._id);
     }
   });
 
@@ -256,7 +264,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const forbiddenReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withoutPerm._id) });
       assert.equal((await couponsGET(forbiddenReq)).status, 403);
     } finally {
-      await User.deleteMany({ _id: { $in: [withPerm._id, withoutPerm._id] } });
+      await deleteRows("users", "id", [withPerm._id, withoutPerm._id]);
     }
   });
 
@@ -267,7 +275,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await couponsGET(req);
       assert.equal(res.status, 403);
     } finally {
-      await User.deleteOne({ _id: customer._id });
+      await deleteRows("users", "id", customer._id);
     }
   });
 });

@@ -1,100 +1,204 @@
-import mongoose from "mongoose";
+import { query } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
 
-import { TARGET_TYPES, COLLECTION_VALUES, AUDIENCES, PAGE_SCOPES, FREQUENCIES } from "../lib/promotionConstants.js";
+function rowToPromotion(row) {
+  if (!row) return null;
+  const promotion = {
+    _id: row.id,
+    name: row.name,
+    type: row.type,
+    placement: row.placement,
+    status: row.status,
+    title: row.title,
+    titleBn: row.title_bn,
+    subtitle: row.subtitle,
+    subtitleBn: row.subtitle_bn,
+    ctaLabel: row.cta_label,
+    ctaLabelBn: row.cta_label_bn,
+    desktopImage: row.desktop_image,
+    mobileImage: row.mobile_image,
+    imageAlt: row.image_alt,
+    imageAltBn: row.image_alt_bn,
+    targetType: row.target_type,
+    targetProduct: row.target_product_id,
+    targetCategory: row.target_category_id,
+    targetCollection: row.target_collection,
+    targetShopFilter: row.target_shop_filter_category_id || row.target_shop_filter_collection || row.target_shop_filter_style_id
+      ? { category: row.target_shop_filter_category_id, collection: row.target_shop_filter_collection, style: row.target_shop_filter_style_id }
+      : null,
+    targetUrl: row.target_url,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    priority: row.priority,
+    sortOrder: row.sort_order,
+    audience: row.audience,
+    pageScope: row.page_scope,
+    popupDelayMs: row.popup_delay_ms,
+    frequency: row.frequency,
+    cooldownHours: row.cooldown_hours,
+    version: row.version,
+    createdBy: row.created_by,
+    updatedBy: row.updated_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  promotion.save = async function save() {
+    return savePromotion(this);
+  };
+  return promotion;
+}
 
-// Admin-managed promotions — backs two storefront surfaces from one model
-// (see services/promotionService.js's own comment for why one model, not
-// two): the homepage hero carousel (`placement: "home_hero"`, `type:
-// "carousel"`) and visitor campaign popups (`placement: "storefront_popup"`,
-// `type: "popup"`). Both share the same target/schedule/audience contract —
-// a carousel banner and a popup campaign are the same "show this creative,
-// linking to this safe destination, under these conditions" shape with a
-// different presentation, not two different domains.
-//
-// `title`/`subtitle`/`ctaLabel` and their `...Bn` counterparts are plain
-// admin-authored copy fields (this codebase's app-chrome strings go through
-// lib/i18n's translation-key dictionaries, but promotion content is
-// per-campaign prose an admin writes directly — there is no translation key
-// for "20% off this weekend only").
-const shopFilterSchema = new mongoose.Schema(
-  {
-    category: { type: mongoose.Schema.Types.ObjectId, ref: "categories", default: null },
-    collection: { type: String, enum: COLLECTION_VALUES, default: null },
-    style: { type: mongoose.Schema.Types.ObjectId, ref: "categories", default: null },
-  },
-  { _id: false },
-);
+async function findById(id) {
+  if (!id) return null;
+  const rows = await query("SELECT * FROM promotions WHERE id = ?", [id]);
+  return rowToPromotion(rows[0]);
+}
 
-const promotionSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true, trim: true, maxlength: 120 },
-    type: { type: String, enum: ["carousel", "popup"], required: true },
-    // Kept alongside `type` (rather than derived) so a future placement can
-    // be added for the same type without a migration — today carousel is
-    // always home_hero and popup is always storefront_popup, but nothing in
-    // the query layer assumes that 1:1 mapping.
-    placement: { type: String, enum: ["home_hero", "storefront_popup"], required: true },
-    status: { type: String, enum: ["draft", "active", "paused"], default: "draft" },
+async function findAll({ type, status } = {}) {
+  const clauses = [];
+  const params = [];
+  if (type) {
+    clauses.push("type = ?");
+    params.push(type);
+  }
+  if (status) {
+    clauses.push("status = ?");
+    params.push(status);
+  }
+  const where = clauses.length ? clauses.join(" AND ") : "1=1";
+  const rows = await query(`SELECT * FROM promotions WHERE ${where} ORDER BY sort_order ASC, priority DESC, id ASC`, params);
+  return rows.map(rowToPromotion);
+}
 
-    title: { type: String, trim: true, maxlength: 200, default: "" },
-    titleBn: { type: String, trim: true, maxlength: 200, default: "" },
-    subtitle: { type: String, trim: true, maxlength: 400, default: "" },
-    subtitleBn: { type: String, trim: true, maxlength: 400, default: "" },
-    ctaLabel: { type: String, trim: true, maxlength: 60, default: "" },
-    ctaLabelBn: { type: String, trim: true, maxlength: 60, default: "" },
+async function findIdsByType(type) {
+  const rows = await query("SELECT id FROM promotions WHERE type = ?", [type]);
+  return rows.map((r) => r.id);
+}
 
-    desktopImage: { type: String, required: true },
-    mobileImage: { type: String, default: "" },
-    imageAlt: { type: String, trim: true, maxlength: 200, default: "" },
-    imageAltBn: { type: String, trim: true, maxlength: 200, default: "" },
+async function create(data) {
+  const id = generateObjectId();
+  await query(
+    `INSERT INTO promotions
+       (id, name, type, placement, status, title, title_bn, subtitle, subtitle_bn, cta_label, cta_label_bn,
+        desktop_image, mobile_image, image_alt, image_alt_bn, target_type, target_product_id, target_category_id,
+        target_collection, target_shop_filter_category_id, target_shop_filter_collection, target_shop_filter_style_id,
+        target_url, start_at, end_at, priority, sort_order, audience, page_scope, popup_delay_ms, frequency,
+        cooldown_hours, version, created_by, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.name,
+      data.type,
+      data.placement,
+      data.status || "draft",
+      data.title || "",
+      data.titleBn || "",
+      data.subtitle || "",
+      data.subtitleBn || "",
+      data.ctaLabel || "",
+      data.ctaLabelBn || "",
+      data.desktopImage,
+      data.mobileImage || "",
+      data.imageAlt || "",
+      data.imageAltBn || "",
+      data.targetType || "none",
+      data.targetProduct || null,
+      data.targetCategory || null,
+      data.targetCollection || null,
+      data.targetShopFilter?.category || null,
+      data.targetShopFilter?.collection || null,
+      data.targetShopFilter?.style || null,
+      data.targetUrl || "",
+      data.startAt || null,
+      data.endAt || null,
+      data.priority ?? 0,
+      data.sortOrder ?? 0,
+      data.audience || "all",
+      data.pageScope || "home",
+      data.popupDelayMs ?? 2000,
+      data.frequency || "once_per_session",
+      data.cooldownHours ?? null,
+      data.version ?? 1,
+      data.createdBy || null,
+      data.updatedBy || null,
+    ],
+  );
+  return findById(id);
+}
 
-    targetType: { type: String, enum: TARGET_TYPES, default: "none" },
-    targetProduct: { type: mongoose.Schema.Types.ObjectId, ref: "products", default: null },
-    targetCategory: { type: mongoose.Schema.Types.ObjectId, ref: "categories", default: null },
-    targetCollection: { type: String, enum: COLLECTION_VALUES, default: null },
-    targetShopFilter: { type: shopFilterSchema, default: null },
-    // Validated at the schema layer (schemas/promotionSchemas.js's
-    // internalPathSchema) AND again in services/promotionService.js's
-    // resolvePromotionTarget() — defense in depth, matching this app's
-    // existing pattern (see schemas/commonSchemas.js's own comments).
-    targetUrl: { type: String, trim: true, maxlength: 300, default: "" },
+async function savePromotion(p) {
+  await query(
+    `UPDATE promotions SET
+       name=?, type=?, placement=?, status=?, title=?, title_bn=?, subtitle=?, subtitle_bn=?, cta_label=?, cta_label_bn=?,
+       desktop_image=?, mobile_image=?, image_alt=?, image_alt_bn=?, target_type=?, target_product_id=?, target_category_id=?,
+       target_collection=?, target_shop_filter_category_id=?, target_shop_filter_collection=?, target_shop_filter_style_id=?,
+       target_url=?, start_at=?, end_at=?, priority=?, sort_order=?, audience=?, page_scope=?, popup_delay_ms=?, frequency=?,
+       cooldown_hours=?, version=?, updated_by=?
+     WHERE id=?`,
+    [
+      p.name,
+      p.type,
+      p.placement,
+      p.status,
+      p.title || "",
+      p.titleBn || "",
+      p.subtitle || "",
+      p.subtitleBn || "",
+      p.ctaLabel || "",
+      p.ctaLabelBn || "",
+      p.desktopImage,
+      p.mobileImage || "",
+      p.imageAlt || "",
+      p.imageAltBn || "",
+      p.targetType || "none",
+      p.targetProduct || null,
+      p.targetCategory || null,
+      p.targetCollection || null,
+      p.targetShopFilter?.category || null,
+      p.targetShopFilter?.collection || null,
+      p.targetShopFilter?.style || null,
+      p.targetUrl || "",
+      p.startAt || null,
+      p.endAt || null,
+      p.priority ?? 0,
+      p.sortOrder ?? 0,
+      p.audience || "all",
+      p.pageScope || "home",
+      p.popupDelayMs ?? 2000,
+      p.frequency || "once_per_session",
+      p.cooldownHours ?? null,
+      p.version ?? 1,
+      p.updatedBy || null,
+      p._id,
+    ],
+  );
+  return p;
+}
 
-    startAt: { type: Date, default: null },
-    endAt: { type: Date, default: null },
-    priority: { type: Number, default: 0, min: 0, max: 1000 },
-    sortOrder: { type: Number, default: 0, min: 0, max: 10000 },
+async function deleteById(id) {
+  const result = await query("DELETE FROM promotions WHERE id = ?", [id]);
+  return result.affectedRows > 0;
+}
 
-    audience: { type: String, enum: AUDIENCES, default: "all" },
-    pageScope: { type: String, enum: PAGE_SCOPES, default: "home" },
+async function updateSortOrder(id, type, sortOrder) {
+  await query("UPDATE promotions SET sort_order = ? WHERE id = ? AND type = ?", [sortOrder, id, type]);
+}
 
-    // Popup-only fields — harmless/unused on a carousel document.
-    popupDelayMs: { type: Number, default: 2000, min: 500, max: 10000 },
-    frequency: { type: String, enum: FREQUENCIES, default: "once_per_session" },
-    cooldownHours: { type: Number, default: null, min: 1, max: 24 * 90 },
+/** Public eligibility query: matching type/placement/status/pageScope, within schedule bounds. */
+async function findEligible({ type, placement, pageScope, now }) {
+  const pageScopes = pageScope === "home" ? ["home", "all"] : [pageScope, "all"];
+  const sortSql = type === "popup" ? "priority DESC, start_at DESC, id ASC" : "sort_order ASC, priority DESC, id ASC";
+  const rows = await query(
+    `SELECT * FROM promotions
+     WHERE type = ? AND placement = ? AND status = 'active' AND page_scope IN (${pageScopes.map(() => "?").join(",")})
+       AND (start_at IS NULL OR start_at <= ?)
+       AND (end_at IS NULL OR end_at > ?)
+     ORDER BY ${sortSql}`,
+    [type, placement, ...pageScopes, now, now],
+  );
+  return rows.map(rowToPromotion);
+}
 
-    // Bumped by services/promotionService.js whenever creative/targeting
-    // meaningfully changes, so a visitor who already dismissed the OLD
-    // version of a campaign sees the new one — see CampaignPopup.jsx's own
-    // comment on how the client compares this against its stored value.
-    version: { type: Number, default: 1, min: 1 },
+const Promotion = { findById, findAll, findIdsByType, create, deleteById, updateSortOrder, findEligible };
 
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
-    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
-  },
-  { timestamps: true },
-);
-
-// Public eligibility query shape (services/promotionService.js's
-// getEligiblePromotions()): { type, placement, status: "active", pageScope,
-// startAt/endAt bounds }, sorted by sortOrder/priority. This one compound
-// index covers the entire filter + both sort keys used there.
-promotionSchema.index({ type: 1, placement: 1, status: 1, pageScope: 1, sortOrder: 1, priority: -1 });
-// Admin list page's own filter-by-type/status view.
-promotionSchema.index({ type: 1, status: 1, createdAt: -1 });
-// Scheduling sweep — "what's currently active/scheduled/expired" for the
-// admin list's status labels, and the eligibility query's own startAt/endAt
-// bounds checks.
-promotionSchema.index({ startAt: 1, endAt: 1 });
-
-const Promotion = mongoose.models.promotions || mongoose.model("promotions", promotionSchema);
 export default Promotion;

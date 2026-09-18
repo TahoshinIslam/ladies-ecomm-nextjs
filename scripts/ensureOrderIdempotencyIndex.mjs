@@ -1,3 +1,15 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// This ensured a Mongoose index existed at runtime (for deployments
+// running with autoIndex disabled). MySQL/MariaDB indexes are declared as
+// static DDL in sql/schema.sql and created once at import time — there is
+// no runtime "ensure index" step for MySQL.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Phase 4/4B — explicit, idempotent production index-deployment step.
 //
 // config/db.js does not set `autoIndex: false`, so Mongoose's default

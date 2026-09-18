@@ -87,12 +87,22 @@ export default async function ShopPage({ searchParams }) {
   // experience is correct there; forcing an extra tile-click first would
   // only have made real, working navigation (color/size/fabric filters,
   // real product counts) worse.
+  //
+  // Matched by slug alone, NOT "is this a root category" — these 9 now sit
+  // one level under the Men/Women gender divisions (parent set), exactly
+  // like a marketplace division's own mid-tier departments (e.g. Food's
+  // "Fruits & Vegetables"). The distinction that actually matters was
+  // never depth, it was "is every child of this category still the same
+  // filterable product type" — that's still true of Burqa regardless of
+  // what now sits above it, so the exemption must survive the added
+  // nesting. Visiting the Men/Women division itself (not in this
+  // allowlist) still correctly falls through to the isLeaf check below and
+  // lands on CategoryLanding, same as Food's own division page.
   const categoryParam = typeof rawSearchParams?.category === "string" ? rawSearchParams.category : null;
   const hasStyleParam = typeof rawSearchParams?.style === "string" && rawSearchParams.style !== "";
   if (categoryParam && isObjectIdFormat(categoryParam) && !hasStyleParam) {
     const requestedCategory = categories.find((c) => String(c._id) === categoryParam);
-    const isFashionDept =
-      requestedCategory && !requestedCategory.parent && FASHION_DEPARTMENT_SLUGS.includes(requestedCategory.slug);
+    const isFashionDept = requestedCategory && FASHION_DEPARTMENT_SLUGS.includes(requestedCategory.slug);
     if (!isFashionDept) {
       const isLeaf = await isLeafCategory(categoryParam);
       if (!isLeaf) {

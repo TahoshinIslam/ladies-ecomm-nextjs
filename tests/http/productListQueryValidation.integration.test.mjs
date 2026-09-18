@@ -40,7 +40,7 @@ const skip = !serverUp
     : false;
 
 describe("Phase 5D — GET /api/products hybrid query contract (real MongoDB, via HTTP)", { skip }, () => {
-  let AttributeDefinition, Product, Category;
+  let AttributeDefinition, Category;
 
   const fetchJson = async (qs) => {
     const res = await fetch(`${BASE_URL}/api/products?${qs}`);
@@ -49,11 +49,10 @@ describe("Phase 5D — GET /api/products hybrid query contract (real MongoDB, vi
 
   before(async () => {
     ({ default: AttributeDefinition } = await import("../../models/attributeDefinitionModel.js"));
-    ({ default: Product } = await import("../../models/productModel.js"));
     ({ default: Category } = await import("../../models/categoryModel.js"));
-    const occasion = await AttributeDefinition.findOne({ key: "occasion" }).lean();
+    const [occasion] = await AttributeDefinition.findByKeys(["occasion"]);
     assert.ok(occasion, "seed data must include the 'occasion' attribute definition");
-    const careInstructions = await AttributeDefinition.findOne({ key: "careInstructions" }).lean();
+    const [careInstructions] = await AttributeDefinition.findByKeys(["careInstructions"]);
     assert.ok(careInstructions && careInstructions.filterable === false, "seed data must include a non-filterable 'careInstructions' attribute");
   });
 
@@ -180,7 +179,7 @@ describe("Phase 5D — GET /api/products hybrid query contract (real MongoDB, vi
   });
 
   test("14c. too many distinct dynamic facets in one request is rejected (400)", async () => {
-    const defs = await AttributeDefinition.find().lean();
+    const defs = await AttributeDefinition.findAll();
     const keys = defs.map((d) => d.key);
     // Pad with enough distinct (even nonexistent, still key-shape-valid)
     // facet names to exceed MAX_DYNAMIC_FACETS — the facet-count bound is
@@ -241,7 +240,7 @@ describe("Phase 5D — GET /api/products hybrid query contract (real MongoDB, vi
 
   // 22. administrator filter compatibility
   test("22. admin-shaped query (topCategory + isActive + sort) succeeds (200)", async () => {
-    const burqa = await Category.findOne({ slug: "burqa" }).lean();
+    const burqa = await Category.findBySlug("burqa");
     assert.ok(burqa, "seed data must include the Burqa department");
     const { status, json } = await fetchJson(`topCategory=${burqa._id}&isActive=true&sort=-createdAt&limit=20`);
     assert.equal(status, 200);

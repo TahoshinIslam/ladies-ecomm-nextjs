@@ -51,7 +51,7 @@ export async function register({ name, email, password }, presentedSessionToken,
 }
 
 export async function login({ email, password }, presentedSessionToken, meta) {
-  const user = await User.findOne({ email }).select("+password +loginAttempts +lockUntil");
+  const user = await User.findOne({ email });
 
   if (!user) {
     await bcrypt.compare(password || "", DUMMY_HASH);

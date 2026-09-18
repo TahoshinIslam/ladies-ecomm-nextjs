@@ -1,138 +1,253 @@
-import mongoose from "mongoose";
+import { query, withConnection } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
+import User from "./userModel.js";
 
-// Snapshot at order-creation time — mirrors the cart item shape from
-// Phase 5A (models/cartModel.js), so an order line stays correct even if
-// the product/variant changes later. `variantId` (not a bare size string)
-// is what makes this line uniquely identifiable, same reasoning as cart.
-const orderItemSchema = new mongoose.Schema(
-  {
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "products",
-      required: [true, "Product is required"],
-    },
-    // Not a `ref` — variants are subdocuments inside Product.variants, not
-    // a top-level collection.
-    variantId: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: [true, "Variant is required"],
-    },
-    quantity: {
-      type: Number,
-      required: [true, "Quantity is required"],
-      min: [1, "Quantity must be at least 1"],
-    },
+function rowToItem(row) {
+  return {
+    product: row.product_id,
+    variantId: row.variant_id,
+    quantity: row.quantity,
     snapshot: {
-      name: { type: String, required: [true, "Product name is required"] },
-      sku: { type: String, default: "" },
-      // Arbitrary key/value bag mirroring the variant's own `attributes`
-      // (color/size/fabric for clothing, shade/volumeMl for cosmetics, ...)
-      // — see models/productModel.js's variantSchema.
-      attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
-      price: { type: Number, required: [true, "Price is required"] },
-      image: { type: String, default: "" },
+      name: row.snapshot_name,
+      sku: row.snapshot_sku,
+      attributes: typeof row.snapshot_attributes === "string" ? JSON.parse(row.snapshot_attributes) : row.snapshot_attributes || {},
+      price: Number(row.snapshot_price),
+      image: row.snapshot_image,
     },
-  },
-  { _id: false },
-);
+  };
+}
 
-const orderSchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: [true, "User is required"],
-    },
-    items: {
-      type: [orderItemSchema],
-      required: [true, "Order must have items"],
-      validate: [(arr) => arr.length > 0, "Order must have at least one item"],
-    },
+async function loadItems(orderIds) {
+  if (!orderIds.length) return new Map();
+  const rows = await query(
+    `SELECT * FROM order_items WHERE order_id IN (${orderIds.map(() => "?").join(",")}) ORDER BY position ASC`,
+    orderIds,
+  );
+  const map = new Map();
+  for (const r of rows) {
+    const list = map.get(r.order_id) || [];
+    list.push(rowToItem(r));
+    map.set(r.order_id, list);
+  }
+  return map;
+}
+
+function rowToOrder(row, items, user) {
+  if (!row) return null;
+  const order = {
+    _id: row.id,
+    user: user ?? row.user_id,
+    items: items || [],
     shippingAddress: {
-      fullName: { type: String, required: true },
-      phone: { type: String, required: true },
-      street: { type: String, required: true },
-      city: { type: String, required: true },
-      state: { type: String, default: "" },
-      postalCode: { type: String, required: true },
-      country: { type: String, required: true },
+      fullName: row.shipping_full_name,
+      phone: row.shipping_phone,
+      street: row.shipping_street,
+      city: row.shipping_city,
+      state: row.shipping_state,
+      postalCode: row.shipping_postal_code,
+      country: row.shipping_country,
     },
-    coupon: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "coupons",
-      default: null,
-    },
+    coupon: row.coupon_id,
+    subtotal: Number(row.subtotal),
+    tax: Number(row.tax),
+    taxLabel: row.tax_label,
+    shippingCost: Number(row.shipping_cost),
+    shippingTier: row.shipping_tier,
+    discount: Number(row.discount),
+    total: Number(row.total),
+    region: row.region,
+    currency: row.currency,
+    status: row.status,
+    paymentMethod: row.payment_method,
+    trackingNumber: row.tracking_number,
+    deliveredAt: row.delivered_at,
+    notes: row.notes,
+    idempotencyKeyHash: row.idempotency_key_hash,
+    idempotencyRequestHash: row.idempotency_request_hash,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  order.save = async function save() {
+    return saveOrder(this);
+  };
+  return order;
+}
 
-    // --- Pricing breakdown (all in `currency` below) ---
-    subtotal: { type: Number, required: true },
-    tax: { type: Number, default: 0 },
-    taxLabel: { type: String, default: "" }, // "VAT 15%" — for receipts
-    shippingCost: { type: Number, default: 0 },
-    shippingTier: { type: String, default: "" }, // "Inside Dhaka"
-    discount: { type: Number, default: 0 },
-    total: { type: Number, required: true },
+async function hydrateOne(row, { populateUser = false } = {}) {
+  if (!row) return null;
+  const items = (await loadItems([row.id])).get(row.id) || [];
+  const user = populateUser ? await User.findById(row.user_id) : undefined;
+  const userSummary = populateUser && user ? { _id: user._id, name: user.name, email: user.email } : undefined;
+  return rowToOrder(row, items, userSummary);
+}
 
-    // --- Region + currency snapshot ---
-    region: { type: String, default: "BD", enum: ["BD", "INTL"] },
-    currency: { type: String, default: "BDT", enum: ["BDT", "USD"] },
+async function findById(id, opts) {
+  if (!id) return null;
+  const rows = await query("SELECT * FROM orders WHERE id = ?", [id]);
+  return hydrateOne(rows[0], opts);
+}
 
-    // --- Status ---
-    status: {
-      type: String,
-      enum: [
-        "pending",
-        "paid",
-        "processing",
-        "shipped",
-        "delivered",
-        "cancelled",
-        "refunded",
+/** Locks the order row for the rest of the caller's transaction (SELECT ... FOR UPDATE) and returns it fully hydrated — used by cancelOrder() so the read-modify-write is race-free against a concurrent cancel/status-update on the same order. */
+async function findByIdForUpdate(conn, id) {
+  const [rows] = await conn.query("SELECT * FROM orders WHERE id = ? FOR UPDATE", [id]);
+  if (!rows.length) return null;
+  const [itemRows] = await conn.query("SELECT * FROM order_items WHERE order_id = ? ORDER BY position ASC", [id]);
+  return rowToOrder(rows[0], itemRows.map(rowToItem));
+}
+
+async function findByIdempotencyKey(userId, keyHash) {
+  const rows = await query("SELECT * FROM orders WHERE user_id = ? AND idempotency_key_hash = ?", [userId, keyHash]);
+  return hydrateOne(rows[0]);
+}
+
+async function findMyOrders(userId) {
+  const rows = await query("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", [userId]);
+  const itemsByOrder = await loadItems(rows.map((r) => r.id));
+  return rows.map((r) => rowToOrder(r, itemsByOrder.get(r.id) || []));
+}
+
+const ADMIN_SORT_COLUMNS = { createdAt: "created_at", total: "total", status: "status" };
+
+async function findAdminList({ status, search, sortBy, sortOrder, skip, limit }) {
+  const clauses = [];
+  const params = [];
+  if (status) {
+    clauses.push("o.status = ?");
+    params.push(status);
+  }
+  if (search && String(search).trim()) {
+    const term = String(search).trim();
+    clauses.push("(o.id LIKE ? OR u.name LIKE ? OR u.email LIKE ?)");
+    params.push(`%${term}%`, `%${term}%`, `%${term}%`);
+  }
+  const where = clauses.length ? clauses.join(" AND ") : "1=1";
+  const sortCol = `o.${ADMIN_SORT_COLUMNS[sortBy] || "created_at"}`;
+  const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
+
+  const rows = await query(
+    `SELECT o.*, u.name AS user_name, u.email AS user_email
+     FROM orders o LEFT JOIN users u ON u.id = o.user_id
+     WHERE ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
+    [...params, Number(limit), Number(skip)],
+  );
+  const totalRows = await query(
+    `SELECT COUNT(*) AS n FROM orders o LEFT JOIN users u ON u.id = o.user_id WHERE ${where}`,
+    params,
+  );
+  const itemsByOrder = await loadItems(rows.map((r) => r.id));
+  const orders = rows.map((r) =>
+    rowToOrder(r, itemsByOrder.get(r.id) || [], { _id: r.user_id, name: r.user_name, email: r.user_email }),
+  );
+  return { orders, total: totalRows[0].n };
+}
+
+async function create(data, conn) {
+  const id = generateObjectId();
+  await conn.query(
+    `INSERT INTO orders
+       (id, user_id, coupon_id, shipping_full_name, shipping_phone, shipping_street, shipping_city,
+        shipping_state, shipping_postal_code, shipping_country, subtotal, tax, tax_label, shipping_cost,
+        shipping_tier, discount, total, region, currency, status, notes, idempotency_key_hash, idempotency_request_hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      data.user,
+      data.coupon || null,
+      data.shippingAddress.fullName,
+      data.shippingAddress.phone,
+      data.shippingAddress.street,
+      data.shippingAddress.city,
+      data.shippingAddress.state || "",
+      data.shippingAddress.postalCode,
+      data.shippingAddress.country,
+      data.subtotal,
+      data.tax || 0,
+      data.taxLabel || "",
+      data.shippingCost || 0,
+      data.shippingTier || "",
+      data.discount || 0,
+      data.total,
+      data.region || "BD",
+      data.currency || "BDT",
+      data.status || "pending",
+      data.notes || "",
+      data.idempotencyKeyHash,
+      data.idempotencyRequestHash,
+    ],
+  );
+  for (let i = 0; i < data.items.length; i++) {
+    const it = data.items[i];
+    await conn.query(
+      `INSERT INTO order_items (order_id, product_id, variant_id, quantity, snapshot_name, snapshot_sku, snapshot_attributes, snapshot_price, snapshot_image, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        it.product,
+        it.variantId,
+        it.quantity,
+        it.snapshot.name,
+        it.snapshot.sku || "",
+        JSON.stringify(it.snapshot.attributes || {}),
+        it.snapshot.price,
+        it.snapshot.image || "",
+        i,
       ],
-      default: "pending",
-    },
-    paymentMethod: { type: String, default: "" },
-    trackingNumber: { type: String, default: "" },
-    deliveredAt: { type: Date },
-    notes: { type: String, default: "" },
+    );
+  }
+  const [rows] = await conn.query("SELECT * FROM orders WHERE id = ?", [id]);
+  const items = data.items.map((it) => ({ product: it.product, variantId: it.variantId, quantity: it.quantity, snapshot: it.snapshot }));
+  return rowToOrder(rows[0], items);
+}
 
-    // --- Phase 4: order-request idempotency (internal only) ---
-    // SHA-256 of the client's Idempotency-Key header, scoped per-user by
-    // the unique index below. Never the raw key. select:false so it's
-    // never accidentally serialized into an API response; absent entirely
-    // on orders created before this field existed (no backfill needed —
-    // see the partial index below).
-    idempotencyKeyHash: { type: String, select: false },
-    // SHA-256 of the normalized, business-relevant request body (see
-    // lib/idempotency.js's fingerprintOrderRequest). Used to detect the
-    // same key being reused with a materially different request.
-    idempotencyRequestHash: { type: String, select: false },
-  },
-  { timestamps: true },
-);
+async function saveOrder(order) {
+  await withConnection(async (conn) => {
+    await conn.query(
+      `UPDATE orders SET status=?, payment_method=?, tracking_number=?, delivered_at=?, notes=? WHERE id=?`,
+      [order.status, order.paymentMethod || "", order.trackingNumber || "", order.deliveredAt ?? null, order.notes || "", order._id],
+    );
+  });
+  return order;
+}
 
-// Index for the most common admin query
-orderSchema.index({ status: 1, createdAt: -1 });
-orderSchema.index({ user: 1, createdAt: -1 });
-// Performance audit Closure Pass 2 — explain("executionStats") evidence
-// (scripts/perfSeedAndExplain.mjs, 150 synthetic orders) showed the
-// unfiltered admin orders list (services/orderService.js's getAllOrders()
-// with no status filter — the default "All statuses" view) examining
-// every document and sorting in memory (no usable index for a plain
-// {createdAt: -1} scan): 166 examined for 20 returned, in-memory SORT
-// stage present. This index serves that exact shape directly.
-orderSchema.index({ createdAt: -1 });
+/** Same update, but runs on the caller's own transaction connection (order cancellation, coupon/stock rollback all need to commit or roll back together). */
+async function saveOrderOnConnection(conn, order) {
+  await conn.query(
+    `UPDATE orders SET status=?, payment_method=?, tracking_number=?, delivered_at=?, notes=? WHERE id=?`,
+    [order.status, order.paymentMethod || "", order.trackingNumber || "", order.deliveredAt ?? null, order.notes || "", order._id],
+  );
+  return order;
+}
 
-// The database-level idempotency guarantee: at most one order per
-// (user, idempotencyKeyHash) pair. `partialFilterExpression` scopes the
-// uniqueness to documents that actually have the field, so pre-Phase-4
-// orders (which never set it at all) never collide with each other or with
-// new orders — no migration/backfill of historical orders is required.
-orderSchema.index(
-  { user: 1, idempotencyKeyHash: 1 },
-  { unique: true, partialFilterExpression: { idempotencyKeyHash: { $exists: true } } },
-);
+/** Every product a user has in a delivered order — reviewService.js's eligibility check/list. */
+async function findDeliveredProductIdsByUser(userId) {
+  const rows = await query(
+    `SELECT DISTINCT oi.product_id FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE o.user_id = ? AND o.status = 'delivered'`,
+    [userId],
+  );
+  return rows.map((r) => r.product_id);
+}
 
-// Guards against Next.js dev's hot-reload re-executing this module and
-// trying to re-register an already-compiled model.
-const Order = mongoose.models.orders || mongoose.model("orders", orderSchema);
+async function existsDeliveredWithProduct(userId, productId) {
+  const rows = await query(
+    `SELECT 1 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+     WHERE o.user_id = ? AND o.status = 'delivered' AND oi.product_id = ? LIMIT 1`,
+    [userId, productId],
+  );
+  return rows.length > 0;
+}
+
+const Order = {
+  findById,
+  findByIdForUpdate,
+  findDeliveredProductIdsByUser,
+  existsDeliveredWithProduct,
+  findByIdempotencyKey,
+  findMyOrders,
+  findAdminList,
+  create,
+  saveOrderOnConnection,
+};
+
 export default Order;

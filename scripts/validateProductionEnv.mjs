@@ -81,39 +81,27 @@ function isHttpsUrl(value) {
   }
 }
 
-function isMongoUri(value) {
-  return /^mongodb(\+srv)?:\/\//.test(value || "");
-}
-
-// A bare heuristic for "this URI can reach a transaction-capable
-// topology" — a real check would require connecting (explicitly out of
-// scope here, see the file header). mongodb+srv:// (Atlas) always
-// resolves to a replica set; a plain mongodb:// URI must explicitly name
-// `replicaSet=` to be transaction-capable, since a lone standalone mongod
-// cannot run multi-document transactions at all — this mirrors
-// scripts/ensureReplicaSetReadiness.mjs's own live check, just as a
-// static shape signal rather than a real handshake.
-function looksTransactionCapable(uri) {
-  if (/^mongodb\+srv:\/\//.test(uri)) return true;
-  return /[?&]replicaSet=/.test(uri);
-}
-
 // Every variable this app's runtime code actually reads in a way that
 // matters for production correctness/security. Each entry's `check`
 // receives the raw string value (already confirmed non-empty) and must
 // return true (valid) or a string (the specific reason it's invalid).
 const RULES = [
   {
-    name: "MONGO_URI",
-    check: (v) => {
-      if (!isMongoUri(v)) return "must be a mongodb:// or mongodb+srv:// URI";
-      if (looksLikePlaceholder(v)) return "looks like a localhost/placeholder URI, not a real production database";
-      if (!looksTransactionCapable(v)) {
-        return "does not look transaction-capable — a plain mongodb:// URI must include replicaSet=, or use mongodb+srv:// (Atlas); this app relies on multi-document transactions (order/payment creation, stock decrement, coupon claims) that a standalone mongod cannot run";
-      }
-      return true;
-    },
+    name: "DB_HOST",
+    check: (v) => (looksLikePlaceholder(v) ? "looks like a localhost/placeholder host, not a real production database host" : true),
   },
+  { name: "DB_PORT", check: (v) => (/^\d+$/.test(v) ? true : "must be numeric") },
+  {
+    name: "DB_NAME",
+    check: (v) => (/^[A-Za-z0-9_]+$/.test(v) ? true : "must contain only letters, digits, and underscores"),
+  },
+  { name: "DB_USER", check: (v) => (looksLikePlaceholder(v) ? "looks like a placeholder value" : true) },
+  // DB_PASSWORD is deliberately NOT in this list — it's legitimately empty
+  // for a local XAMPP default `root` account, and this script only runs
+  // against a real production deployment's own env, not local dev, so an
+  // operator who genuinely runs production MySQL with no password would
+  // still be validated by every other rule here; this script isn't the
+  // place to force a security opinion that specific.
   {
     name: "APP_ORIGIN",
     check: (v) => {
@@ -148,8 +136,8 @@ const RULES = [
 // Cross-variable checks that need more than one value at once.
 function crossChecks(env) {
   const problems = [];
-  if (env.MONGO_URI && env.MONGO_URI_TEST && env.MONGO_URI === env.MONGO_URI_TEST) {
-    problems.push("MONGO_URI and MONGO_URI_TEST must never be equal — a production deployment must never point at the same database as the automated test suite (which wipes/reseeds its database on every run)");
+  if (env.DB_NAME && /(_test|_ci)$/i.test(env.DB_NAME)) {
+    problems.push('DB_NAME ends in "_test"/"_ci" — a production deployment must never point at the database the automated test suite resets on every run (see scripts/assertTestDbSafety.mjs)');
   }
   if (env.APP_ORIGIN && env.CLIENT_URL && env.APP_ORIGIN !== env.CLIENT_URL) {
     problems.push("APP_ORIGIN and CLIENT_URL should be the exact same origin in production — CSRF Origin validation (APP_ORIGIN) and app-generated absolute links (CLIENT_URL) must agree, or a legitimate request could be rejected while links point elsewhere");

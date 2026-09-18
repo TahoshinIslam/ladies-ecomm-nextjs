@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { X } from "lucide-react";
 
 import Modal from "../ui/Modal.jsx";
 import Button from "../ui/Button.jsx";
@@ -107,26 +108,50 @@ export default function CampaignPopup() {
   const alt = (locale === "bn" ? promotion.imageAltBn : promotion.imageAlt) || title;
   const image = promotion.mobileImage || promotion.desktopImage;
 
+  // Large, edge-to-edge creative with a floating close control overlaid on
+  // the image itself (no separate title header bar eating into it) — this
+  // is deliberately a much bigger, image-first presentation than a typical
+  // form/confirmation modal, matching how a real campaign popup needs to
+  // read as an actual promotional banner, not a small dialog box.
   return (
-    <Modal open={open} onClose={close} size="sm" title={title || undefined}>
-      <div className="p-5">
+    <Modal open={open} onClose={close} size="xl" hideHeader className="rounded-3xl">
+      <div className="relative">
+        <button
+          onClick={close}
+          aria-label="Close"
+          className="absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-ink/60 text-white backdrop-blur-sm transition-colors hover:bg-ink/80 focus-ring"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        {/* A width-based aspect ratio (the previous `aspect-[16/9] w-full`)
+            made the image taller than the viewport on short/laptop screens
+            — image height + the text block below then exceeded the panel's
+            own `max-h-[90vh]`, forcing Modal's `overflow-y-auto` to show a
+            scrollbar. A viewport-height-based, capped height instead keeps
+            the image (and therefore the whole popup) reliably short enough
+            to fit on one screen with no scrolling, at any panel width. */}
         {image &&
           (promotion.clickable ? (
-            <Link href={promotion.href} onClick={close} className="relative mb-4 block aspect-[4/3] w-full overflow-hidden rounded-lg focus-ring">
-              <Image src={resolveImage(image, 600)} alt={alt} fill sizes="(max-width: 640px) 90vw, 400px" className="object-cover" />
+            <Link href={promotion.href} onClick={close} className="relative block h-[32vh] max-h-[340px] min-h-[180px] w-full overflow-hidden focus-ring">
+              <Image src={resolveImage(image, 1200)} alt={alt} fill sizes="(max-width: 768px) 100vw, 900px" className="object-cover" priority />
             </Link>
           ) : (
-            <div className="relative mb-4 aspect-[4/3] w-full overflow-hidden rounded-lg">
-              <Image src={resolveImage(image, 600)} alt={alt} fill sizes="(max-width: 640px) 90vw, 400px" className="object-cover" />
+            <div className="relative h-[32vh] max-h-[340px] min-h-[180px] w-full overflow-hidden">
+              <Image src={resolveImage(image, 1200)} alt={alt} fill sizes="(max-width: 768px) 100vw, 900px" className="object-cover" priority />
             </div>
           ))}
-        {subtitle && <p className="mb-4 text-sm text-stone">{subtitle}</p>}
-        {promotion.clickable && (
-          <Link href={promotion.href} onClick={close}>
-            <Button variant="accent" className="w-full">
-              {ctaLabel}
-            </Button>
-          </Link>
+        {(title || subtitle || promotion.clickable) && (
+          <div className="p-5 text-center sm:p-6">
+            {title && <h3 className="text-xl font-bold tracking-[-0.02em] sm:text-2xl">{title}</h3>}
+            {subtitle && <p className="mt-1.5 text-sm text-stone sm:text-base">{subtitle}</p>}
+            {promotion.clickable && (
+              <Link href={promotion.href} onClick={close} className="mt-4 block">
+                <Button variant="accent" className="w-full sm:w-auto sm:px-10">
+                  {ctaLabel}
+                </Button>
+              </Link>
+            )}
+          </div>
         )}
       </div>
     </Modal>

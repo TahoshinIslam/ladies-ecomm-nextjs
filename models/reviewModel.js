@@ -1,112 +1,195 @@
-import mongoose from "mongoose";
+import { query } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
+import User from "./userModel.js";
+import Product from "./productModel.js";
 
-const reviewSchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: [true, "User is required"],
-    },
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "products",
-      required: [true, "Product is required"],
-    },
-    rating: {
-      type: Number,
-      required: [true, "Rating is required"],
-      min: [1, "Rating must be at least 1"],
-      max: [5, "Rating cannot exceed 5"],
-    },
-    title: {
-      type: String,
-      trim: true,
-      maxlength: [100, "Title cannot exceed 100 characters"],
-    },
-    comment: {
-      type: String,
-      required: [true, "Review comment is required"],
-      trim: true,
-    },
-    isVerifiedPurchase: {
-      type: Boolean,
-      default: false,
-    },
-    images: {
-      type: [String],
-      default: [],
-      validate: [(arr) => arr.length <= 5, "Max 5 images per review"],
-    },
-    helpfulCount: {
-      type: Number,
-      default: 0,
-    },
+function rowToReview(row, user, repliedBy) {
+  if (!row) return null;
+  const review = {
+    _id: row.id,
+    user: user ?? row.user_id,
+    product: row.product_id,
+    rating: row.rating,
+    // "" and "not provided" are indistinguishable in the DB (title is
+    // NOT NULL DEFAULT '', and the create()/schema layer reject an explicit
+    // empty string — see schemas/reviewSchemas.js), so an empty value here
+    // always means omitted; surface it as undefined to match the old
+    // Mongoose-level optional-field representation the frontend expects.
+    title: row.title || undefined,
+    comment: row.comment,
+    isVerifiedPurchase: !!row.is_verified_purchase,
+    images: typeof row.images === "string" ? JSON.parse(row.images) : row.images || [],
+    helpfulCount: row.helpful_count,
     adminReply: {
-      text: { type: String, trim: true, default: "" },
-      repliedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
-      repliedAt: { type: Date },
+      text: row.admin_reply_text || "",
+      repliedBy: repliedBy ?? row.admin_reply_by,
+      repliedAt: row.admin_reply_at,
     },
-  },
-  { timestamps: true },
-);
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  review.save = async function save() {
+    return saveReview(this);
+  };
+  review.deleteOne = async function deleteOne() {
+    await query("DELETE FROM reviews WHERE id = ?", [this._id]);
+  };
+  return review;
+}
 
-// One review per user per product
-reviewSchema.index({ user: 1, product: 1 }, { unique: true });
+async function populateOne(row, { populateUser = false, populateReplier = false } = {}) {
+  const user = populateUser ? await userSummary(row.user_id) : undefined;
+  const repliedBy = populateReplier && row.admin_reply_by ? await userSummary(row.admin_reply_by) : undefined;
+  return rowToReview(row, user, repliedBy);
+}
 
-// services/reviewService.js's getProductReviews() — the PDP reviews tab,
-// read on every product page view — filters {product} and sorts
-// -createdAt. The unique index above has `product` as its SECOND key, so
-// it can't serve as a prefix for a product-only filter; without this,
-// that query collection-scans and sorts in memory as the reviews
-// collection grows.
-reviewSchema.index({ product: 1, createdAt: -1 });
+async function userSummary(id, fields = ["name", "avatar"]) {
+  const u = await User.findById(id);
+  if (!u) return null;
+  const out = { _id: u._id };
+  for (const f of fields) out[f] = u[f];
+  return out;
+}
 
-// Performance audit Closure Pass 2 — explain("executionStats") evidence
-// (scripts/perfSeedAndExplain.mjs, ~400 synthetic reviews) showed the
-// unfiltered admin reviews list (services/reviewService.js's
-// listAllReviews() with no rating/product filter — the default view)
-// examining every document and sorting in memory: 409 examined for 20
-// returned, in-memory SORT stage present. This index serves that exact
-// shape directly.
-reviewSchema.index({ createdAt: -1 });
+/** Recalculates and persists a product's aggregate rating/numReviews — the SQL port of the old post("save")/post("deleteOne") hooks. */
+async function recalcProductRating(productId) {
+  const rows = await query("SELECT AVG(rating) AS avg_rating, COUNT(*) AS n FROM reviews WHERE product_id = ?", [productId]);
+  const avgRating = rows[0].n > 0 ? Math.round(Number(rows[0].avg_rating) * 10) / 10 : 0;
+  await query("UPDATE products SET rating = ?, num_reviews = ? WHERE id = ?", [avgRating, rows[0].n, productId]);
+}
 
-// Update product's average rating after save
-reviewSchema.statics.calcAverageRating = async function (productId) {
-  const stats = await this.aggregate([
-    { $match: { product: productId } },
-    {
-      $group: {
-        _id: "$product",
-        avgRating: { $avg: "$rating" },
-        numReviews: { $sum: 1 },
-      },
-    },
-  ]);
+async function findById(id) {
+  if (!id) return null;
+  const rows = await query("SELECT * FROM reviews WHERE id = ?", [id]);
+  return populateOne(rows[0]);
+}
 
-  if (stats.length > 0) {
-    await mongoose.model("products").findByIdAndUpdate(productId, {
-      rating: Math.round(stats[0].avgRating * 10) / 10,
-      numReviews: stats[0].numReviews,
-    });
-  } else {
-    await mongoose.model("products").findByIdAndUpdate(productId, {
-      rating: 0,
-      numReviews: 0,
-    });
+async function findByProduct(productId, { skip = 0, limit = 10 } = {}) {
+  const rows = await query(
+    "SELECT * FROM reviews WHERE product_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    [productId, Number(limit), Number(skip)],
+  );
+  return Promise.all(rows.map((r) => populateOne(r, { populateUser: true, populateReplier: true })));
+}
+
+async function countByProduct(productId) {
+  const rows = await query("SELECT COUNT(*) AS n FROM reviews WHERE product_id = ?", [productId]);
+  return rows[0].n;
+}
+
+async function ratingBreakdown(productId) {
+  const rows = await query("SELECT rating, COUNT(*) AS count FROM reviews WHERE product_id = ? GROUP BY rating", [productId]);
+  const breakdown = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  for (const r of rows) {
+    if (r.rating >= 1 && r.rating <= 5) breakdown[r.rating] = r.count;
   }
+  return breakdown;
+}
+
+async function findByUserAndProducts(userId, productIds) {
+  if (!productIds.length) return [];
+  const rows = await query(
+    `SELECT * FROM reviews WHERE user_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})`,
+    [userId, ...productIds],
+  );
+  return Promise.all(rows.map((r) => populateOne(r, { populateUser: true, populateReplier: true })));
+}
+
+async function create({ user, product, rating, title, comment, images, isVerifiedPurchase }) {
+  const id = generateObjectId();
+  try {
+    await query(
+      "INSERT INTO reviews (id, user_id, product_id, rating, title, comment, images, is_verified_purchase, admin_reply_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, user, product, rating, title || "", comment, JSON.stringify(images || []), isVerifiedPurchase ? 1 : 0, ""],
+    );
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY") {
+      const dupErr = new Error("duplicate review");
+      dupErr.code = 11000;
+      throw dupErr;
+    }
+    throw err;
+  }
+  await recalcProductRating(product);
+  return findById(id);
+}
+
+async function saveReview(review) {
+  await query(
+    "UPDATE reviews SET rating=?, title=?, comment=?, images=?, admin_reply_text=?, admin_reply_by=?, admin_reply_at=? WHERE id=?",
+    [
+      review.rating,
+      review.title || "",
+      review.comment,
+      JSON.stringify(review.images || []),
+      review.adminReply?.text || "",
+      review.adminReply?.repliedBy ?? null,
+      review.adminReply?.repliedAt ?? null,
+      review._id,
+    ],
+  );
+  return review;
+}
+
+async function incrementHelpful(id) {
+  const result = await query("UPDATE reviews SET helpful_count = helpful_count + 1 WHERE id = ?", [id]);
+  if (result.affectedRows === 0) return null;
+  return findById(id);
+}
+
+const REVIEW_SORT_COLUMNS = { createdAt: "created_at", rating: "rating", helpfulCount: "helpful_count" };
+
+async function findAdminList({ rating, productId, search, sortBy, sortOrder, skip, limit }) {
+  const clauses = [];
+  const params = [];
+  if (rating) {
+    clauses.push("rating = ?");
+    params.push(Number(rating));
+  }
+  if (productId) {
+    clauses.push("product_id = ?");
+    params.push(productId);
+  }
+  if (search) {
+    clauses.push("(comment LIKE ? OR title LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  const where = clauses.length ? clauses.join(" AND ") : "1=1";
+  const sortCol = REVIEW_SORT_COLUMNS[sortBy] || "created_at";
+  const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
+
+  const rows = await query(`SELECT * FROM reviews WHERE ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`, [
+    ...params,
+    Number(limit),
+    Number(skip),
+  ]);
+  const totalRows = await query(`SELECT COUNT(*) AS n FROM reviews WHERE ${where}`, params);
+
+  const productIds = [...new Set(rows.map((r) => r.product_id))];
+  const products = productIds.length ? await Product.findByIds(productIds) : [];
+  const productById = new Map(products.map((p) => [p._id, { _id: p._id, name: p.name, images: p.images, slug: p.slug }]));
+
+  const reviews = await Promise.all(
+    rows.map(async (r) => {
+      const review = await populateOne(r, { populateUser: true, populateReplier: true });
+      review.user = await userSummary(r.user_id, ["name", "email", "avatar"]);
+      review.product = productById.get(r.product_id) || r.product_id;
+      return review;
+    }),
+  );
+
+  return { reviews, total: totalRows[0].n };
+}
+
+const Review = {
+  findById,
+  findByProduct,
+  countByProduct,
+  ratingBreakdown,
+  findByUserAndProducts,
+  create,
+  incrementHelpful,
+  findAdminList,
 };
 
-reviewSchema.post("save", function () {
-  this.constructor.calcAverageRating(this.product);
-});
-
-reviewSchema.post("deleteOne", { document: true }, function () {
-  this.constructor.calcAverageRating(this.product);
-});
-
-// Guards against Next.js dev's hot-reload (and, as of Phase 7, the build's
-// own parallel static-generation workers re-evaluating this module) trying
-// to re-register an already-compiled model — same guard every other model
-// in this codebase already has.
-const reviewModel = mongoose.models.reviews || mongoose.model("reviews", reviewSchema);
-export default reviewModel;
+export default Review;

@@ -1,20 +1,27 @@
 // Performance audit Closure Pass 2 — creates (or resets) one synthetic
 // admin account in the DISPOSABLE LOCAL TEST DATABASE ONLY, for manual
 // browser-based verification (DataTable render profiling, admin
-// walkthroughs). Same MONGO_URI_TEST-only safety guard as
-// scripts/perfSeedAndExplain.mjs. Uses the real User model so the
-// password hash goes through the normal pre('save') hook — never a raw
-// insert.
+// walkthroughs). Same DB_NAME-must-look-like-a-test-database safety guard
+// (lib/testDbSafety.js) as scripts/httpTestServer.mjs. Uses the real User
+// model so the password hash goes through the normal save() hashing path
+// (models/userModel.js) — never a raw insert.
 //
 // Usage: node --env-file=.env.test scripts/seedTestAdmin.mjs
-import mongoose from "mongoose";
+import { checkTestDbConfig } from "../lib/testDbSafety.js";
 
-const uri = process.env.MONGO_URI_TEST;
-if (!uri) throw new Error("MONGO_URI_TEST is not set — refusing to run against anything else.");
-if (!/test/i.test(uri)) throw new Error("MONGO_URI_TEST does not look like a test database — refusing to run.");
+const dbCheck = checkTestDbConfig({
+  dbName: process.env.DB_NAME,
+  host: process.env.DB_HOST || "127.0.0.1",
+  allowRemoteHost: process.env.ALLOW_REMOTE_TEST_DB === "true",
+});
+if (!dbCheck.ok) {
+  throw new Error(`Refusing to run against this database: ${dbCheck.reason}`);
+}
 
-await mongoose.connect(uri);
+const { default: connectDB, closePool } = await import("../config/db.js");
 const { default: User } = await import("../models/userModel.js");
+
+await connectDB();
 
 const EMAIL = "perfseed-admin@example.invalid";
 const PASSWORD = "PerfSeedAdmin123!";
@@ -33,4 +40,4 @@ if (!admin) {
   console.log(`Synthetic admin already exists: ${EMAIL}`);
 }
 
-await mongoose.disconnect();
+await closePool();

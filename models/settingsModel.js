@@ -1,174 +1,102 @@
-import mongoose from "mongoose";
+import { query } from "../config/db.js";
 
-const taxRuleSchema = new mongoose.Schema(
-  {
-    region: { type: String, required: true },
-    label: { type: String, default: "Tax" },
-    rate: { type: Number, required: true, min: 0, max: 1 },
-    inclusive: { type: Boolean, default: false },
-  },
-  { _id: false },
-);
-
-const shippingTierSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
-    baseCost: { type: Number, required: true, min: 0 },
-    freeAbove: { type: Number, default: 0 },
-  },
-  { _id: false },
-);
-
-const shippingZoneSchema = new mongoose.Schema(
-  {
-    region: { type: String, required: true },
-    currency: { type: String, required: true, enum: ["BDT", "USD"] },
-    tiers: { type: [shippingTierSchema], default: [] },
-  },
-  { _id: false },
-);
-
-const settingsSchema = new mongoose.Schema(
-  {
-    _id: { type: String, default: "main" },
-
-    store: {
-      name: { type: String, default: "My Store" },
-      supportEmail: { type: String, default: "" },
-      supportPhone: { type: String, default: "" },
-      // Branding — the live site reads from these. Admin can either paste
-      // an existing URL or upload a file via the Settings page (which uses
-      // the existing /api/upload endpoint and stores the returned URL here).
-      logoUrl: { type: String, default: "" },
-      logoDarkUrl: { type: String, default: "" },
-      faviconUrl: { type: String, default: "" },
-    },
-
-    // Home page content an admin can change without touching code — a
-    // carousel image override per rotating department slug (falls back to
-    // that department's own top-rated product photo when unset — see
-    // views/home/HeroCarousel.jsx), a single promotional banner, and the
-    // campaign section's copy (views/HomePage.jsx's "Campaign" section
-    // reads these instead of hardcoded strings).
-    homepage: {
-      carouselImages: {
-        burqa: { type: String, default: "" },
-        abaya: { type: String, default: "" },
-        hijab: { type: String, default: "" },
-      },
-      // Per-department photo for the "Shop by department" grid
-      // (views/HomePage.jsx) — independent of carouselImages above (that
-      // one is the rotating hero's own full-bleed shot; this is the
-      // smaller department-card crop). Every department key exists here,
-      // including the ones that otherwise render as a plain solid-color
-      // card (hijab/modest-sets/niqab) with no image mechanism at all —
-      // unset (the default) keeps that existing solid-tone look exactly
-      // as before.
-      departmentImages: {
-        burqa: { type: String, default: "" },
-        abaya: { type: String, default: "" },
-        hijab: { type: String, default: "" },
-        niqab: { type: String, default: "" },
-        khimar: { type: String, default: "" },
-        "modest-sets": { type: String, default: "" },
-      },
-      // "What it's made of matters" fabric cards — unset keeps the
-      // existing hatch-pattern placeholder.
-      fabricImages: {
-        nida: { type: String, default: "" },
-        crepe: { type: String, default: "" },
-        chiffon: { type: String, default: "" },
-        jersey: { type: String, default: "" },
-        georgette: { type: String, default: "" },
-      },
-      // "Dressed for the moment" occasion cards — unset keeps the
-      // existing plain bordered card with no image.
-      occasionImages: {
-        eid: { type: String, default: "" },
-        everyday: { type: String, default: "" },
-        bridal: { type: String, default: "" },
-        prayer: { type: String, default: "" },
-      },
-      // The guided-finder ("Not sure where to start?") card's right-hand
-      // panel — unset keeps the existing hatch placeholder.
-      guidedFinderImage: { type: String, default: "" },
-      // The header's "Occasions" mega-menu promo tile (components/layout
-      // /Header.jsx) — a separate nav element from the homepage's own
-      // "Dressed for the moment" section above (occasionImages), and
-      // previously had no settings field at all, so its promo box was
-      // hardcoded to always show the hatch placeholder with no way for an
-      // admin to set a real photo. Unset keeps that same placeholder.
-      occasionMenuImage: { type: String, default: "" },
-      banner: {
-        enabled: { type: Boolean, default: false },
-        imageUrl: { type: String, default: "" },
-        href: { type: String, default: "" },
-      },
-      campaign: {
-        enabled: { type: Boolean, default: false },
-        title: { type: String, default: "" },
-        message: { type: String, default: "" },
-        ctaLabel: { type: String, default: "" },
-        ctaHref: { type: String, default: "" },
-      },
-    },
-
-    currency: {
-      defaultDisplay: { type: String, default: "BDT", enum: ["BDT", "USD"] },
-      usdToBdt: { type: Number, default: 120, min: 1 },
-    },
-
-    // Promotion: free shipping on a customer's first order. Admin can toggle.
-    promotions: {
-      firstOrderFreeShipping: { type: Boolean, default: false },
-    },
-
-    // Single source of truth for the exchange-policy copy shown across the
-    // storefront (Header announcement bar, homepage trust row, PDP perk) —
-    // previously hardcoded as "14-day exchange" in three separate frontend
-    // files with no way to change it without editing code.
-    exchangePolicy: {
-      windowDays: { type: Number, default: 14, min: 0 },
-      description: { type: String, default: "Easy exchanges" },
-    },
-
-    taxRules: {
-      type: [taxRuleSchema],
-      default: () => [
-        { region: "BD", label: "VAT", rate: 0.15, inclusive: true },
-        { region: "INTL", label: "No tax", rate: 0, inclusive: false },
-      ],
-    },
-
-    shippingZones: {
-      type: [shippingZoneSchema],
-      default: () => [
-        {
-          region: "BD",
-          currency: "BDT",
-          tiers: [
-            { name: "Inside Dhaka", baseCost: 60, freeAbove: 2000 },
-            { name: "Outside Dhaka", baseCost: 120, freeAbove: 2000 },
-          ],
-        },
-        {
-          region: "INTL",
-          currency: "USD",
-          tiers: [{ name: "Standard", baseCost: 25, freeAbove: 200 }],
-        },
-      ],
-    },
-  },
-  { timestamps: true },
-);
-
-settingsSchema.statics.getSingleton = async function () {
-  let doc = await this.findById("main");
-  if (!doc) doc = await this.create({ _id: "main" });
-  return doc;
+const DEFAULT_HOMEPAGE = {
+  carouselImages: { burqa: "", abaya: "", hijab: "" },
+  departmentImages: { burqa: "", abaya: "", hijab: "", niqab: "", khimar: "", "modest-sets": "" },
+  fabricImages: { nida: "", crepe: "", chiffon: "", jersey: "", georgette: "" },
+  occasionImages: { eid: "", everyday: "", bridal: "", prayer: "" },
+  guidedFinderImage: "",
+  occasionMenuImage: "",
+  banner: { enabled: false, imageUrl: "", href: "" },
+  campaign: { enabled: false, title: "", message: "", ctaLabel: "", ctaHref: "" },
 };
+const DEFAULT_CURRENCY = { defaultDisplay: "BDT", usdToBdt: 120 };
+const DEFAULT_PROMOTIONS = { firstOrderFreeShipping: false };
+const DEFAULT_EXCHANGE_POLICY = { windowDays: 14, description: "Easy exchanges" };
+const DEFAULT_TAX_RULES = [
+  { region: "BD", label: "VAT", rate: 0.15, inclusive: true },
+  { region: "INTL", label: "No tax", rate: 0, inclusive: false },
+];
+const DEFAULT_SHIPPING_ZONES = [
+  { region: "BD", currency: "BDT", tiers: [{ name: "Inside Dhaka", baseCost: 60, freeAbove: 2000 }, { name: "Outside Dhaka", baseCost: 120, freeAbove: 2000 }] },
+  { region: "INTL", currency: "USD", tiers: [{ name: "Standard", baseCost: 25, freeAbove: 200 }] },
+];
 
-// Guards against Next.js dev's hot-reload re-executing this module and
-// trying to re-register an already-compiled model.
-const Settings = mongoose.models.settings || mongoose.model("settings", settingsSchema);
+function jsonOrDefault(value, fallback) {
+  if (value == null) return fallback;
+  return typeof value === "string" ? JSON.parse(value) : value;
+}
+
+function rowToSettings(row) {
+  if (!row) return null;
+  const settings = {
+    _id: row.id,
+    store: {
+      name: row.store_name,
+      supportEmail: row.store_support_email,
+      supportPhone: row.store_support_phone,
+      logoUrl: row.store_logo_url,
+      logoDarkUrl: row.store_logo_dark_url,
+      faviconUrl: row.store_favicon_url,
+    },
+    homepage: jsonOrDefault(row.homepage, DEFAULT_HOMEPAGE),
+    currency: jsonOrDefault(row.currency, DEFAULT_CURRENCY),
+    promotions: jsonOrDefault(row.promotions, DEFAULT_PROMOTIONS),
+    exchangePolicy: jsonOrDefault(row.exchange_policy, DEFAULT_EXCHANGE_POLICY),
+    taxRules: jsonOrDefault(row.tax_rules, DEFAULT_TAX_RULES),
+    shippingZones: jsonOrDefault(row.shipping_zones, DEFAULT_SHIPPING_ZONES),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  settings.save = async function save() {
+    return saveSettings(this);
+  };
+  return settings;
+}
+
+async function saveSettings(settings) {
+  await query(
+    `UPDATE settings SET store_name=?, store_support_email=?, store_support_phone=?, store_logo_url=?,
+       store_logo_dark_url=?, store_favicon_url=?, homepage=?, currency=?, promotions=?, exchange_policy=?,
+       tax_rules=?, shipping_zones=? WHERE id=?`,
+    [
+      settings.store.name,
+      settings.store.supportEmail || "",
+      settings.store.supportPhone || "",
+      settings.store.logoUrl || "",
+      settings.store.logoDarkUrl || "",
+      settings.store.faviconUrl || "",
+      JSON.stringify(settings.homepage),
+      JSON.stringify(settings.currency),
+      JSON.stringify(settings.promotions),
+      JSON.stringify(settings.exchangePolicy),
+      JSON.stringify(settings.taxRules),
+      JSON.stringify(settings.shippingZones),
+      settings._id,
+    ],
+  );
+  return settings;
+}
+
+async function getSingleton() {
+  const rows = await query("SELECT * FROM settings WHERE id = 'main'");
+  if (rows.length) return rowToSettings(rows[0]);
+  await query(
+    `INSERT INTO settings (id, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
+     VALUES ('main', ?, ?, ?, ?, ?, ?)`,
+    [
+      JSON.stringify(DEFAULT_HOMEPAGE),
+      JSON.stringify(DEFAULT_CURRENCY),
+      JSON.stringify(DEFAULT_PROMOTIONS),
+      JSON.stringify(DEFAULT_EXCHANGE_POLICY),
+      JSON.stringify(DEFAULT_TAX_RULES),
+      JSON.stringify(DEFAULT_SHIPPING_ZONES),
+    ],
+  );
+  const rows2 = await query("SELECT * FROM settings WHERE id = 'main'");
+  return rowToSettings(rows2[0]);
+}
+
+const Settings = { getSingleton };
+
 export default Settings;

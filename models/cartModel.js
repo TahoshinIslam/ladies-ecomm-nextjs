@@ -1,63 +1,89 @@
-import mongoose from "mongoose";
+import { query, withConnection } from "../config/db.js";
+import { generateObjectId } from "../lib/objectId.js";
 
-// Snapshot at add-time — mirrors store/guestCartSlice.js's snapshotVariant
-// on the client, so a cart line still prices and displays correctly even
-// if the product's variant changes later (price update, restock, etc).
-const cartItemSchema = new mongoose.Schema(
-  {
-    productId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "products",
-      required: [true, "Product is required"],
-    },
-    // Not a `ref` — variants are subdocuments inside Product.variants, not
-    // a top-level collection, so there's nothing to .populate() here. This
-    // is matched by exact ObjectId equality against product.variants[]._id.
-    variantId: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: [true, "Variant is required"],
-    },
-    quantity: {
-      type: Number,
-      required: [true, "Quantity is required"],
-      min: [1, "Quantity must be at least 1"],
-      default: 1,
-    },
+function rowToItem(row) {
+  return {
+    _id: row.id,
+    productId: row.product_id,
+    variantId: row.variant_id,
+    quantity: row.quantity,
     snapshot: {
-      sku: { type: String, default: "" },
-      // Arbitrary key/value bag mirroring the variant's own `attributes`
-      // (color/size/fabric for clothing, shade/volumeMl for cosmetics, ...)
-      // — see models/productModel.js's variantSchema.
-      attributes: { type: mongoose.Schema.Types.Mixed, default: {} },
-      price: { type: Number, default: null },
-      image: { type: String, default: "" },
+      sku: row.snapshot_sku,
+      attributes: typeof row.snapshot_attributes === "string" ? JSON.parse(row.snapshot_attributes) : row.snapshot_attributes || {},
+      price: row.snapshot_price == null ? null : Number(row.snapshot_price),
+      image: row.snapshot_image,
     },
-  },
-  { timestamps: true },
-);
+  };
+}
 
-const cartSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "users",
-      required: [true, "User is required"],
-      unique: true, // one cart per user
-    },
-    items: {
-      type: [cartItemSchema],
-      default: [],
-    },
-  },
-  { timestamps: true },
-);
+async function loadItems(cartId) {
+  const rows = await query("SELECT * FROM cart_items WHERE cart_id = ? ORDER BY created_at ASC", [cartId]);
+  return rows.map(rowToItem);
+}
 
-// Virtual: total number of items in cart
-cartSchema.virtual("totalItems").get(function () {
-  return this.items.reduce((sum, item) => sum + item.quantity, 0);
-});
+function rowToCart(row, items) {
+  const cart = {
+    _id: row.id,
+    userId: row.user_id,
+    items: items || [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+  cart.totalItems = cart.items.reduce((sum, i) => sum + i.quantity, 0);
+  cart.save = async function save() {
+    return saveCart(this);
+  };
+  return cart;
+}
 
-// Guards against Next.js dev's hot-reload re-executing this module and
-// trying to re-register an already-compiled model.
-const cartModel = mongoose.models.carts || mongoose.model("carts", cartSchema);
-export default cartModel;
+async function findByUser(userId) {
+  const rows = await query("SELECT * FROM carts WHERE user_id = ?", [userId]);
+  if (!rows.length) return null;
+  return rowToCart(rows[0], await loadItems(rows[0].id));
+}
+
+async function create(userId) {
+  const id = generateObjectId();
+  await query("INSERT INTO carts (id, user_id) VALUES (?, ?)", [id, userId]);
+  return rowToCart({ id, user_id: userId, created_at: new Date(), updated_at: new Date() }, []);
+}
+
+/** Replaces the cart's item list wholesale — matches how services/cartService.js already mutates `cart.items` in memory before calling save(). */
+async function saveCart(cart) {
+  await withConnection(async (conn) => {
+    await conn.query("DELETE FROM cart_items WHERE cart_id = ?", [cart._id]);
+    for (const item of cart.items) {
+      await conn.query(
+        `INSERT INTO cart_items (id, cart_id, product_id, variant_id, quantity, snapshot_sku, snapshot_attributes, snapshot_price, snapshot_image)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          item._id || generateObjectId(),
+          cart._id,
+          item.productId,
+          item.variantId,
+          item.quantity,
+          item.snapshot?.sku || "",
+          JSON.stringify(item.snapshot?.attributes || {}),
+          item.snapshot?.price ?? null,
+          item.snapshot?.image || "",
+        ],
+      );
+    }
+    await conn.query("UPDATE carts SET updated_at = NOW(3) WHERE id = ?", [cart._id]);
+  });
+  return cart;
+}
+
+/** Clears every item in one statement — used by order creation inside its own transaction connection. */
+async function clearByUser(userId, conn) {
+  const sql = "DELETE ci FROM cart_items ci JOIN carts c ON c.id = ci.cart_id WHERE c.user_id = ?";
+  if (conn) {
+    await conn.query(sql, [userId]);
+  } else {
+    await query(sql, [userId]);
+  }
+}
+
+const Cart = { findByUser, create, clearByUser };
+
+export default Cart;

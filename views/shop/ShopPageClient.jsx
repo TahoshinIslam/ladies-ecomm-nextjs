@@ -83,6 +83,10 @@ const SORTS = [
   { value: "-isFeatured", labelKey: "filters.featured" },
 ];
 const PAGE_SIZE = 12;
+// Purely cosmetic — the real fetched page is always PAGE_SIZE items, but
+// showing that many shimmer placeholders would overwhelm the "Load more"
+// moment; 4 (one row on desktop) is enough to signal "more is coming".
+const PRODUCT_LOADMORE_SKELETON_COUNT = 4;
 
 // `allCategories` (not just the top-nav `departments` list) so a
 // department reached by drilling into a division (e.g. ?category=<BurqaId>
@@ -551,7 +555,7 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
               <div
                 className={cn(
                   "grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4 transition-opacity",
-                  (loadingMore || isPending) && "pointer-events-none opacity-60",
+                  isPending && "pointer-events-none opacity-60",
                 )}
                 aria-busy={loadingMore || isPending}
               >
@@ -577,6 +581,19 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
                     className={initialCardVisibilityClass(i, revealedExtra)}
                   />
                 ))}
+                {/* A real fetched-page "Load more" (not the instant,
+                    already-rendered buffer reveal above — that one sets no
+                    loading state at all, see showMore()) previously gave no
+                    feedback for the INCOMING page: only the already-visible
+                    cards above dimmed to 60% opacity, which read as the grid
+                    going blank rather than more content being on its way.
+                    These placeholders make it clear new cards are loading,
+                    matching the shimmer skeleton convention used everywhere
+                    else in this file (CategoryTileFilter, FilterRowSkeleton). */}
+                {loadingMore &&
+                  Array.from({ length: PRODUCT_LOADMORE_SKELETON_COUNT }).map((_, i) => (
+                    <ProductCardSkeleton key={`loadmore-skeleton-${i}`} />
+                  ))}
               </div>
 
               {/* Show more — visible whenever there's still something to
@@ -910,6 +927,23 @@ function PriceRange({ sp, setSp, histogramProducts }) {
           setSp(next);
         }}
       />
+    </div>
+  );
+}
+
+// Matches ProductCard.jsx's real shape (aspect-4/5 media plate, rounded-lg
+// bordered card, a body of a few text lines, a footer bar) closely enough
+// that swapping a real card in for one causes no layout jump.
+function ProductCardSkeleton() {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-lg border border-line" aria-hidden="true">
+      <div className="skeleton aspect-4/5 w-full rounded-none" />
+      <div className="flex flex-col items-center gap-2 border-b border-line px-3 pb-3 pt-4">
+        <div className="skeleton h-3 w-16 rounded" />
+        <div className="skeleton h-4 w-28 rounded" />
+        <div className="skeleton h-4 w-20 rounded" />
+      </div>
+      <div className="h-[41px] bg-wash" />
     </div>
   );
 }

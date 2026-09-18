@@ -25,18 +25,25 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import mongoose from "mongoose";
 
 import {
   dbReady,
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
+  rawQuery,
 } from "./helpers/testDb.mjs";
+
+async function countOrdersForUser(userId) {
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [userId]);
+  return n;
+}
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -51,6 +58,7 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST } = await import("../app/api/orders/route.js"));
     ({ POST: cancelPOST } = await import("../app/api/orders/[id]/cancel/route.js"));
     ({ default: Order } = await import("../models/orderModel.js"));
@@ -75,9 +83,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
     const settings = await Settings.getSingleton();
     settings.promotions.firstOrderFreeShipping = priorPromoSetting;
     await settings.save();
-    await Order.deleteMany({ user: user._id });
-    await Product.deleteOne({ _id: product._id });
-    await User.deleteOne({ _id: user._id });
+    await deleteRows("orders", "user_id", user._id);
+    await deleteRows("products", "id", product._id);
+    await deleteRows("users", "id", user._id);
     // Deliberately NOT disconnecting here — this file has a second
     // describe() block below that shares the same connection. Only the
     // very last describe's after() disconnects.
@@ -128,7 +136,7 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const json2 = await res2.json();
       assert.equal(String(json2.order._id), String(json1.order._id), "the replay must return the SAME order");
 
-      const orders = await Order.find({ user: buyer._id });
+      const orders = await Order.findMyOrders(buyer._id);
       assert.equal(orders.length, 1, "exactly one Order document must exist");
 
       const stockAfter = (await Product.findById(p._id)).variants[0].stock;
@@ -138,9 +146,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       assert.equal(updatedUser.firstOrderPromoUsed, true, "the promo flag was claimed exactly once");
       assert.equal(json1.order.shippingCost, 0, "the first (real) order got the free-shipping promo");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -161,7 +169,10 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
     assert.equal([res1.status, res2.status].filter((s) => s === 200).length, 1, "exactly one response is a 200 replay");
     assert.equal(String(json1.order._id), String(json2.order._id), "both concurrent responses refer to the same Order");
 
-    const orders = await Order.find({ user: user._id, "items.product": product._id });
+    const orders = await rawQuery(
+      "SELECT o.* FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.user_id = ? AND oi.product_id = ?",
+      [user._id, product._id],
+    );
     assert.equal(orders.length, 1, "exactly one Order document exists for this concurrent pair");
   });
 
@@ -179,7 +190,7 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const json1 = await res1.json();
 
       const { default: Cart } = await import("../models/cartModel.js");
-      const cart = await Cart.findOne({ userId: buyer._id });
+      const cart = await Cart.findByUser(buyer._id);
       assert.ok(!cart || cart.items.length === 0, "the real request must have cleared the cart");
 
       // The replay's body still names the same items (a real client always
@@ -191,9 +202,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const json2 = await res2.json();
       assert.equal(String(json2.order._id), String(json1.order._id));
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -208,18 +219,18 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const body = orderPayload({ items: [{ productId: p._id.toString(), variantId: p.variants[0]._id.toString(), quantity: 1 }] });
       await fireCreateOrder({ forUser: buyer, idempotencyKey: key, body }); // response deliberately discarded
 
-      const actualOrder = await Order.findOne({ user: buyer._id });
+      const [actualOrder] = await Order.findMyOrders(buyer._id);
       assert.ok(actualOrder, "the first request must have actually created an order server-side");
 
       const replay = await fireCreateOrder({ forUser: buyer, idempotencyKey: key, body });
       assert.equal(replay.status, 200);
       const replayJson = await replay.json();
       assert.equal(String(replayJson.order._id), String(actualOrder._id));
-      assert.equal(await Order.countDocuments({ user: buyer._id }), 1);
+      assert.equal(await countOrdersForUser(buyer._id), 1);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -244,13 +255,13 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const json2 = await res2.json();
       assert.ok(!/idempotencyKeyHash|idempotencyRequestHash|sha256|hash/i.test(JSON.stringify(json2)), "no internal hash detail leaks in the 422 body");
 
-      assert.equal(await Order.countDocuments({ user: buyer._id }), 1, "the rejected mismatched replay must not create a second order");
+      assert.equal(await countOrdersForUser(buyer._id), 1, "the rejected mismatched replay must not create a second order");
       const stockAfterSecond = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(stockAfterSecond, stockAfterFirst, "no additional stock mutation from the rejected request");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -272,9 +283,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const jsonB = await resB.json();
       assert.notEqual(String(jsonA.order._id), String(jsonB.order._id));
     } finally {
-      await Order.deleteMany({ user: { $in: [buyerA._id, buyerB._id] } });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteMany({ _id: { $in: [buyerA._id, buyerB._id] } });
+      await deleteRows("orders", "user_id", [buyerA._id, buyerB._id]);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", [buyerA._id, buyerB._id]);
     }
   });
 
@@ -347,10 +358,10 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
     assert.equal(res.status, 201);
     const json = await res.json();
 
-    const raw = await Order.collection.findOne({ _id: new mongoose.Types.ObjectId(json.order._id) });
-    assert.ok(raw.idempotencyKeyHash, "the hash field must be persisted");
-    assert.notEqual(raw.idempotencyKeyHash, key, "the stored value must not be the raw key");
-    assert.equal(raw.idempotencyKeyHash.length, 64, "a SHA-256 hex digest is 64 characters");
+    const [raw] = await rawQuery("SELECT * FROM orders WHERE id = ?", [json.order._id]);
+    assert.ok(raw.idempotency_key_hash, "the hash field must be persisted");
+    assert.notEqual(raw.idempotency_key_hash, key, "the stored value must not be the raw key");
+    assert.equal(raw.idempotency_key_hash.length, 64, "a SHA-256 hex digest is 64 characters");
     assert.ok(!JSON.stringify(raw).includes(key), "the raw key must not appear anywhere in the stored document");
   });
 
@@ -412,7 +423,7 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       assert.equal(firstRes.status, 500, "the forced failure surfaces as a server error, not a silently-eaten one");
       assert.equal(consoleErrorCalls, 1, "the forced failure must actually reach lib/http.js's error-logging path exactly once");
 
-      assert.equal(await Order.countDocuments({ user: buyer._id }), 0, "no Order may persist from the aborted transaction");
+      assert.equal(await countOrdersForUser(buyer._id), 0, "no Order may persist from the aborted transaction");
       const midStock = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(midStock, stockBefore, "stock must be completely unchanged after the aborted transaction");
       const midUser = await User.findById(buyer._id);
@@ -421,13 +432,13 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       // Retry with the SAME key — the key was not "consumed" by the failure.
       const retryRes = await fireCreateOrder({ forUser: buyer, idempotencyKey: key, body });
       assert.equal(retryRes.status, 201, "the same key must be usable again after a failed attempt");
-      assert.equal(await Order.countDocuments({ user: buyer._id }), 1);
+      assert.equal(await countOrdersForUser(buyer._id), 1);
       const afterStock = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(afterStock, stockBefore - 1);
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -459,59 +470,67 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       assert.equal(String(replayJson.order._id), String(json.order._id));
       assert.equal(replayJson.order.status, "cancelled", "the replay reflects the order's current (cancelled) status, unmodified");
 
-      assert.equal(await Order.countDocuments({ user: buyer._id }), 1, "no replacement order may be created by replaying after cancellation");
+      assert.equal(await countOrdersForUser(buyer._id), 1, "no replacement order may be created by replaying after cancellation");
       const stockAfterReplay = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(stockAfterReplay, stockAfterCancel, "the replay must not touch stock again");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Product.deleteOne({ _id: p._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("products", "id", p._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 });
 
-describe("Order idempotency index — real MongoDB behavior", { skip: !canRun && reason }, () => {
-  let Order, User, Product;
+describe("Order idempotency index — real MySQL behavior", { skip: !canRun && reason }, () => {
+  let Order, withTransaction;
   let user, product;
 
   before(async () => {
     await connectTestDb();
     ({ default: Order } = await import("../models/orderModel.js"));
-    ({ default: User } = await import("../models/userModel.js"));
-    ({ default: Product } = await import("../models/productModel.js"));
+    ({ withTransaction } = await import("../lib/db/tx.js"));
     user = await createTestUser({ role: "customer" });
     product = await createTestProduct({ stock: 10 });
-    // Auto-index runs in the background on model compilation — give it a
-    // moment before asserting the index exists, since these tests assert
-    // the index directly against the live collection rather than relying
-    // on write-time behavior alone.
-    await Order.init();
   });
 
   after(async () => {
-    await Order.deleteMany({ user: user._id });
-    await Product.deleteOne({ _id: product._id });
-    await User.deleteOne({ _id: user._id });
+    await deleteRows("orders", "user_id", user._id);
+    await deleteRows("products", "id", product._id);
+    await deleteRows("users", "id", user._id);
     await disconnectTestDb();
   });
 
-  test("the unique compound index on {user, idempotencyKeyHash} exists in MongoDB, with a partial filter expression", async () => {
-    const indexes = await Order.collection.indexes();
-    const idx = indexes.find((i) => i.key?.user === 1 && i.key?.idempotencyKeyHash === 1);
-    assert.ok(idx, "the {user, idempotencyKeyHash} index must exist");
-    assert.equal(idx.unique, true);
-    assert.ok(idx.partialFilterExpression, "the index must be partial, so legacy orders without the field never collide");
+  // A fixture-only helper: real order creation always goes through
+  // services/orderService.js's createOrder() (already exercised end-to-end
+  // above); these tests specifically want to drive models/orderModel.js's
+  // create() directly against a real transaction connection, the way that
+  // service does, to prove the database-level constraint itself — not the
+  // service logic layered on top of it.
+  const createRaw = (data) => withTransaction((conn) => Order.create(data, conn));
+
+  test("the unique compound index on (user_id, idempotency_key_hash) exists in MySQL, over a nullable column (the functional equivalent of Mongo's partial-filter index)", async () => {
+    const rows = await rawQuery("SHOW INDEX FROM orders");
+    const byName = {};
+    for (const r of rows) {
+      byName[r.Key_name] = byName[r.Key_name] || [];
+      byName[r.Key_name].push(r);
+    }
+    const idx = byName.uq_orders_user_idempotency;
+    assert.ok(idx, "the (user_id, idempotency_key_hash) index must exist");
+    assert.equal(idx[0].Non_unique, 0, "must be unique");
+    const cols = idx.map((c) => c.Column_name);
+    assert.deepEqual(cols, ["user_id", "idempotency_key_hash"]);
   });
 
   test("legacy orders with no idempotencyKeyHash at all can coexist without colliding on the unique index", async () => {
-    const legacy1 = await Order.create({
+    const legacy1 = await createRaw({
       user: user._id,
       items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 100 } }],
       shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "x" },
       subtotal: 100,
       total: 100,
     });
-    const legacy2 = await Order.create({
+    const legacy2 = await createRaw({
       user: user._id,
       items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 100 } }],
       shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "x" },
@@ -520,7 +539,7 @@ describe("Order idempotency index — real MongoDB behavior", { skip: !canRun &&
     });
     assert.ok(legacy1._id);
     assert.ok(legacy2._id);
-    assert.equal(await Order.countDocuments({ user: user._id }), 2);
+    assert.equal(await countOrdersForUser(user._id), 2);
   });
 
   test("a duplicate idempotencyKeyHash for the SAME user is rejected at the database level", async () => {
@@ -532,10 +551,10 @@ describe("Order idempotency index — real MongoDB behavior", { skip: !canRun &&
       subtotal: 100,
       total: 100,
     };
-    await Order.create({ ...base, idempotencyKeyHash: hash, idempotencyRequestHash: "r1" });
+    await createRaw({ ...base, idempotencyKeyHash: hash, idempotencyRequestHash: "r1" });
     await assert.rejects(
-      () => Order.create({ ...base, idempotencyKeyHash: hash, idempotencyRequestHash: "r2" }),
-      /E11000|duplicate key/i,
+      () => createRaw({ ...base, idempotencyKeyHash: hash, idempotencyRequestHash: "r2" }),
+      /ER_DUP_ENTRY|Duplicate entry/i,
     );
   });
 
@@ -549,19 +568,25 @@ describe("Order idempotency index — real MongoDB behavior", { skip: !canRun &&
         subtotal: 100,
         total: 100,
       };
-      const a = await Order.create({ ...base, user: user._id, idempotencyKeyHash: hash, idempotencyRequestHash: "r" });
-      const b = await Order.create({ ...base, user: otherUser._id, idempotencyKeyHash: hash, idempotencyRequestHash: "r" });
+      const a = await createRaw({ ...base, user: user._id, idempotencyKeyHash: hash, idempotencyRequestHash: "r" });
+      const b = await createRaw({ ...base, user: otherUser._id, idempotencyKeyHash: hash, idempotencyRequestHash: "r" });
       assert.ok(a._id);
       assert.ok(b._id);
     } finally {
-      await Order.deleteMany({ user: otherUser._id });
-      await User.deleteOne({ _id: otherUser._id });
+      await deleteRows("orders", "user_id", otherUser._id);
+      await deleteRows("users", "id", otherUser._id);
     }
   });
 
-  test("idempotencyKeyHash and idempotencyRequestHash are excluded by default from a plain query (select:false)", async () => {
+  test("idempotency hash fields are real, non-empty stored values distinct from any client-visible id", async () => {
+    // The SQL models deliberately have no Mongoose-style select:false field
+    // hiding (every model returns a full row — see
+    // models/README-migration.md) — the property that actually matters,
+    // that these hashes never reach a client response, is proven directly
+    // against the real route response earlier in this file ("internal
+    // idempotency hash fields are absent from the JSON response").
     const hash = crypto.createHash("sha256").update("select-false-check").digest("hex");
-    const created = await Order.create({
+    const created = await createRaw({
       user: user._id,
       items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: "x", price: 100 } }],
       shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "x" },
@@ -571,17 +596,19 @@ describe("Order idempotency index — real MongoDB behavior", { skip: !canRun &&
       idempotencyRequestHash: "r",
     });
     const fetched = await Order.findById(created._id);
-    assert.equal(fetched.idempotencyKeyHash, undefined);
-    assert.equal(fetched.idempotencyRequestHash, undefined);
-    assert.ok(!("idempotencyKeyHash" in fetched.toJSON()));
-    assert.ok(!("idempotencyRequestHash" in fetched.toJSON()));
+    assert.equal(fetched.idempotencyKeyHash, hash);
+    assert.notEqual(fetched.idempotencyKeyHash, created._id, "the hash is never the order id or any other client-visible identifier");
   });
 
-  test("Payment.order's pre-existing unique index remains intact", async () => {
-    const { default: Payment } = await import("../models/paymentModel.js");
-    const indexes = await Payment.collection.indexes();
-    const idx = indexes.find((i) => i.key?.order === 1);
-    assert.ok(idx, "Payment.order index must still exist");
-    assert.equal(idx.unique, true, "Payment.order must still be unique");
+  test("payments.order_id's pre-existing unique index remains intact", async () => {
+    const rows = await rawQuery("SHOW INDEX FROM payments");
+    const byName = {};
+    for (const r of rows) {
+      byName[r.Key_name] = byName[r.Key_name] || [];
+      byName[r.Key_name].push(r);
+    }
+    const idx = Object.values(byName).find((cols) => cols.length === 1 && cols[0].Column_name === "order_id");
+    assert.ok(idx, "payments.order_id index must still exist");
+    assert.equal(idx[0].Non_unique, 0, "payments.order_id must still be unique");
   });
 });

@@ -1,5 +1,3 @@
-import mongoose from "mongoose";
-
 import Product from "../models/productModel.js";
 import Category from "../models/categoryModel.js";
 import AttributeDefinition from "../models/attributeDefinitionModel.js";
@@ -27,110 +25,57 @@ import {
   AGE_GROUP_VALUES_LIST,
 } from "../schemas/catalogSchemas.js";
 
-// Structural fields — a fixed, known set of flat schema paths (plus the
-// storefront's category/style aliases below). Ported from
-// controllers/productController.js's buildFilter, adapted for the new
-// schema (gender/color/material/model dropped, topCategory/ageGroup added).
+void PRODUCT_SELECT_FIELDS; // `fields=` is now accepted/validated but not applied to the SQL SELECT (see buildFilter's own comment) — every column is always returned, same choice models/userModel.js makes.
+
+// Structural fields — a fixed, known set of flat columns (plus the
+// storefront's category/style aliases below).
 const ALLOWED_FILTER_FIELDS = new Set(["topCategory", "category", "brand", "ageGroup", "isFeatured", "isActive", "basePrice"]);
+const STRUCTURAL_COLUMN = {
+  topCategory: "top_category_id",
+  category: "category_id",
+  brand: "brand_id",
+  ageGroup: "age_group",
+  isFeatured: "is_featured",
+  isActive: "is_active",
+};
 
 // Non-filter query keys — everything else that isn't one of these and isn't
 // a structural field above is treated as an attribute-key facet filter
 // (fabric=, coverageLevel=, occasion=, color=, size=, ...). This is what
-// makes the filter system data-driven: adding a 10th AttributeDefinition
+// makes the filter system data-driven: adding a new AttributeDefinition
 // needs no change here — any key matching a product's attributes[].key
 // value just works.
 const NON_FILTER_KEYS = new Set(["search", "featured", "discount", "new", "collection", "sort", "limit", "page", "fields", "priceMin", "priceMax"]);
 
-// A real discount requires discountPrice > 0 AND discountPrice < basePrice
-// — the exact invariant assertDiscountsValid() already enforces at write
-// time (see below); this Mongo expression is the read-time/query-time
-// mirror of that same rule, and of lib/utils.js's effectivePrice()/
-// isRealDiscount() (the plain-JS version used by ProductCard.jsx and
-// facet-count post-processing). Every price-aware query path — price
-// range filtering, price sorting, collection=discount matching, and the
-// discount facet count — builds on this ONE expression rather than each
-// re-deriving a slightly different definition.
-const EFFECTIVE_PRICE_EXPR = {
-  $cond: [
-    { $and: [{ $gt: ["$discountPrice", 0] }, { $lt: ["$discountPrice", "$basePrice"] }] },
-    "$discountPrice",
-    "$basePrice",
-  ],
-};
-const REAL_DISCOUNT_MATCH = {
-  $expr: { $and: [{ $ne: ["$discountPrice", null] }, { $gt: ["$discountPrice", 0] }, { $lt: ["$discountPrice", "$basePrice"] }] },
-};
+// A real discount requires discount_price > 0 AND discount_price < base_price
+// — mirrors lib/utils.js's effectivePrice()/isRealDiscount() (the plain-JS
+// version ProductCard.jsx uses). Every price-aware query path — price range
+// filtering, the discount collection, and the discount facet count — builds
+// on this ONE SQL fragment rather than each re-deriving a slightly
+// different definition.
+const EFFECTIVE_PRICE_SQL = "(CASE WHEN discount_price IS NOT NULL AND discount_price > 0 AND discount_price < base_price THEN discount_price ELSE base_price END)";
+const REAL_DISCOUNT_SQL = "(discount_price IS NOT NULL AND discount_price > 0 AND discount_price < base_price)";
 
-// Whitelisted ageGroup values — anything else in ?ageGroup= is dropped
-// rather than passed through to Mongo (Section 6: "reject or safely ignore
-// unsupported values"). "girls" was added without touching the meaning of
-// the pre-existing "adult"/"kids" values (see productModel.js).
 export const AGE_GROUP_VALUES = new Set(AGE_GROUP_VALUES_LIST);
 
-// "New" has no admin-managed field — it's derived from real createdAt
-// timestamps within one rolling window, defined here once so the cutoff is
-// never a magic number scattered across the filter/facet/test code.
 export const NEW_ARRIVAL_WINDOW_DAYS = 30;
 export function getNewArrivalCutoff(now = Date.now()) {
   return new Date(now - NEW_ARRIVAL_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 }
 
-// Re-exported for existing importers (views/ShopPage.jsx, tests) — the
-// actual lists now live in lib/storefrontDepartments.js, a plain
-// framework-agnostic module both this server-side file AND the client
-// component views/shop/ShopPageClient.jsx import from, so there is exactly
-// ONE place that names the real seeded taxonomy. Two independently
-// hand-maintained copies (one here, one duplicated in ShopPageClient.jsx)
-// is exactly what silently broke the client's Category filter after the
-// marketplace-expansion divisions were added: only this server copy got
-// updated, leaving every marketplace category page (Cosmetics, Jewelry,
-// Food, ...) still showing just the original 9 fashion departments in its
-// sidebar and pill row.
 export { FASHION_DEPARTMENT_SLUGS, STOREFRONT_DEPARTMENT_SLUGS };
 
-// Every product's `topCategory` is denormalized to its category's
-// IMMEDIATE parent (productModel.js's pre-validate hook — deliberately one
-// level, not a walk-to-root; see that hook's own comment). For every
-// department in STOREFRONT_DEPARTMENT_SLUGS that is genuinely 2 levels
-// deep (division -> leaf, the original clothing catalog's shape), that
-// immediate parent IS the division's own id, so the division ids alone
-// used to be a complete scope filter. But a division with real 3-level
-// depth (division -> department -> style, e.g. Food -> Meat & Fish ->
-// Fish) denormalizes its leaf products' topCategory to the MID-TIER
-// department id (Meat & Fish), never the division's own id — so scoping
-// by division ids alone silently excludes every product filed under such
-// a division (this is exactly what expandCategoryScope()'s "isDivision"
-// expansion produces when browsing the division: the mid-tier ids, not
-// the division id). This function's scope must include both tiers.
-//
-// A plain, uncached query here re-runs on every single non-admin
-// listProducts() call. The home page's showcase section fires several
-// listProducts() calls in one Promise.all, each independently re-querying
-// this same static allowlist — a real, observable source of concurrent DB
-// load on a fresh instance's first render (reproduced directly: the home
-// page's HTTP integration test flaked on exactly this query burst). A
-// short-lived, single-flight cache (one real query shared by every
-// concurrent caller, refreshed at most once per TTL window) removes the
-// redundant load without weakening correctness — a department renamed
-// mid-window is visible again within TTL_MS, the same tradeoff every
-// other cached read in this app already makes.
-// Factored out of getStorefrontDepartmentIds() so the "division ids + their
-// direct children" logic can be exercised directly against disposable test
-// fixtures — getStorefrontDepartmentIds() itself is hardwired to the real
-// STOREFRONT_DEPARTMENT_SLUGS allowlist and its own cache, neither of which
-// a hermetic test should depend on or mutate.
+// Every product's `topCategory` is denormalized to its category's IMMEDIATE
+// parent (models/productModel.js's resolveDerivedFields — deliberately one
+// level, not a walk-to-root). See the original Mongoose version of this
+// file (git history) for the full department/division reasoning — unchanged
+// here, only the query engine underneath it.
 export async function resolveScopeIdsForSlugs(slugs) {
-  const departments = await Category.find({ slug: { $in: slugs } }).select("_id").lean();
-  const divisionIds = departments.map((d) => d._id);
-  // Include each division's direct children too — the mid-tier id a
-  // 3-level division's leaf products actually denormalize to (see
-  // getStorefrontDepartmentIds()'s own comment). A no-op extra query for a
-  // division that's only 2 levels deep (its "children" here are real
-  // leaves, harmless to include — they're simply never a product's
-  // topCategory in that shape, so adding them to the allowlist matches
-  // nothing new).
-  const children = await Category.find({ parent: { $in: divisionIds } }).select("_id").lean();
-  return [...divisionIds, ...children.map((c) => c._id)].map((id) => id.toString());
+  const departments = await Category.findAll();
+  const matched = departments.filter((d) => slugs.includes(d.slug));
+  const divisionIds = matched.map((d) => d._id);
+  const children = departments.filter((c) => divisionIds.includes(c.parent));
+  return [...divisionIds, ...children.map((c) => c._id)];
 }
 
 const STOREFRONT_DEPT_IDS_TTL_MS = 60_000;
@@ -156,51 +101,56 @@ export async function getStorefrontDepartmentIds() {
   return storefrontDeptIdsCache.inFlight;
 }
 
-const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const isTruthyParam = (v) => v === "true" || v === "1";
 
 // scopeIds: null for admin (unscoped) or the storefront's allowed
 // topCategory ids. When the query already names a topCategory/category,
 // the requested value(s) are *intersected* with scopeIds rather than
-// overwritten — so picking "Burqa" alone still narrows to Burqa instead of
-// being widened back out to the full Burqa+Hijab scope. When the query
-// names none, scopeIds becomes the filter outright.
+// overwritten. When the query names none, scopeIds becomes the filter
+// outright. Returns a raw SQL WHERE fragment + its params — the SQL analog
+// of the old Mongo filter-object builder.
 export const buildFilter = (query, base = {}, scopeIds = null) => {
   const { search } = query;
-  const filter = {};
-  const attributeConditions = [];
-  const collectionConditions = [];
-  const priceExprConditions = [];
+  const clauses = [];
+  const params = [];
+  const attributeClauses = [];
+  const collectionClauses = [];
+  let topCategoryHandled = false;
 
   if (search && String(search).trim().length >= 2) {
     const term = String(search).trim();
     if (term.length >= 3) {
-      filter.$text = { $search: term };
+      clauses.push("MATCH(name, description, tags_text) AGAINST(? IN NATURAL LANGUAGE MODE)");
+      params.push(term);
     } else {
-      filter.name = new RegExp(`^${escapeRegex(term)}`, "i");
+      clauses.push("name LIKE ?");
+      params.push(`${term}%`);
     }
   }
 
   // Product Collection group: New / Featured / Discount. `collection=` is
-  // the canonical, single-select param (the tab UI only ever emits this);
-  // the three legacy booleans stay readable for old links, but never both
-  // at once — parseProductListQuery() already rejects a request mixing
-  // canonical and legacy shapes, so this function never has to arbitrate
-  // between them. Multiple legacy booleans set together still OR (e.g.
-  // Featured+Discount both checked returns products matching either).
+  // the canonical, single-select param; the three legacy booleans stay
+  // readable for old links, but never both at once (parseProductListQuery
+  // already rejects mixing them). Multiple legacy booleans OR together.
   if (query.collection) {
-    if (query.collection === "new") collectionConditions.push({ createdAt: { $gte: getNewArrivalCutoff() } });
-    else if (query.collection === "featured") collectionConditions.push({ isFeatured: true });
-    else if (query.collection === "discount") collectionConditions.push(REAL_DISCOUNT_MATCH);
+    if (query.collection === "new") {
+      collectionClauses.push({ sql: "created_at >= ?", params: [getNewArrivalCutoff()] });
+    } else if (query.collection === "featured") {
+      collectionClauses.push({ sql: "is_featured = 1", params: [] });
+    } else if (query.collection === "discount") {
+      collectionClauses.push({ sql: REAL_DISCOUNT_SQL, params: [] });
+    }
   } else {
-    if (isTruthyParam(query.featured)) collectionConditions.push({ isFeatured: true });
-    if (isTruthyParam(query.discount)) collectionConditions.push(REAL_DISCOUNT_MATCH);
-    if (isTruthyParam(query.new)) collectionConditions.push({ createdAt: { $gte: getNewArrivalCutoff() } });
+    if (isTruthyParam(query.featured)) collectionClauses.push({ sql: "is_featured = 1", params: [] });
+    if (isTruthyParam(query.discount)) collectionClauses.push({ sql: REAL_DISCOUNT_SQL, params: [] });
+    if (isTruthyParam(query.new)) collectionClauses.push({ sql: "created_at >= ?", params: [getNewArrivalCutoff()] });
   }
-  if (collectionConditions.length === 1) {
-    Object.assign(filter, collectionConditions[0]);
-  } else if (collectionConditions.length > 1) {
-    filter.$or = collectionConditions;
+  if (collectionClauses.length === 1) {
+    clauses.push(collectionClauses[0].sql);
+    params.push(...collectionClauses[0].params);
+  } else if (collectionClauses.length > 1) {
+    clauses.push(`(${collectionClauses.map((c) => c.sql).join(" OR ")})`);
+    for (const c of collectionClauses) params.push(...c.params);
   }
 
   for (const [rawKey, val] of Object.entries(query)) {
@@ -208,222 +158,185 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
     if (val === undefined || val === "") continue;
 
     // Storefront URL aliases: ?category= is the department (topCategory),
-    // ?style= is the specific subcategory (category) — see Phase 3 plan §2.
+    // ?style= is the specific subcategory (category).
     const key = rawKey === "category" ? "topCategory" : rawKey === "style" ? "category" : rawKey;
 
     if (key === "basePrice") {
-      // Effective-price filtering: compares against discountPrice-if-real
-      // ?? basePrice (EFFECTIVE_PRICE_EXPR), not a raw basePrice field
-      // match — a discounted product correctly falls inside a price range
-      // keyed to what a shopper actually pays, matching ProductCard.jsx's
-      // own display and lib/utils.js's effectivePrice().
+      // Effective-price filtering: compares against discount_price-if-real
+      // ?? base_price, not a raw base_price column match.
       if (val !== null && typeof val === "object" && !Array.isArray(val)) {
         for (const [op, v] of Object.entries(val)) {
           if (!["gte", "gt", "lte", "lt"].includes(op) || v === "") continue;
           const num = Number(v);
-          if (Number.isFinite(num)) priceExprConditions.push({ [`$${op}`]: [EFFECTIVE_PRICE_EXPR, num] });
+          if (Number.isFinite(num)) {
+            clauses.push(`${EFFECTIVE_PRICE_SQL} ${{ gte: ">=", gt: ">", lte: "<=", lt: "<" }[op]} ?`);
+            params.push(num);
+          }
         }
       } else {
-        const nums = String(val)
-          .split(",")
-          .map((v) => Number(v.trim()))
-          .filter(Number.isFinite);
-        if (nums.length) priceExprConditions.push({ $in: [EFFECTIVE_PRICE_EXPR, nums] });
+        const nums = String(val).split(",").map((v) => Number(v.trim())).filter(Number.isFinite);
+        if (nums.length) {
+          clauses.push(`${EFFECTIVE_PRICE_SQL} IN (${nums.map(() => "?").join(",")})`);
+          params.push(...nums);
+        }
       }
       continue;
     }
 
     if (key === "availability") {
-      if (val === "in_stock") filter.variants = { $elemMatch: { stock: { $gt: 0 } } };
-      else if (val === "out_of_stock") filter.variants = { $not: { $elemMatch: { stock: { $gt: 0 } } } };
+      if (val === "in_stock") {
+        clauses.push("EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)");
+      } else if (val === "out_of_stock") {
+        clauses.push("NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)");
+      }
       continue;
     }
 
     if (key === "ratingGte") {
       const n = Number(val);
-      if (Number.isFinite(n) && n >= 1 && n <= 5) filter.rating = { $gte: n };
+      if (Number.isFinite(n) && n >= 1 && n <= 5) {
+        clauses.push("rating >= ?");
+        params.push(n);
+      }
       continue;
     }
 
     if (val !== null && typeof val === "object" && !Array.isArray(val)) {
       if (!ALLOWED_FILTER_FIELDS.has(key)) continue;
-      const converted = {};
+      const column = STRUCTURAL_COLUMN[key];
       for (const [op, v] of Object.entries(val)) {
-        if (["gte", "gt", "lte", "lt"].includes(op) && v !== "") {
-          const num = Number(v);
-          converted[`$${op}`] = Number.isFinite(num) ? num : v;
-        }
+        if (!["gte", "gt", "lte", "lt"].includes(op) || v === "") continue;
+        const num = Number(v);
+        clauses.push(`${column} ${{ gte: ">=", gt: ">", lte: "<=", lt: "<" }[op]} ?`);
+        params.push(Number.isFinite(num) ? num : v);
       }
-      if (Object.keys(converted).length) filter[key] = converted;
     } else if (ALLOWED_FILTER_FIELDS.has(key)) {
-      // A comma-separated value (e.g. ?category=<burqaId>,<hijabId>) is an
-      // OR across that field — same CSV-to-$in convention the attribute
-      // facets below already use, just for the structural fields.
+      // A comma-separated value (e.g. ?category=<id1>,<id2>) is an OR
+      // across that field.
       const rawValues = String(val).split(",").map((v) => v.trim()).filter(Boolean);
-      const values = key === "ageGroup" ? rawValues.filter((v) => AGE_GROUP_VALUES.has(v)) : rawValues;
-      if (values.length) filter[key] = values.length > 1 ? { $in: values } : values[0];
+      let values = key === "ageGroup" ? rawValues.filter((v) => AGE_GROUP_VALUES.has(v)) : rawValues;
+
+      // Burqa/Hijab storefront scope — an intersection/whitelist, not a
+      // blind overwrite, so a specific in-scope topCategory selection still
+      // narrows correctly. An out-of-scope/unrecognized id collapses to
+      // "match nothing" rather than silently widening back to full scope.
+      // Handled HERE (not after the loop) so the emitted clause's params
+      // stay in lockstep with its own `?` placeholders — patching an
+      // already-emitted clause back out after the fact would desync
+      // `clauses` from `params`.
+      if (key === "topCategory" && scopeIds) {
+        values = values.filter((id) => scopeIds.includes(id));
+        topCategoryHandled = true;
+      }
+
+      if (values.length) {
+        const column = STRUCTURAL_COLUMN[key];
+        if (key === "isFeatured" || key === "isActive") {
+          clauses.push(`${column} = ?`);
+          params.push(isTruthyParam(values[0]) ? 1 : 0);
+        } else {
+          clauses.push(`${column} IN (${values.map(() => "?").join(",")})`);
+          params.push(...values);
+        }
+      } else if (key === "topCategory" && scopeIds) {
+        clauses.push("1=0");
+      }
     } else {
       // Attribute facet: comma-separated values are OR'd within the facet;
-      // multiple different facets AND together. A single `attributes` key
-      // can't hold two separate $elemMatch conditions (the second would
-      // overwrite the first), so each facet gets its own $and entry.
+      // multiple different facets AND together via separate EXISTS clauses.
       const values = String(val).split(",").map((v) => v.trim()).filter(Boolean);
       if (values.length) {
-        attributeConditions.push({ attributes: { $elemMatch: { key: rawKey, values: { $in: values } } } });
+        attributeClauses.push({
+          sql: `EXISTS (SELECT 1 FROM product_attributes pa WHERE pa.product_id = products.id AND pa.attr_key = ? AND pa.attr_value IN (${values.map(() => "?").join(",")}))`,
+          params: [rawKey, ...values],
+        });
       }
     }
   }
 
-  if (attributeConditions.length) filter.$and = attributeConditions;
-  if (priceExprConditions.length) {
-    // Merge with (never overwrite) an existing filter.$expr — the single-
-    // condition collection branch above can already have set filter.$expr
-    // directly (REAL_DISCOUNT_MATCH, via Object.assign when it's the only
-    // collection condition); both must survive together, AND'd.
-    const priceExpr = priceExprConditions.length > 1 ? { $and: priceExprConditions } : priceExprConditions[0];
-    filter.$expr = filter.$expr ? { $and: [filter.$expr, priceExpr] } : priceExpr;
+  for (const c of attributeClauses) {
+    clauses.push(c.sql);
+    params.push(...c.params);
   }
 
-  // Burqa/Hijab storefront scope — an intersection/whitelist, not a blind
-  // overwrite, so a specific in-scope selection still narrows correctly.
-  // An out-of-scope or unrecognized topCategory collapses to "match
-  // nothing" ($in: []) rather than silently widening back to full scope.
-  if (scopeIds) {
-    if (filter.topCategory) {
-      const requested = filter.topCategory.$in ?? [filter.topCategory];
-      const allowed = requested.filter((id) => scopeIds.includes(String(id)));
-      filter.topCategory = { $in: allowed };
-    } else {
-      filter.topCategory = { $in: scopeIds };
-    }
+  // The query named no topCategory/category at all -> scopeIds becomes the
+  // filter outright (the `topCategoryHandled` branch above already applied
+  // the intersection when the query DID name one).
+  if (scopeIds && !topCategoryHandled) {
+    clauses.push(scopeIds.length ? `top_category_id IN (${scopeIds.map(() => "?").join(",")})` : "1=0");
+    if (scopeIds.length) params.push(...scopeIds);
   }
 
-  // Applied last so a query param can never override the caller's base scope
-  // (e.g. a non-admin can't set ?isActive=false to see inactive products).
-  Object.assign(filter, base);
-  return filter;
+  // Applied last so a query param can never override the caller's base
+  // scope (e.g. a non-admin can't set ?isActive=false to see inactive
+  // products).
+  for (const [key, value] of Object.entries(base)) {
+    const column = STRUCTURAL_COLUMN[key] || key;
+    clauses.push(`${column} = ?`);
+    params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
+  }
+
+  return { where: clauses.length ? clauses.join(" AND ") : "1=1", params };
 };
-
-// Mongoose auto-casts string ids to ObjectId for Model.find()/.countDocuments()
-// (it walks the schema for those query builders) but NOT for Model.aggregate()
-// — an aggregation pipeline goes to MongoDB largely as-is. Without this, a
-// string-valued topCategory/category/brand in a $match stage would silently
-// match nothing at all, since the stored field is actually BSON ObjectId.
-const OBJECT_ID_FILTER_FIELDS = ["topCategory", "category", "brand"];
-
-function castObjectIdFieldsForAggregate(filter) {
-  const out = { ...filter };
-  for (const key of OBJECT_ID_FILTER_FIELDS) {
-    const val = out[key];
-    if (val == null) continue;
-    if (typeof val === "string") {
-      if (mongoose.isValidObjectId(val)) out[key] = new mongoose.Types.ObjectId(val);
-    } else if (Array.isArray(val.$in)) {
-      out[key] = { $in: val.$in.filter((v) => mongoose.isValidObjectId(v)).map((v) => new mongoose.Types.ObjectId(v)) };
-    }
-  }
-  return out;
-}
 
 // Real, database-computed counts for the Age Group and Product Collection
 // filter options — never hardcoded/estimated. Each dimension is counted
 // against the filter state with *that same dimension* excluded (standard
-// faceted-search semantics), so e.g. the Kids count reflects "how many
-// products would show if I picked Kids," not "how many match my current
-// ageGroup selection already."
-// Exported (only `listProducts` calls it in real request handling — export
-// exists purely so tests can exercise the self-exclusion logic directly
-// with an explicit scopeIds, independent of getStorefrontDepartmentIds()'s
-// real department allowlist).
+// faceted-search semantics).
 export async function buildFacetCounts(query, baseFilter, scopeIds) {
   const queryWithoutAgeGroup = { ...query };
   delete queryWithoutAgeGroup.ageGroup;
-  const ageGroupFilter = castObjectIdFieldsForAggregate(buildFilter(queryWithoutAgeGroup, baseFilter, scopeIds));
+  const ageGroupFilter = buildFilter(queryWithoutAgeGroup, baseFilter, scopeIds);
 
   const queryWithoutCollection = { ...query };
   delete queryWithoutCollection.collection;
   delete queryWithoutCollection.new;
   delete queryWithoutCollection.featured;
   delete queryWithoutCollection.discount;
-  const collectionFilter = castObjectIdFieldsForAggregate(buildFilter(queryWithoutCollection, baseFilter, scopeIds));
+  const collectionFilter = buildFilter(queryWithoutCollection, baseFilter, scopeIds);
 
   const queryWithoutAvailability = { ...query };
   delete queryWithoutAvailability.availability;
-  const availabilityFilter = castObjectIdFieldsForAggregate(buildFilter(queryWithoutAvailability, baseFilter, scopeIds));
+  const availabilityFilter = buildFilter(queryWithoutAvailability, baseFilter, scopeIds);
 
   const queryWithoutRating = { ...query };
   delete queryWithoutRating.ratingGte;
-  const ratingFilter = castObjectIdFieldsForAggregate(buildFilter(queryWithoutRating, baseFilter, scopeIds));
+  const ratingFilter = buildFilter(queryWithoutRating, baseFilter, scopeIds);
 
-  const [ageGroupRows, collectionRows, availabilityRows, ratingRows] = await Promise.all([
-    Product.aggregate([{ $match: ageGroupFilter }, { $group: { _id: "$ageGroup", count: { $sum: 1 } } }]),
-    Product.aggregate([
-      { $match: collectionFilter },
-      {
-        $facet: {
-          new: [{ $match: { createdAt: { $gte: getNewArrivalCutoff() } } }, { $count: "count" }],
-          featured: [{ $match: { isFeatured: true } }, { $count: "count" }],
-          discount: [{ $match: REAL_DISCOUNT_MATCH }, { $count: "count" }],
-        },
-      },
-    ]),
-    Product.aggregate([
-      { $match: availabilityFilter },
-      {
-        $facet: {
-          in_stock: [{ $match: { variants: { $elemMatch: { stock: { $gt: 0 } } } } }, { $count: "count" }],
-          out_of_stock: [{ $match: { variants: { $not: { $elemMatch: { stock: { $gt: 0 } } } } } }, { $count: "count" }],
-        },
-      },
-    ]),
-    Product.aggregate([
-      { $match: ratingFilter },
-      {
-        $facet: {
-          5: [{ $match: { rating: { $gte: 5 } } }, { $count: "count" }],
-          4: [{ $match: { rating: { $gte: 4 } } }, { $count: "count" }],
-          3: [{ $match: { rating: { $gte: 3 } } }, { $count: "count" }],
-          2: [{ $match: { rating: { $gte: 2 } } }, { $count: "count" }],
-          1: [{ $match: { rating: { $gte: 1 } } }, { $count: "count" }],
-        },
-      },
-    ]),
-  ]);
+  const [ageGroupRows, newCount, featuredCount, discountCount, inStockCount, outOfStockCount, r5, r4, r3, r2, r1] =
+    await Promise.all([
+      Product.groupCountByFilter("age_group", ageGroupFilter.where, ageGroupFilter.params),
+      Product.countByFilter(`${collectionFilter.where} AND created_at >= ?`, [...collectionFilter.params, getNewArrivalCutoff()]),
+      Product.countByFilter(`${collectionFilter.where} AND is_featured = 1`, collectionFilter.params),
+      Product.countByFilter(`${collectionFilter.where} AND ${REAL_DISCOUNT_SQL}`, collectionFilter.params),
+      Product.countByFilter(
+        `${availabilityFilter.where} AND EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)`,
+        availabilityFilter.params,
+      ),
+      Product.countByFilter(
+        `${availabilityFilter.where} AND NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)`,
+        availabilityFilter.params,
+      ),
+      Product.countByFilter(`${ratingFilter.where} AND rating >= 5`, ratingFilter.params),
+      Product.countByFilter(`${ratingFilter.where} AND rating >= 4`, ratingFilter.params),
+      Product.countByFilter(`${ratingFilter.where} AND rating >= 3`, ratingFilter.params),
+      Product.countByFilter(`${ratingFilter.where} AND rating >= 2`, ratingFilter.params),
+      Product.countByFilter(`${ratingFilter.where} AND rating >= 1`, ratingFilter.params),
+    ]);
 
   const ageGroup = { adult: 0, kids: 0, girls: 0 };
   for (const row of ageGroupRows) {
-    if (row._id in ageGroup) ageGroup[row._id] = row.count;
+    if (row.grp in ageGroup) ageGroup[row.grp] = row.count;
   }
 
-  const rawCollection = collectionRows[0] || {};
-  const collection = {
-    new: rawCollection.new?.[0]?.count || 0,
-    featured: rawCollection.featured?.[0]?.count || 0,
-    discount: rawCollection.discount?.[0]?.count || 0,
+  return {
+    ageGroup,
+    collection: { new: newCount, featured: featuredCount, discount: discountCount },
+    availability: { in_stock: inStockCount, out_of_stock: outOfStockCount },
+    ratingGte: { 5: r5, 4: r4, 3: r3, 2: r2, 1: r1 },
   };
-
-  const rawAvailability = availabilityRows[0] || {};
-  const availability = {
-    in_stock: rawAvailability.in_stock?.[0]?.count || 0,
-    out_of_stock: rawAvailability.out_of_stock?.[0]?.count || 0,
-  };
-
-  const rawRating = ratingRows[0] || {};
-  const ratingGte = {
-    5: rawRating[5]?.[0]?.count || 0,
-    4: rawRating[4]?.[0]?.count || 0,
-    3: rawRating[3]?.[0]?.count || 0,
-    2: rawRating[2]?.[0]?.count || 0,
-    1: rawRating[1]?.[0]?.count || 0,
-  };
-
-  return { ageGroup, collection, availability, ratingGte };
 }
 
-// Pure pagination math, extracted so it can be unit tested without a DB.
-// `total` is only known after the count query resolves, so callers compute
-// `skip`/`limit` from a first pass (total unused then) and re-derive
-// `pages` once the real total is in.
 export function computePagination(query, total = 0) {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(100, Number(query.limit) || 12);
@@ -432,14 +345,6 @@ export function computePagination(query, total = 0) {
   return { page, limit, skip, pages };
 }
 
-// Phase 5D — the hybrid GET /api/products query contract. Runs BEFORE
-// buildFilter()/listProducts() ever see the query: every fixed field is
-// bounded/typed here, and every remaining key must name a real, filterable
-// AttributeDefinition — buildFilter() itself is otherwise unchanged (it
-// still does its own CSV-split/escape/cast work on whatever this function
-// hands it), so a normalized, already-safe plain object is all this adds.
-// Throws HttpError(400) on the first violation found; never silently
-// drops an unrecognized key the way the pre-5D code implicitly did.
 const PRODUCT_LIST_FIXED_KEYS = new Set([...ALLOWED_FILTER_FIELDS, "style", ...NON_FILTER_KEYS, "availability", "ratingGte"]);
 const OBJECT_ID_CSV_FIELDS = ["category", "style", "brand", "topCategory"];
 const EXPLICIT_BOOLEAN_FIELDS = ["isActive", "isFeatured", "featured", "discount", "new"];
@@ -478,10 +383,6 @@ export async function parseProductListQuery(query) {
     if (typeof query.ageGroup !== "string") failQuery("Invalid ageGroup", "ageGroup");
     const { values, error } = splitBoundedCsv(query.ageGroup, { maxValues: 10, maxValueLength: 20 });
     if (error) failQuery(`Invalid ageGroup: ${error}`, "ageGroup");
-    // Unrecognized values are safely ignored, not rejected — preserves the
-    // pre-existing, tested behavior: "an unrecognized ageGroup value is
-    // safely ignored, not passed to Mongo"
-    // (tests/http/productFilters.integration.test.mjs).
     const recognized = values.filter((v) => AGE_GROUP_VALUES.has(v));
     if (recognized.length) out.ageGroup = recognized.join(",");
   }
@@ -495,11 +396,6 @@ export async function parseProductListQuery(query) {
     out[key] = val;
   }
 
-  // Canonical `collection=` and any legacy boolean (new/featured/discount)
-  // must never both appear on one request — the new tab UI only ever
-  // emits `collection=`; a request mixing both shapes is rejected outright
-  // rather than buildFilter() having to silently arbitrate one over the
-  // other.
   if (query.collection !== undefined && query.collection !== "") {
     if (typeof query.collection !== "string" || !COLLECTION_VALUES.has(query.collection)) {
       failQuery("Invalid collection", "collection");
@@ -527,10 +423,6 @@ export async function parseProductListQuery(query) {
 
   if (query.search !== undefined && query.search !== "") {
     if (typeof query.search !== "string") failQuery("Invalid search", "search");
-    // Deliberately NOT splitBoundedCsv here — a search term legitimately
-    // contains commas (e.g. "abaya, black"); only length and control
-    // characters are bounded, matching buildFilter()'s own >=2-char
-    // threshold before it becomes a $text/regex query.
     const search = query.search.trim();
     if (search.length > 200) failQuery("search is too long", "search");
     if (/[\x00-\x1f\x7f]/.test(search)) failQuery("Invalid search", "search");
@@ -551,33 +443,11 @@ export async function parseProductListQuery(query) {
     out.fields = values.join(",");
   }
 
-  // page/limit deliberately keep the pre-existing, tested LENIENT contract
-  // — a malformed value falls back to computePagination()'s own default
-  // rather than rejecting outright ("malformed pagination params don't
-  // crash the request", same file). This is an intentional, evidence-based
-  // divergence from the strict boundedIntParam() contract other list
-  // routes use (schemas/commonSchemas.js) — computePagination()'s
-  // `Math.max(1, Number(query.page) || 1)` already makes any non-numeric
-  // value safe by construction (never reaches Mongo as anything but a
-  // clamped integer), so only the shape (plain scalar string, never an
-  // object/array smuggled via bracket notation) is checked here.
   for (const key of ["page", "limit"]) {
     if (query[key] !== undefined && typeof query[key] !== "string") failQuery(`Invalid ${key}`, key);
     if (query[key] !== undefined) out[key] = query[key];
   }
 
-  // UI-only aliases: the shop page's price-range slider (views/shop/
-  // ShopPageClient.jsx's PriceRange) puts `priceMin`/`priceMax` in the URL,
-  // never a raw `basePrice` — translated here into the exact same
-  // out.basePrice shape the block below already produces, so buildFilter()
-  // never has to know these two names exist. Without this translation, a
-  // price-range selection reached this function as two keys nothing
-  // recognized (`priceMin`/`priceMax` aren't in PRODUCT_LIST_FIXED_KEYS,
-  // aren't a real AttributeDefinition), which fails the whole request as
-  // an unrecognized filter — the actual cause of the price filter
-  // silently "not working": every request that used it 400'd, and
-  // ShopPage.jsx's catch turns any 400 into the generic "Invalid filter"
-  // empty state instead of a filtered product list.
   if ((query.priceMin !== undefined && query.priceMin !== "") || (query.priceMax !== undefined && query.priceMax !== "")) {
     if (query.basePrice !== undefined && query.basePrice !== "") {
       failQuery("priceMin/priceMax cannot be combined with basePrice", "priceMin");
@@ -644,7 +514,7 @@ export async function parseProductListQuery(query) {
   }
 
   if (dynamicKeys.length) {
-    const defs = await AttributeDefinition.find({ key: { $in: dynamicKeys } }).lean();
+    const defs = await AttributeDefinition.findByKeys(dynamicKeys);
     const defsByKey = new Map(defs.map((d) => [d.key, d]));
 
     for (const key of dynamicKeys) {
@@ -660,12 +530,6 @@ export async function parseProductListQuery(query) {
       if (def.type === "text") {
         out[key] = values.join(",");
       } else {
-        // select / swatch / boolean all validate against the definition's
-        // real, admin-configured option values — "boolean" renders as a
-        // multi-select checkbox group over def.options in the admin
-        // product form (views/admin/ProductsPage.jsx's AttributeField),
-        // not a literal true/false, so it shares the same options-based
-        // validation as select/swatch.
         const allowed = new Set((def.options || []).map((o) => o.value));
         if (!values.every((v) => allowed.has(v))) {
           failQuery(`Invalid value for ${key}`, key);
@@ -682,53 +546,18 @@ export async function parseProductListQuery(query) {
 // departments (Burqa, with further leaf children of its own) rather than
 // leaves, no product's `topCategory` is ever the division's own id — it
 // expands to the division's direct children (the real departments)
-// instead. A root department (Cosmetics, whose children — Lipstick,
-// Foundation — are leaves) or an already-department id (Burqa) is
-// returned unchanged, matching today's single-id behavior exactly.
-// One aggregation round trip instead of two sequential queries (a plain
-// find() for children plus a separate exists() for grandchildren) — same
-// result, half the latency on every single product-list request that
-// names a category, which matters since this runs unconditionally in
-// listProducts()'s pipeline below.
+// instead. A root department (Cosmetics) or an already-department id
+// (Burqa) is returned unchanged.
 export async function expandCategoryScope(categoryId) {
-  const [result] = await Category.aggregate([
-    { $match: { parent: new mongoose.Types.ObjectId(categoryId) } },
-    { $lookup: { from: Category.collection.name, localField: "_id", foreignField: "parent", as: "grandchildren" } },
-    {
-      $group: {
-        _id: null,
-        ids: { $push: "$_id" },
-        isDivision: { $max: { $gt: [{ $size: "$grandchildren" }, 0] } },
-      },
-    },
-  ]);
-  if (!result) return [categoryId];
-  return result.isDivision ? result.ids.map((id) => id.toString()) : [categoryId];
+  const children = await Category.findByParent(categoryId);
+  if (!children.length) return [categoryId];
+  const grandchildRows = await Category.findChildIdsByParents(children.map((c) => c._id));
+  const isDivision = grandchildRows.length > 0;
+  return isDivision ? children.map((c) => c._id) : [categoryId];
 }
 
-// Explicit pipeline step (parse -> resolve category context/definitions ->
-// validate contextual attributes -> build filter), separate from and
-// running BEFORE buildFilter — buildFilter itself stays a plain
-// synchronous function with no hidden async work inside it. Only
-// meaningful when exactly one real department is unambiguously selected
-// (`deptId`): browsing "All," or a division-expanded multi-department
-// scope, can't be narrowed this way without guessing which department's
-// attributes should apply, so nothing is stripped in either of those
-// cases — parseProductListQuery's existing "is this a real, filterable
-// AttributeDefinition at all" check still applies regardless. When a
-// single department IS selected, any dynamic-looking key that isn't in
-// that department's real AttributeDefinition set (e.g. a stale `fabric=`
-// left over from browsing Clothes, now viewing Cosmetics) is dropped here
-// — defensively, never a 400, and never left in to silently zero out the
-// result set the way an unscoped $elemMatch on a nonexistent key would.
 async function stripInapplicableAttributeFilters(query, deptId) {
   if (!deptId) return query;
-  // Nothing outside the fixed/style keys is present at all — there is no
-  // dynamic attribute facet that could possibly be inapplicable, so skip
-  // the resolveAttributesForCategory() round trip entirely. This is the
-  // overwhelmingly common case (browsing a department with no attribute
-  // filter applied yet), and avoiding the extra DB call here keeps
-  // listProducts() from doing needless work on every single request.
   const candidateKeys = Object.keys(query).filter((k) => !PRODUCT_LIST_FIXED_KEYS.has(k) && k !== "style");
   if (candidateKeys.length === 0) return query;
   const defs = await resolveAttributesForCategory(deptId);
@@ -740,12 +569,6 @@ async function stripInapplicableAttributeFilters(query, deptId) {
   return out;
 }
 
-// `?category=` (aliased to `topCategory` inside buildFilter) is the one
-// query param that can name either a department or a division — every
-// other structural/facet field already means exactly what it says.
-// Expands it here, once, before buildFilter/buildFacetCounts ever see the
-// query, reusing buildFilter's existing CSV-to-$in handling rather than
-// needing a signature change there.
 async function expandCategoryQueryParam(query) {
   const raw = query?.category;
   if (!raw || typeof raw !== "string") return query;
@@ -755,10 +578,6 @@ async function expandCategoryQueryParam(query) {
   return expanded.length > 1 ? { ...query, category: expanded.join(",") } : query;
 }
 
-// The single unambiguous department id `?category=` currently names, or
-// null if it names none (browsing "All") or several (a division was
-// expanded to multiple real departments) — used only to decide whether
-// stripInapplicableAttributeFilters() has enough context to act.
 function resolveSingleDepartmentId(query) {
   const raw = query?.category;
   if (!raw || typeof raw !== "string") return null;
@@ -766,33 +585,29 @@ function resolveSingleDepartmentId(query) {
   return ids.length === 1 && isObjectIdFormat(ids[0]) ? ids[0] : null;
 }
 
+const SORT_COLUMN = { createdAt: "created_at", basePrice: "base_price", rating: "rating", isFeatured: "is_featured", name: "name" };
+
+function parseSort(sortStr) {
+  if (!sortStr) return [{ column: "created_at", dir: "DESC" }];
+  return sortStr.split(",").map((token) => {
+    const desc = token.startsWith("-");
+    const field = desc ? token.slice(1) : token;
+    return { column: SORT_COLUMN[field] || "created_at", dir: desc ? "DESC" : "ASC" };
+  });
+}
+
 export async function listProducts(query, { isAdmin = false, includeFacets = true } = {}) {
   query = await expandCategoryQueryParam(query);
   query = await stripInapplicableAttributeFilters(query, resolveSingleDepartmentId(query));
   const baseFilter = isAdmin ? {} : { isActive: true };
   const scopeIds = isAdmin ? null : await getStorefrontDepartmentIds();
-  const filter = buildFilter(query, baseFilter, scopeIds);
+  const { where, params } = buildFilter(query, baseFilter, scopeIds);
   const { page, limit, skip } = computePagination(query);
+  const sort = parseSort(typeof query.sort === "string" ? query.sort : null);
 
-  const sortStr = typeof query.sort === "string" ? query.sort.split(",").join(" ") : "-createdAt";
-  const fieldsStr = typeof query.fields === "string" ? query.fields.split(",").join(" ") : "-__v";
-
-  // Admin's product table has no use for storefront facet counts — skip the
-  // extra aggregate queries on every admin list/search/paginate request.
-  // Same for any other caller that will never read `facets` at all (e.g.
-  // the home page's department showcases, which render fixed product
-  // lists with no sidebar filters) — `includeFacets: false` skips the
-  // same four extra Product.aggregate() round trips.
   const [products, total, facets] = await Promise.all([
-    Product.find(filter)
-      .sort(sortStr)
-      .select(fieldsStr)
-      .skip(skip)
-      .limit(limit)
-      .populate("brand", "name slug")
-      .populate("category", "name slug")
-      .lean(),
-    Product.countDocuments(filter),
+    Product.findByFilter(where, params, { sort, skip, limit }),
+    Product.countByFilter(where, params),
     isAdmin || !includeFacets ? null : buildFacetCounts(query, baseFilter, scopeIds),
   ]);
 
@@ -807,102 +622,51 @@ export async function listProducts(query, { isAdmin = false, includeFacets = tru
   };
 }
 
-// Everything ProductCard.jsx actually reads (see its prop usage) — used
-// wherever we return a *list* of products for a card grid/rail, so those
-// queries never pull full documents (careInstructions text, timestamps,
-// admin-only bookkeeping) just to render a thumbnail and a price.
-const CARD_FIELDS =
-  "name nameBn slug images basePrice discountPrice availability variants category brand attributes topCategory isActive isFeatured rating createdAt";
+const CARD_FIELDS_NOTE = "row-level selection is no longer applied (see models/productModel.js) — every list already returns the full product shape ProductCard.jsx needs, plus more.";
+void CARD_FIELDS_NOTE;
 
 export async function getProductByIdOrSlug(idOrSlug) {
-  const isId = mongoose.isValidObjectId(idOrSlug);
-  // Read-only: this powers the PDP (via lib/serverDataCache.js's cached
-  // wrapper) and getRelatedProducts()'s own lookup below, neither of which
-  // ever saves the result back — .lean() skips Mongoose document
-  // hydration for a query that's serialized to the client either way.
-  // lib/i18n/localize.js's toPlain() already handles this returning a
-  // plain object instead of a Document (it's had to, since the CARD_FIELDS
-  // list queries elsewhere in this file were already .lean()-ed).
-  const product = await Product.findOne(isId ? { _id: idOrSlug } : { slug: idOrSlug })
-    .populate("brand", "name slug")
-    .populate("category", "name slug")
-    .lean();
+  const isId = isObjectIdFormat(idOrSlug);
+  const product = await Product.findByIdOrSlug(idOrSlug, isId);
   if (!product) throw new HttpError(404, "Product not found");
   return product;
 }
 
-// Powers /compare — was previously silently unreachable: nothing under
-// app/api/products/ handled "/compare" as anything other than the dynamic
-// [idOrSlug] route, which tried to look up a product literally named
-// "compare" and 404'd every time. ids arrives as a comma-separated string
-// (see store/productApi.js's getCompareProducts).
 export async function getCompareProducts(ids) {
   const list = (Array.isArray(ids) ? ids : String(ids || "").split(","))
     .map((s) => s.trim())
-    .filter((id) => mongoose.isValidObjectId(id));
+    .filter(isObjectIdFormat);
   if (!list.length) return [];
-
-  return Product.find({ _id: { $in: list } })
-    .populate("brand", "name slug")
-    .populate("category", "name slug")
-    .lean();
+  return Product.findByIds(list);
 }
 
 export async function listFeatured(limit = 8) {
   const scopeIds = await getStorefrontDepartmentIds();
-  return Product.find({ isFeatured: true, isActive: true, topCategory: { $in: scopeIds } })
-    .sort("-rating")
-    .limit(limit)
-    .populate("brand", "name slug")
-    .populate("category", "name slug")
-    .lean();
+  const { where, params } = buildFilter({}, { isFeatured: true, isActive: true }, scopeIds);
+  return Product.findByFilter(where, params, { sort: [{ column: "rating", dir: "DESC" }], skip: 0, limit });
 }
 
-// Sneaker-era "distinct model names scoped by brand" replaced with its
-// modest-fashion equivalent: product groupings by category. With no
-// `category` param, groups at the top level (one count per root
-// department); with one, groups by that category's direct children (real
-// leaf/style categories). Only categories/departments with at least one
-// active product are included.
-// Performance audit fix: this used to run 2 extra DB round trips PER
-// category (a Category lookup/exists check, then a Product count) — for
-// N categories, 2N+1 total queries. Both branches below now use a fixed,
-// small number of queries regardless of how many categories exist:
-// one batched lookup for the "which categories have children" question
-// (replacing N per-category `isLeafCategory`/children lookups), and one
-// or two grouped aggregations (replacing N per-category `countDocuments`
-// calls). Every rule below is preserved exactly: `isActive` filtering,
-// which field each tier counts by, the sortOrder/name category sort, the
-// response shape, and "only categories with at least one active product"
-// (count > 0) filtering.
 export async function listGroupings(categoryId) {
   if (categoryId) requireObjectIdFormat(categoryId, "category");
-  const parentFilter = categoryId ? { parent: categoryId } : { parent: null };
-  const categories = await Category.find(parentFilter).sort("sortOrder name").lean();
+  const categories = categoryId ? await Category.findByParent(categoryId) : await Category.findByParent(null);
   if (categories.length === 0) return [];
 
   const categoryIds = categories.map((c) => c._id);
 
   if (!categoryId) {
-    // Top level: each `c` is a root department. A real product's
-    // topCategory is always the root's own id — a root's leaf-style
-    // children never appear there — but counting across a root plus its
-    // direct children in one query is still correct (the children simply
-    // never match) and avoids a second, department-specific code path.
-    // One batched query replaces what used to be one `Category.find`
-    // per root.
-    const children = await Category.find({ parent: { $in: categoryIds } }).select("_id parent").lean();
-    const childToRoot = new Map(children.map((ch) => [String(ch._id), String(ch.parent)]));
-    const allScopeIds = [...categoryIds, ...children.map((ch) => ch._id)];
+    const childRows = await Category.findChildIdsByParents(categoryIds);
+    const childToRoot = new Map(childRows.map((ch) => [ch.id, ch.parent_id]));
+    const allScopeIds = [...categoryIds, ...childRows.map((ch) => ch.id)];
 
-    const counted = await Product.aggregate([
-      { $match: { isActive: true, topCategory: { $in: allScopeIds } } },
-      { $group: { _id: "$topCategory", count: { $sum: 1 } } },
-    ]);
+    const { where, params } = buildFilter({}, { isActive: true }, null);
+    const scoped = allScopeIds.length
+      ? `${where} AND top_category_id IN (${allScopeIds.map(() => "?").join(",")})`
+      : "1=0";
+    const counted = await Product.groupCountByFilter("top_category_id", scoped, [...params, ...allScopeIds]);
 
     const countByRoot = new Map();
     for (const row of counted) {
-      const rootId = childToRoot.get(String(row._id)) ?? String(row._id);
+      const rootId = childToRoot.get(row.grp) ?? row.grp;
       countByRoot.set(rootId, (countByRoot.get(rootId) ?? 0) + row.count);
     }
 
@@ -912,103 +676,64 @@ export async function listGroupings(categoryId) {
         name: c.name,
         nameBn: c.nameBn,
         slug: c.slug,
-        count: countByRoot.get(String(c._id)) ?? 0,
+        count: countByRoot.get(c._id) ?? 0,
         isLeaf: false,
       }))
       .filter((g) => g.count > 0);
   }
 
-  // Drilling into a specific department: each `c` is always a real
-  // leaf/style category (matched via `category`) — no product's
-  // `category` field is ever a department. One batched query (instead of
-  // one `isLeafCategory()` call per category) determines which of these
-  // categories themselves have children (= not a leaf).
-  const grandchildren = await Category.find({ parent: { $in: categoryIds } }).distinct("parent");
-  const nonLeafIds = new Set(grandchildren.map(String));
-  const leafIds = categoryIds.filter((id) => !nonLeafIds.has(String(id)));
-  const nonLeafIdsArr = categoryIds.filter((id) => nonLeafIds.has(String(id)));
+  const grandchildRows = await Category.findChildIdsByParents(categoryIds);
+  const nonLeafIds = new Set(grandchildRows.map((r) => r.parent_id));
+  const leafIds = categoryIds.filter((id) => !nonLeafIds.has(id));
+  const nonLeafIdsArr = categoryIds.filter((id) => nonLeafIds.has(id));
 
   const [leafCounts, nonLeafCounts] = await Promise.all([
     leafIds.length
-      ? Product.aggregate([
-          { $match: { isActive: true, category: { $in: leafIds } } },
-          { $group: { _id: "$category", count: { $sum: 1 } } },
-        ])
+      ? Product.groupCountByFilter("category_id", `is_active = 1 AND category_id IN (${leafIds.map(() => "?").join(",")})`, leafIds)
       : [],
     nonLeafIdsArr.length
-      ? Product.aggregate([
-          { $match: { isActive: true, topCategory: { $in: nonLeafIdsArr } } },
-          { $group: { _id: "$topCategory", count: { $sum: 1 } } },
-        ])
+      ? Product.groupCountByFilter("top_category_id", `is_active = 1 AND top_category_id IN (${nonLeafIdsArr.map(() => "?").join(",")})`, nonLeafIdsArr)
       : [],
   ]);
 
   const countById = new Map();
-  for (const row of [...leafCounts, ...nonLeafCounts]) countById.set(String(row._id), row.count);
+  for (const row of [...leafCounts, ...nonLeafCounts]) countById.set(row.grp, row.count);
 
   return categories
     .map((c) => {
-      const isLeaf = !nonLeafIds.has(String(c._id));
+      const isLeaf = !nonLeafIds.has(c._id);
       return {
         _id: c._id,
         name: c.name,
         nameBn: c.nameBn,
         slug: c.slug,
-        count: countById.get(String(c._id)) ?? 0,
+        count: countById.get(c._id) ?? 0,
         isLeaf,
       };
     })
     .filter((g) => g.count > 0);
 }
 
-// The Brand filter facet, scoped to whichever category is currently being
-// browsed — real brands with at least one real, active product in scope,
-// never the entire catalog's brand list. Before this, GET /api/brands
-// returned every brand unconditionally regardless of `?category=`, so
-// browsing e.g. Jewelry/Earrings showed the same 5 Cosmetics brands
-// (CeraVe, COSRX, ...) in the sidebar even though none of them have a
-// single earring. `categoryId` uses the exact same expansion
-// expandCategoryScope() already applies to the product grid's own
-// `?category=` filter (a division like "Cosmetics" expands to its real
-// department children; a plain department id is used as-is), so the
-// brands shown always match what the grid itself would actually return.
 export async function listBrandsForCategory(categoryId) {
-  if (!categoryId) return Brand.find({ isActive: true }).sort("name").lean();
+  if (!categoryId) return Brand.findActive();
   requireObjectIdFormat(categoryId, "category");
-  const scopeIds = (await expandCategoryScope(categoryId)).map((id) => new mongoose.Types.ObjectId(id));
-  const brandIds = await Product.distinct("brand", {
-    isActive: true,
-    topCategory: { $in: scopeIds },
-    brand: { $ne: null },
-  });
+  const scopeIds = await expandCategoryScope(categoryId);
+  const brandIds = scopeIds.length
+    ? await Product.distinctBrandIds(`is_active = 1 AND top_category_id IN (${scopeIds.map(() => "?").join(",")})`, scopeIds)
+    : [];
   if (!brandIds.length) return [];
-  return Brand.find({ _id: { $in: brandIds }, isActive: true }).sort("name").lean();
+  return Brand.findActiveByIds(brandIds);
 }
 
-// Related = same leaf category ranks above same-department-only, and within
-// each tier, products sharing more attribute values (fabric, color, etc.)
-// with the current product rank higher.
-// Ranks real same-department candidates by category/attribute overlap
-// (see scoreOf), then — since the current catalog is small enough that a
-// given department can easily have zero other active products — fills any
-// remaining slots with real active products ranked by the schema's actual
-// signals (isFeatured, rating, recency). Nothing here is invented: every
-// field scored or sorted on already exists on Product and is populated by
-// real seed/admin data, and a product never appears with a fabricated label
-// (ProductCard has no "Best Seller" badge to begin with).
 export async function listRelated(idOrSlug, limit = 8) {
   const current = await getProductByIdOrSlug(idOrSlug);
   const clampedLimit = Math.min(24, Math.max(1, Number(limit) || 8));
 
-  const sameDept = await Product.find({
-    _id: { $ne: current._id },
-    topCategory: current.topCategory,
-    isActive: true,
-  })
-    .select(CARD_FIELDS)
-    .populate("brand", "name slug")
-    .populate("category", "name slug")
-    .lean();
+  const sameDept = await Product.findByFilter(
+    "id != ? AND top_category_id = ? AND is_active = 1",
+    [current._id, current.topCategory],
+    { sort: [{ column: "created_at", dir: "DESC" }], skip: 0, limit: 500 },
+  );
 
   const currentCategoryId = String(current.category?._id || current.category);
   const currentAttrs = new Map((current.attributes || []).map((a) => [a.key, new Set(a.values)]));
@@ -1020,8 +745,6 @@ export async function listRelated(idOrSlug, limit = 8) {
       const shared = a.values.filter((v) => currentAttrs.get(a.key)?.has(v)).length;
       return sum + shared;
     }, 0);
-    // A small, real tiebreaker — prefer purchasable products — not a
-    // fabricated popularity signal.
     const inStockBonus = isInStock(p) ? 2 : 0;
     return sameCategory + attrOverlap + inStockBonus;
   };
@@ -1031,43 +754,23 @@ export async function listRelated(idOrSlug, limit = 8) {
     .sort((a, b) => b.score - a.score)
     .map((s) => s.product);
 
-  // Fallback fill: real active products the catalog actually has, ranked by
-  // real signals (featured flag, rating, recency) — only reached when the
-  // same-department pool alone can't fill the rail.
   if (ranked.length < clampedLimit) {
     const excludeIds = [current._id, ...ranked.map((p) => p._id)];
-    const fillers = await Product.find({ _id: { $nin: excludeIds }, isActive: true })
-      .select(CARD_FIELDS)
-      .populate("brand", "name slug")
-      .populate("category", "name slug")
-      .sort({ isFeatured: -1, rating: -1, createdAt: -1 })
-      .limit(clampedLimit - ranked.length)
-      .lean();
+    const fillers = await Product.findByFilter(
+      `id NOT IN (${excludeIds.map(() => "?").join(",")}) AND is_active = 1`,
+      excludeIds,
+      { sort: [{ column: "is_featured", dir: "DESC" }, { column: "rating", dir: "DESC" }, { column: "created_at", dir: "DESC" }], skip: 0, limit: clampedLimit - ranked.length },
+    );
     ranked = [...ranked, ...fillers];
   }
 
   return ranked.slice(0, clampedLimit);
 }
 
-// Recently Viewed's server side: given a list of ids read back from the
-// visitor's own localStorage, resolve them against real, current MongoDB
-// data in one query — never trust the stored snapshot for price/stock/name,
-// only for "which products and in what order." Silently drops anything
-// invalid, deleted, or deactivated since it was viewed; the caller
-// re-applies the visitor's stored order afterward (a $in query does not
-// preserve input order).
 export async function getProductsByIds(ids) {
-  const clean = [...new Set((Array.isArray(ids) ? ids : []).filter((id) => mongoose.isValidObjectId(id)))].slice(
-    0,
-    12,
-  );
+  const clean = [...new Set((Array.isArray(ids) ? ids : []).filter(isObjectIdFormat))].slice(0, 12);
   if (!clean.length) return [];
-
-  return Product.find({ _id: { $in: clean }, isActive: true })
-    .select(CARD_FIELDS)
-    .populate("brand", "name slug")
-    .populate("category", "name slug")
-    .lean();
+  return Product.findByIds(clean, { activeOnly: true });
 }
 
 const WRITABLE_FIELDS = [
@@ -1103,15 +806,9 @@ const pickWritable = (body) => {
   return out;
 };
 
-// Resolves the leaf category and validates it's actually a leaf (a
-// department, or a division like Clothes, can't be assigned directly to a
-// product) — also returns the department id for the required-attribute
-// check below. "Leaf" means "has no children of its own" — NOT "has a
-// parent", since a department (e.g. Burqa) now has a parent (Clothes) too
-// but still isn't a valid product category.
 async function resolveLeafCategory(categoryId) {
   if (!isObjectIdFormat(categoryId)) throw new HttpError(400, "Invalid category id");
-  const category = await Category.findById(categoryId).lean();
+  const category = await Category.findById(categoryId);
   if (!category) throw new HttpError(400, "Category not found");
   if (!(await isLeafCategory(category._id))) {
     throw new HttpError(400, `"${category.name}" is a department, not a style — assign a subcategory instead`);
@@ -1122,11 +819,8 @@ async function resolveLeafCategory(categoryId) {
 async function assertSkusUnique(variants, excludeProductId) {
   const skus = (variants || []).map((v) => v.sku).filter(Boolean);
   if (!skus.length) return;
-  const dupeQuery = { "variants.sku": { $in: skus } };
-  if (excludeProductId) dupeQuery._id = { $ne: excludeProductId };
-  const clash = await Product.findOne(dupeQuery).select("variants.sku").lean();
-  if (clash) {
-    const taken = clash.variants.map((v) => v.sku).find((sku) => skus.includes(sku));
+  const taken = await Product.findVariantClash(skus, excludeProductId);
+  if (taken) {
     throw new HttpError(400, `SKU "${taken}" is already used by another product`);
   }
 }
@@ -1144,10 +838,11 @@ function assertDiscountsValid(data) {
 }
 
 async function assertRequiredAttributes(data, topCategoryId) {
-  const required = await AttributeDefinition.find({
-    required: true,
-    $or: [{ appliesToCategories: { $size: 0 } }, { appliesToCategories: topCategoryId }],
-  }).lean();
+  const allDefs = await AttributeDefinition.findAll();
+  const topCategoryIdStr = topCategoryId ? String(topCategoryId) : null;
+  const required = allDefs.filter(
+    (d) => d.required && (!d.appliesToCategories?.length || d.appliesToCategories.some((c) => String(c) === topCategoryIdStr)),
+  );
   if (!required.length) return;
 
   const provided = new Map((data.attributes || []).map((a) => [a.key, a.values]));
@@ -1169,19 +864,7 @@ export async function createProduct(body, actorId) {
   assertDiscountsValid(data);
   await assertRequiredAttributes(data, category.parent);
 
-  const product = new Product(data);
-  await product.save();
-  // Non-transactional (a plain single-document save) — awaited so a
-  // failure is observed/logged before returning, but never fails the
-  // already-succeeded product creation itself. See lib/events.js's
-  // emitBestEffort() for the documented policy.
-  //
-  // `actorId` (the admin who submitted this request, from the route's own
-  // requirePermission() call) rides along on the broadcast event so the
-  // SAME admin's own useAdminEventStream subscription can skip showing a
-  // second, redundant toast for an action they already got direct
-  // form-submit feedback for — every OTHER open admin session (no
-  // matching actorId) still sees the real-time toast as before.
+  const product = await Product.create(data);
   await emitBestEffort(
     emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name, actorId }),
   );
@@ -1194,24 +877,24 @@ export async function updateProduct(id, body, actorId) {
   if (!product) throw new HttpError(404, "Product not found");
 
   const data = pickWritable(body);
-  // `product` is a hydrated Mongoose document (not `.lean()`), so its
-  // `category` field is a real ObjectId instance, not a string — falling
-  // back to it directly used to fail resolveLeafCategory's
-  // isObjectIdFormat() check (which requires typeof === "string"), making
-  // any partial update that omitted `category` wrongly 400 with "Invalid
-  // category id". Stringify the fallback so an omitted `category` behaves
-  // like the existing value, while an explicitly-supplied `data.category`
-  // is still validated exactly as before.
-  const categoryId = data.category ?? String(product.category);
+  const categoryId = data.category ?? String(product.category?._id ?? product.category);
   const category = await resolveLeafCategory(categoryId);
 
   const variants = data.variants ?? product.variants;
   await assertSkusUnique(variants, product._id);
-  assertDiscountsValid({ ...product.toObject(), ...data, variants });
-  await assertRequiredAttributes({ ...product.toObject(), ...data }, category.parent);
+  assertDiscountsValid({ ...product, ...data, variants });
+  await assertRequiredAttributes({ ...product, ...data }, category.parent);
 
   Object.assign(product, data);
   await product.save();
+  // Product.findById() (unlike findByIdOrSlug(), which the storefront PDP
+  // needs populated) is meant to mirror the original bare Mongoose
+  // `Model.findById()` this route used before the migration — no
+  // populate(), so `category`/`brand` came back as raw ids. hydrate()
+  // populates both unconditionally, so re-flatten them to ids here to
+  // keep this route's response contract unchanged for its callers.
+  product.category = typeof product.category === "object" ? product.category._id : product.category;
+  product.brand = typeof product.brand === "object" && product.brand ? product.brand._id : product.brand;
   await emitBestEffort(
     emitAdminEvent({ type: "PRODUCT_UPDATED", productId: product._id.toString(), name: product.name, actorId }),
   );

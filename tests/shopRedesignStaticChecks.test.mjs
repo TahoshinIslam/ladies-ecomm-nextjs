@@ -46,6 +46,30 @@ describe("ShopPageClient.jsx — responsive visible-count is server-rendered CSS
   });
 });
 
+describe("ShopPageClient.jsx — 'Load more' shows real skeleton placeholders for the incoming fetched page, not just a dimmed grid", () => {
+  test("ProductCardSkeleton renders via the shared shimmer `.skeleton` utility, matching ProductCard's own aspect-4/5 media plate", () => {
+    const fnMatch = src.match(/function ProductCardSkeleton\(\)\s*\{([\s\S]*?)\n\}/);
+    assert.ok(fnMatch, "ProductCardSkeleton must exist");
+    assert.match(fnMatch[1], /skeleton aspect-4\/5/);
+  });
+
+  test("skeleton placeholders are appended INSIDE the product grid only while loadingMore (a real fetched page), never during the instant buffered-reveal path which sets no loading state", () => {
+    const fnMatch = src.match(/\{loadingMore &&\s*\n\s*Array\.from\(\{ length: PRODUCT_LOADMORE_SKELETON_COUNT \}\)\.map\([\s\S]*?ProductCardSkeleton/);
+    assert.ok(fnMatch, "expected loadingMore to gate rendering PRODUCT_LOADMORE_SKELETON_COUNT <ProductCardSkeleton> placeholders");
+  });
+
+  test("the already-visible product cards no longer dim to opacity-60 while a page is fetching (loadingMore) — only isPending (a department/filter transition) dims them; the incoming skeletons are the loadingMore feedback instead", () => {
+    const gridClassMatch = src.match(/className=\{cn\(\s*"grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4 transition-opacity",\s*([^)]+)\)/);
+    assert.ok(gridClassMatch, "expected the product grid's cn(...) call");
+    assert.match(gridClassMatch[1], /isPending && "pointer-events-none opacity-60"/);
+    assert.ok(!/loadingMore \|\| isPending\) && "pointer-events-none opacity-60"/.test(gridClassMatch[1]), "loadingMore must no longer dim the whole grid");
+  });
+
+  test("aria-busy on the grid still reflects both loadingMore and isPending (assistive tech is still told a fetch is in flight, even without the visual dim)", () => {
+    assert.match(src, /aria-busy=\{loadingMore \|\| isPending\}/);
+  });
+});
+
 describe("ShopPageClient.jsx — collection filter is a checkbox group, matching Category/Age Group/Availability", () => {
   test("CollectionFilterGroup renders through the shared FilterGroup/CheckBox components, not a bespoke tab widget", () => {
     const fnMatch = src.match(/function CollectionFilterGroup\(([\s\S]*?)\n}\n/);

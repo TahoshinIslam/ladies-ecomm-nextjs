@@ -11,12 +11,12 @@ import { requireObjectIdFormat, isHexTokenFormat } from "../lib/validation.js";
 // ========== SELF-SERVICE ==========
 
 export async function updateMe(userId, body) {
-  const user = await User.findById(userId).select("+password");
+  const user = await User.findById(userId);
   if (!user) throw new HttpError(404, "User not found");
 
   const { name, email, phone, avatar, currentPassword, newPassword } = body;
 
-  // Pre-check email uniqueness for a clearer error than a raw E11000.
+  // Pre-check email uniqueness for a clearer error than a raw duplicate-key error.
   if (email && email !== user.email) {
     const taken = await User.findOne({ email });
     if (taken) throw new HttpError(400, "Email already in use");
@@ -59,16 +59,12 @@ export async function forgotPassword(email) {
   // Always respond identically regardless of what happens below — whether
   // the account doesn't exist, CLIENT_URL is misconfigured, or SMTP send
   // fails, the PUBLIC response must be indistinguishable in every case.
-  // Previously, an existing account whose email failed to send (e.g. SMTP
-  // unreachable) surfaced a 500 while a nonexistent email quietly returned
-  // 200 — a reliable enumeration oracle. Every failure path below is now
-  // swallowed (logged server-side only) and this same response returned.
   if (!user) return FORGOT_PASSWORD_RESPONSE;
 
   const rawToken = crypto.randomBytes(32).toString("hex");
   user.resetPasswordToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-  user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
-  await user.save({ validateBeforeSave: false });
+  user.resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000);
+  await user.save();
 
   try {
     // buildAppUrl throws on a missing/malformed CLIENT_URL — treated the
@@ -77,9 +73,9 @@ export async function forgotPassword(email) {
     const tpl = buildPasswordResetEmail(user.name, resetUrl);
     await sendEmail({ to: user.email, ...tpl });
   } catch (err) {
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save({ validateBeforeSave: false });
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+    await user.save();
     // Never logs the raw token or the user's email — just enough to alert
     // ops that delivery/config is broken.
     console.error("forgotPassword: failed to send reset email", err?.message || err);
@@ -93,25 +89,20 @@ export async function resetPassword(token, password) {
   // never be distinguishable from a well-formed-but-unknown one.
   if (!isHexTokenFormat(token)) throw new HttpError(400, "Invalid or expired reset link");
   const hashed = crypto.createHash("sha256").update(token).digest("hex");
-  const user = await User.findOne({
-    resetPasswordToken: hashed,
-    resetPasswordExpires: { $gt: Date.now() },
-  }).select("+resetPasswordToken +resetPasswordExpires");
+  const user = await User.findOne({ resetPasswordToken: hashed, resetPasswordExpires: { $gt: new Date() } });
 
   if (!user) throw new HttpError(400, "Invalid or expired reset link");
 
   user.password = password;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpires = undefined;
+  user.resetPasswordToken = null;
+  user.resetPasswordExpires = null;
   // Clear any active lockout so they can log in immediately with the new password.
   user.loginAttempts = 0;
-  user.lockUntil = undefined;
+  user.lockUntil = null;
   await user.save();
 
   // Every session this user had — on any device, any browser — must stop
-  // working the moment their password changes via reset. A previously
-  // issued session cookie is rejected the next time it's used (see
-  // lib/session.js's validateSessionToken, which checks revokedAt).
+  // working the moment their password changes via reset.
   await revokeAllSessionsForUser(user._id);
 
   return { message: "Password updated. Please log in." };
@@ -127,35 +118,20 @@ const VALID_ROLES = ["customer", "employee", "admin"];
 // assign an employee a permission string that nothing actually enforces.
 const VALID_PERMISSIONS = Object.values(PERMISSIONS);
 
-const USER_SORT_FIELDS = { name: "name", email: "email", role: "role", createdAt: "createdAt" };
-
 export async function listUsers({ page = 1, limit = 20, search, sortBy, sortOrder, role } = {}) {
-  const filter = {};
-  if (role) filter.role = role;
-  if (search && String(search).trim()) {
-    const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    filter.$or = [{ name: new RegExp(escaped, "i") }, { email: new RegExp(escaped, "i") }];
-  }
-
-  const sortField = USER_SORT_FIELDS[sortBy] || "createdAt";
-  const sortDir = sortOrder === "asc" ? 1 : -1;
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.min(100, Number(limit) || 20);
   const skip = (pageNum - 1) * limitNum;
 
+  const filter = {};
+  if (role) filter.role = role;
+  if (search && String(search).trim()) {
+    const term = String(search).trim();
+    filter.$or = [{ name: term }, { email: term }];
+  }
+
   const [users, total] = await Promise.all([
-    // Read-only (this function's one real caller, GET /api/users,
-    // immediately JSON-serializes the response) — .lean() skips document
-    // hydration. Projected to exactly what the admin users table + its
-    // edit modal render (name/email/avatar/role/createdAt/isVerified/
-    // permissions); password/resetPasswordToken/etc. are already
-    // select:false on the schema and excluded either way.
-    User.find(filter)
-      .select("name email avatar role createdAt isVerified permissions")
-      .sort({ [sortField]: sortDir })
-      .skip(skip)
-      .limit(limitNum)
-      .lean(),
+    User.find(filter, { sort: { field: sortBy || "createdAt", dir: sortOrder === "asc" ? 1 : -1 }, skip, limit: limitNum }),
     User.countDocuments(filter),
   ]);
   return {

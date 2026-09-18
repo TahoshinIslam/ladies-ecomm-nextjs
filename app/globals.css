@@ -427,7 +427,7 @@
   width: 100%;
   max-width: 1480px;
   margin-inline: auto;
-  padding-inline: clamp(20px, 4vw, 56px);
+  padding-inline: clamp(16px, 3vw, 40px);
 }
 
 /* Leo headings: Manrope (carried in --font-serif, see above), tight tracking. */

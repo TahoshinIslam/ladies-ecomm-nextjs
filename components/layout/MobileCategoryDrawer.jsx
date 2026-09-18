@@ -4,38 +4,48 @@
 // department slides in its subcategories with a "‹ [Department]" back row
 // in place of a flat, all-levels-at-once list, matching the reference
 // layout's own category drawer. A node with no children is a real leaf:
-// tapping it navigates straight to that filtered shop page, using the same
-// category/style query-param convention CategoryMegaMenu.jsx already uses
-// for the header's desktop flyout (so the two stay consistent): the
-// department itself uses `category=<id>`, a direct child uses
-// `category=<departmentId>&style=<id>`, and a grandchild (this taxonomy is
-// at most 3 levels deep) uses `style=<id>` alone.
-import { useState } from "react";
+// tapping it navigates straight to that filtered shop page.
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { departmentName } from "../../lib/i18n/catalog.js";
 import { iconFor } from "./CategoryMegaMenu.jsx";
 
-export default function MobileCategoryDrawer({ categories, locale, t, onNavigate }) {
-  const [path, setPath] = useState([]);
-
+// `path`/`setPath` are owned by Header.jsx, not this component — Header.jsx
+// never unmounts, while this drawer's contents do (AnimatePresence removes
+// them from the DOM on close), so state that lived here reset to [] every
+// time the drawer closed and reopened. Lifting it up means reopening the
+// drawer picks back up exactly where the shopper left the drill-down, e.g.
+// mid-browse in Food -> Fruits & Vegetables after tapping a leaf product.
+export default function MobileCategoryDrawer({ categories, locale, t, path, setPath, onNavigate }) {
+  const sp = useSearchParams();
   const childrenOf = (parentId) => categories.filter((c) => String(c.parent) === String(parentId));
   const current = path[path.length - 1] ?? null;
   const list = current ? childrenOf(current._id) : categories.filter((c) => !c.parent);
+  const hasChildren = (node) => childrenOf(node._id).length > 0;
 
-  // `ancestorPath` is every level ABOVE `node` (not including it) — for a
-  // member of `list` that's the current `path` (children of `current`,
-  // whose own ancestors are exactly `path`); for `current` itself (the
-  // trailing "shop all in this category" link below) it's `path` minus its
-  // own last entry, since `current` is one level shallower than its
-  // children.
-  const hrefAt = (node, ancestorPath) => {
-    if (ancestorPath.length === 0) return `/shop?category=${node._id}`;
-    if (ancestorPath.length === 1) return `/shop?category=${ancestorPath[0]._id}&style=${node._id}`;
-    return `/shop?style=${node._id}`;
-  };
-  const hrefFor = (node) => hrefAt(node, path);
+  // Keyed purely on whether `node` itself has children — never on how deep
+  // it sits. `category=<id>` maps to a `topCategory` filter and `style=<id>`
+  // to a `category` filter (services/productService.js); a real product's
+  // `category` is always some genuine LEAF, so a composite
+  // `category=<ancestor>&style=<node>` only ever matches real products when
+  // `node` IS that leaf. A department that itself has children (Burqa under
+  // the Women division, or a marketplace mid-tier like Food's "Fruits &
+  // Vegetables") is never any product's own `category` — browsing it by its
+  // own id, exactly like a top-level department link, is what actually
+  // returns its products.
+  const linkFor = (node) => (hasChildren(node) ? `/shop?category=${node._id}` : `/shop?style=${node._id}`);
+
+  // A node reads as "active" exactly when the CURRENT page's URL is the one
+  // its own linkFor() would produce — i.e. the shopper is actually looking
+  // at this department/style's products right now, not just "this button
+  // was clicked at some point." Reading it from the real URL (rather than
+  // some separately-tracked "last selected" flag) means it's always correct
+  // even after a fresh page load, a Back/Forward navigation, or reaching the
+  // same page a completely different way (e.g. the desktop hover menu).
+  const isActive = (node) =>
+    hasChildren(node) ? sp.get("category") === String(node._id) && !sp.get("style") : sp.get("style") === String(node._id);
 
   if (list.length === 0) return null;
 
@@ -53,34 +63,47 @@ export default function MobileCategoryDrawer({ categories, locale, t, onNavigate
       )}
       {list.map((node) => {
         const Icon = path.length === 0 ? iconFor(node.icon) : null;
-        const hasChildren = childrenOf(node._id).length > 0;
+        const nodeHasChildren = hasChildren(node);
+        const active = isActive(node);
         const name = departmentName(locale, node.slug, node.name);
-        return hasChildren ? (
+        // Same non-color-only convention as CategoryDrillMenu.jsx's desktop
+        // flyout: a solid green fill + white text, never a color-only cue.
+        const rowClasses = `flex items-center gap-3 border-b border-line px-4 py-3.5 text-[15px] transition-colors focus-ring ${
+          active ? "bg-verm text-accent-foreground" : "text-ink hover:bg-wash"
+        }`;
+        return nodeHasChildren ? (
           <button
             key={node._id}
             type="button"
             onClick={() => setPath((p) => [...p, node])}
-            className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-left text-[15px] transition-colors hover:bg-wash focus-ring"
+            className={`w-full text-left ${rowClasses}`}
           >
-            {Icon && <Icon className="h-[18px] w-[18px] flex-none text-stone" strokeWidth={1.8} aria-hidden="true" />}
+            {Icon && (
+              <Icon
+                className={`h-[18px] w-[18px] flex-none ${active ? "text-accent-foreground" : "text-stone"}`}
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+            )}
             <span className="min-w-0 flex-1 truncate">{name}</span>
-            <ChevronRight className="h-4 w-4 flex-none text-stone" aria-hidden="true" />
+            <ChevronRight className={`h-4 w-4 flex-none ${active ? "text-accent-foreground/70" : "text-stone"}`} aria-hidden="true" />
           </button>
         ) : (
-          <Link
-            key={node._id}
-            href={hrefFor(node)}
-            onClick={onNavigate}
-            className="flex items-center gap-3 border-b border-line px-4 py-3.5 text-[15px] transition-colors hover:bg-wash focus-ring"
-          >
-            {Icon && <Icon className="h-[18px] w-[18px] flex-none text-stone" strokeWidth={1.8} aria-hidden="true" />}
+          <Link key={node._id} href={linkFor(node)} onClick={onNavigate} className={rowClasses}>
+            {Icon && (
+              <Icon
+                className={`h-[18px] w-[18px] flex-none ${active ? "text-accent-foreground" : "text-stone"}`}
+                strokeWidth={1.8}
+                aria-hidden="true"
+              />
+            )}
             <span className="min-w-0 flex-1 truncate">{name}</span>
           </Link>
         );
       })}
       {current && (
         <Link
-          href={hrefAt(current, path.slice(0, -1))}
+          href={linkFor(current)}
           onClick={onNavigate}
           className="block px-4 py-3 text-[13.5px] text-stone transition-colors hover:text-verm"
         >

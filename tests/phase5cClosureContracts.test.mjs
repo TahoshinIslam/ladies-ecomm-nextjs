@@ -7,7 +7,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, requestAs, createTestUser, createTestProduct } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestSession, requestAs, createTestUser, createTestProduct, deleteRows } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -40,7 +40,7 @@ describe("Phase 5C — product compare/batch id-list contract", { skip: !canRun 
       const json = await res.json();
       assert.equal(json.products.length, 2);
     } finally {
-      await Product.deleteMany({ _id: { $in: [productA._id, productB._id] } });
+      await deleteRows("products", "id", [productA._id, productB._id]);
     }
   });
 
@@ -50,7 +50,7 @@ describe("Phase 5C — product compare/batch id-list contract", { skip: !canRun 
       const res = await compareGET(requestAs({ method: "GET", url: `http://test/api/products/compare?ids=${product._id},not-an-id` }));
       assert.equal(res.status, 400);
     } finally {
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("products", "id", product._id);
     }
   });
 
@@ -77,12 +77,10 @@ describe("Phase 5C — product compare/batch id-list contract", { skip: !canRun 
 
 describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && reason }, () => {
   let cartDELETE;
-  let User;
 
   before(async () => {
     await connectTestDb();
     ({ DELETE: cartDELETE } = await import("../app/api/cart/[productId]/[variantId]/route.js"));
-    ({ default: User } = await import("../models/userModel.js"));
   });
 
   after(async () => {});
@@ -96,7 +94,7 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -109,7 +107,7 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -122,7 +120,7 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
       );
       assert.equal(res.status, 200);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 });

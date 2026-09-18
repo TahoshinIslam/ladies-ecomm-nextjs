@@ -6,20 +6,12 @@ import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
 import { isSafeInternalPath } from "../schemas/promotionSchemas.js";
 
 // One shared model backs two storefront surfaces (the homepage hero
-// carousel and visitor campaign popups) rather than two competing schemas —
-// see models/promotionModel.js's own comment. Every admin mutation here
-// only ever writes an already Zod-`.strict()`-validated body
-// (schemas/promotionSchemas.js), so — matching services/couponService.js's
-// exact precedent — `Promotion.create(body)` / `findByIdAndUpdate(id,
-// body, ...)` is safe as-is with no separate field-picking step.
+// carousel and visitor campaign popups) rather than two competing schemas.
 
 // Fields that change what a visitor actually SEES or is sent to — bumping
 // `version` on any of these (see updatePromotion() below) intentionally
 // resets a popup visitor's stored "already dismissed/shown" eligibility
 // (CampaignPopup.jsx compares its stored version against the live one).
-// Deliberately excludes status/schedule/priority/audience/pageScope/
-// frequency: pausing-then-reactivating the SAME creative, or nudging its
-// priority, should not force everyone who already saw it to see it again.
 const CREATIVE_FIELDS = [
   "title", "titleBn", "subtitle", "subtitleBn", "ctaLabel", "ctaLabelBn",
   "desktopImage", "mobileImage", "imageAlt", "imageAltBn",
@@ -29,16 +21,11 @@ const CREATIVE_FIELDS = [
 // ================================================================ ADMIN
 
 export async function listPromotionsAdmin({ type, status } = {}) {
-  const filter = {};
-  if (type) filter.type = type;
-  if (status) filter.status = status;
-  return Promotion.find(filter).sort({ sortOrder: 1, priority: -1, _id: 1 }).lean();
+  return Promotion.findAll({ type, status });
 }
 
-// `placement` is a 1:1 derivation of `type` (today at least — see
-// models/promotionModel.js's own comment on why they're still two separate
-// fields) — the admin form never submits it directly, so it's computed
-// here rather than required as its own input.
+// `placement` is a 1:1 derivation of `type` — the admin form never submits
+// it directly, so it's computed here rather than required as its own input.
 const PLACEMENT_BY_TYPE = { carousel: "home_hero", popup: "storefront_popup" };
 
 export async function createPromotion(body, userId) {
@@ -72,9 +59,13 @@ export async function updatePromotion(id, body, userId) {
 
 export async function duplicatePromotion(id, userId) {
   requireObjectIdFormat(id, "id");
-  const source = await Promotion.findById(id).lean();
+  const source = await Promotion.findById(id);
   if (!source) throw new HttpError(404, "Promotion not found");
-  const { _id, createdAt, updatedAt, __v, ...rest } = source;
+  const { _id, createdAt, updatedAt, save, ...rest } = source;
+  void _id;
+  void createdAt;
+  void updatedAt;
+  void save;
   return Promotion.create({
     ...rest,
     name: `${source.name} (copy)`,
@@ -87,49 +78,39 @@ export async function duplicatePromotion(id, userId) {
 
 export async function deletePromotion(id) {
   requireObjectIdFormat(id, "id");
-  const promotion = await Promotion.findByIdAndDelete(id);
-  if (!promotion) throw new HttpError(404, "Promotion not found");
+  const deleted = await Promotion.deleteById(id);
+  if (!deleted) throw new HttpError(404, "Promotion not found");
 }
 
 // Reassigns sortOrder to match `order` (an array of every promotion id of
 // `type`, in the admin's intended display order) — scoped to `type` so
 // reordering carousel banners can never touch a popup's sortOrder or vice
-// versa. Individual updateOne() calls (not updateMany/bulkWrite) — the
-// list is admin-bounded (schemas/promotionSchemas.js caps it at 200) and
-// this keeps every write an explicit, individually-auditable operation
-// matching this codebase's existing preference for narrow, obvious writes
-// over broad batch operators (see scripts/auditIndexes.mjs's own comment
-// on the same tradeoff).
+// versa.
 export async function reorderPromotions(type, order) {
-  const existingIds = new Set((await Promotion.find({ type }).select("_id").lean()).map((p) => String(p._id)));
+  const existingIds = new Set(await Promotion.findIdsByType(type));
   for (const id of order) {
     if (!existingIds.has(id)) throw new HttpError(400, "order lists an id that doesn't belong to this promotion type");
   }
-  await Promise.all(order.map((id, index) => Promotion.updateOne({ _id: id, type }, { $set: { sortOrder: index } })));
+  await Promise.all(order.map((id, index) => Promotion.updateSortOrder(id, type, index)));
   return listPromotionsAdmin({ type });
 }
 
 // ================================================================ TARGET RESOLUTION
 
 // The ONE place a public href is ever computed from a promotion's stored
-// target — both the carousel and popup public services call this, and the
-// client never independently builds a URL from raw target fields (the
-// public DTOs below don't even expose targetProduct/targetCategory as
-// separate ids — only the already-resolved `href`). Returns `{ href,
-// clickable }`; `href` is only ever `null` (with `clickable:false`) — never
-// a partially-built or unsafe string — so nothing downstream can render an
-// unsafe/broken link.
+// target. Returns `{ href, clickable }`; `href` is only ever `null` (with
+// `clickable:false`) — never a partially-built or unsafe string.
 export async function resolvePromotionTarget(promotion) {
   switch (promotion.targetType) {
     case "product": {
       if (!isObjectIdFormat(String(promotion.targetProduct || ""))) return { href: null, clickable: false };
-      const product = await Product.findById(promotion.targetProduct).select("slug isActive").lean();
+      const product = await Product.findById(promotion.targetProduct);
       if (!product || product.isActive === false) return { href: null, clickable: false };
       return { href: `/product/${product.slug || product._id}`, clickable: true };
     }
     case "category": {
       if (!isObjectIdFormat(String(promotion.targetCategory || ""))) return { href: null, clickable: false };
-      const category = await Category.findById(promotion.targetCategory).select("isActive").lean();
+      const category = await Category.findById(promotion.targetCategory);
       if (!category || category.isActive === false) return { href: null, clickable: false };
       return { href: `/shop?category=${promotion.targetCategory}`, clickable: true };
     }
@@ -143,14 +124,14 @@ export async function resolvePromotionTarget(promotion) {
       if (!filter) return { href: null, clickable: false };
       const params = new URLSearchParams();
       if (filter.category && isObjectIdFormat(String(filter.category))) {
-        const category = await Category.findById(filter.category).select("isActive").lean();
+        const category = await Category.findById(filter.category);
         if (category && category.isActive !== false) params.set("category", String(filter.category));
       }
       if (filter.collection && ["new", "featured", "discount"].includes(filter.collection)) {
         params.set("collection", filter.collection);
       }
       if (filter.style && isObjectIdFormat(String(filter.style))) {
-        const style = await Category.findById(filter.style).select("isActive").lean();
+        const style = await Category.findById(filter.style);
         if (style && style.isActive !== false) params.set("style", String(filter.style));
       }
       if ([...params.keys()].length === 0) return { href: null, clickable: false };
@@ -158,11 +139,7 @@ export async function resolvePromotionTarget(promotion) {
     }
     case "internal_url": {
       // Re-checked here even though schemas/promotionSchemas.js already
-      // validated it at write time — this function is the one place a
-      // response is actually built, so it re-verifies rather than trusting
-      // that nothing between write and read could have changed the
-      // contract (defense in depth, matching this app's existing pattern —
-      // see schemas/commonSchemas.js's own comment on the same idea).
+      // validated it at write time — defense in depth.
       if (!isSafeInternalPath(promotion.targetUrl || "")) return { href: null, clickable: false };
       return { href: promotion.targetUrl, clickable: true };
     }
@@ -174,31 +151,13 @@ export async function resolvePromotionTarget(promotion) {
 
 // ================================================================ PUBLIC ELIGIBILITY
 
-// Deliberately audience-BLIND — see lib/serverDataCache.js's own comment
-// and section H of the feature spec this implements: authentication state
-// must never leak into a cache shared across every visitor. Callers
-// (app/api/promotions/*/route.js) filter the returned array by the
-// requesting visitor's own audience AFTER this (cached) read resolves,
-// never before.
-//
-// A promotion whose target has gone stale (resolvePromotionTarget returns
-// `clickable:false` for anything other than a deliberate `targetType:
-// "none"` visual-only banner) is OMITTED from the result entirely, not
-// returned as a dead link — see this module's own top-of-file note on
-// that documented choice.
+// Deliberately audience-BLIND — see lib/serverDataCache.js's own comment:
+// authentication state must never leak into a cache shared across every
+// visitor. Callers (app/api/promotions/*/route.js) filter the returned
+// array by the requesting visitor's own audience AFTER this (cached) read
+// resolves, never before.
 export async function getEligiblePromotionsBase({ type, placement, pageScope, now = new Date() }) {
-  const scheduleFilter = {
-    type,
-    placement,
-    status: "active",
-    pageScope: { $in: pageScope === "home" ? ["home", "all"] : [pageScope, "all"] },
-    $and: [
-      { $or: [{ startAt: null }, { startAt: { $lte: now } }] },
-      { $or: [{ endAt: null }, { endAt: { $gt: now } }] },
-    ],
-  };
-  const sort = type === "popup" ? { priority: -1, startAt: -1, _id: 1 } : { sortOrder: 1, priority: -1, _id: 1 };
-  const candidates = await Promotion.find(scheduleFilter).sort(sort).lean();
+  const candidates = await Promotion.findEligible({ type, placement, pageScope, now });
 
   const resolved = await Promise.all(
     candidates.map(async (p) => {
@@ -235,9 +194,9 @@ function toPublicDto(promotion, target) {
   };
 }
 
-// Applies the visitor's own audience AFTER the shared cached read — see
-// getEligiblePromotionsBase()'s comment. `isAuthenticated` is resolved by
-// the route handler from the request's own session cookie, never cached.
+// Applies the visitor's own audience AFTER the shared cached read.
+// `isAuthenticated` is resolved by the route handler from the request's
+// own session cookie, never cached.
 export function filterByAudience(promotions, isAuthenticated) {
   return promotions.filter((p) => {
     if (p.audience === "all") return true;

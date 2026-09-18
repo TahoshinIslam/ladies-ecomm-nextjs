@@ -16,6 +16,11 @@ export default function Modal({
   children,
   size = "md",
   className,
+  // Opt-in: skips the built-in title/close header bar entirely, for a
+  // caller (e.g. CampaignPopup.jsx) that wants a borderless, edge-to-edge
+  // creative with its own floating close control overlaid on the content
+  // instead of a separate header row eating into the image area.
+  hideHeader = false,
 }) {
   const panelRef = useRef(null);
 
@@ -112,7 +117,7 @@ export default function Modal({
               className,
             )}
           >
-            {(title || onClose) && (
+            {!hideHeader && (title || onClose) && (
               <div className="flex items-start justify-between border-b border-line p-6">
                 <div>
                   {title && (

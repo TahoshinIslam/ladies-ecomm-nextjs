@@ -26,6 +26,7 @@ import {
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -35,15 +36,11 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
   let cartGET, cartPOST;
   let orderCreatePOST;
   let logoutPOST;
-  let User, Order;
-
   before(async () => {
     await connectTestDb();
     ({ GET: cartGET, POST: cartPOST } = await import("../app/api/cart/route.js"));
     ({ POST: orderCreatePOST } = await import("../app/api/orders/route.js"));
     ({ POST: logoutPOST } = await import("../app/api/users/logout/route.js"));
-    ({ default: User } = await import("../models/userModel.js"));
-    ({ default: Order } = await import("../models/orderModel.js"));
   });
 
   after(async () => {
@@ -107,11 +104,9 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
       assert.equal(refreshedLineA.quantity, 2);
       assert.equal(refreshedLineB.quantity, 2);
     } finally {
-      const { default: Cart } = await import("../models/cartModel.js");
-      await Cart.deleteMany({ userId: user._id });
-      const { default: Product } = await import("../models/productModel.js");
-      await Product.deleteMany({ _id: { $in: [productA._id, productB._id] } });
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("carts", "user_id", user._id);
+      await deleteRows("products", "id", [productA._id, productB._id]);
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -141,12 +136,10 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
       const order = (await orderRes.json()).order;
       assert.equal(String(order.user), String(user._id));
     } finally {
-      await Order.deleteMany({ user: user._id });
-      const { default: Cart } = await import("../models/cartModel.js");
-      await Cart.deleteMany({ userId: user._id });
-      const { default: Product } = await import("../models/productModel.js");
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("orders", "user_id", user._id);
+      await deleteRows("carts", "user_id", user._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -162,7 +155,7 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
       const afterLogout = await cartGET(requestAs({ method: "GET", url: "http://test/api/cart", session }));
       assert.equal(afterLogout.status, 401, "the old session cookie no longer authenticates cart access — the client falls back to its (untouched) guest cart");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 });

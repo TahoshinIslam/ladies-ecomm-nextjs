@@ -14,7 +14,27 @@
 import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser, createTestProduct } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestUser, createTestProduct, deleteRows, rawQuery } from "./helpers/testDb.mjs";
+
+async function countOrders(userId) {
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [userId]);
+  return n;
+}
+async function countEventsByPayloadOrderId(type, orderId) {
+  const [{ n }] = await rawQuery(
+    "SELECT COUNT(*) AS n FROM events WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?",
+    [type, orderId],
+  );
+  return n;
+}
+async function countEventsByChannelType(channel, type) {
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM events WHERE channel = ? AND type = ?", [channel, type]);
+  return n;
+}
+async function countPaymentsForOrder(orderId) {
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM payments WHERE order_id = ?", [orderId]);
+  return n;
+}
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -27,6 +47,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ default: Order } = await import("../models/orderModel.js"));
     ({ default: Payment } = await import("../models/paymentModel.js"));
     ({ default: Product } = await import("../models/productModel.js"));
@@ -63,10 +84,10 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
       spy.mock.restore();
     }
 
-    const orderCount = await Order.countDocuments({ user: user._id });
+    const orderCount = await countOrders(user._id);
     assert.equal(orderCount, 0, "no Order document must exist — the transaction (order + stock decrement) must have rolled back");
 
-    const freshProduct = await Product.findById(product._id).lean();
+    const freshProduct = await Product.findById(product._id);
     assert.equal(freshProduct.variants[0].stock, 5, "stock must be unchanged — the decrement rolled back with the rest of the transaction");
 
     // No order was ever created (proven above), and NEW_ORDER's `orderId`
@@ -76,7 +97,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     // suite may run alongside other test files sharing the same disposable
     // database, each with its own real, legitimately-created orders/events.)
 
-    await Product.updateOne({ _id: product._id }, { $set: { isActive: false } });
+    await rawQuery("UPDATE products SET is_active = 0 WHERE id = ?", [product._id]);
   });
 
   test("createOrder: a forced business-mutation failure (insufficient stock) leaves no event, no matter what", async () => {
@@ -86,7 +107,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
 
     await assert.rejects(() => createOrder(user._id, orderPayloadFor(product), idempotencyKey), /Insufficient stock/);
 
-    const orderCount = await Order.countDocuments({ user: user._id });
+    const orderCount = await countOrders(user._id);
     // No order was created (the stock guard rejected before Order.create
     // ever ran), so the NEW_ORDER emit — which only ever fires with an
     // orderId derived from a real committed order's _id — could never
@@ -102,11 +123,11 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     const { order } = await createOrder(user._id, orderPayloadFor(product), idempotencyKey);
     assert.ok(order);
 
-    const events = await Event.find({ type: "NEW_ORDER", "payload.orderId": order._id.toString() }).lean();
-    assert.equal(events.length, 1, "exactly one NEW_ORDER event must exist for the newly committed order");
+    const eventCount = await countEventsByPayloadOrderId("NEW_ORDER", order._id.toString());
+    assert.equal(eventCount, 1, "exactly one NEW_ORDER event must exist for the newly committed order");
 
-    await Order.deleteOne({ _id: order._id });
-    await Event.deleteMany({ "payload.orderId": order._id.toString() });
+    await deleteRows("orders", "id", order._id);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("createOrder: sequential idempotent replay produces exactly one NEW_ORDER event, never two", async () => {
@@ -120,11 +141,11 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(second.replayed, true);
     assert.equal(second.order._id.toString(), first.order._id.toString());
 
-    const events = await Event.find({ type: "NEW_ORDER", "payload.orderId": first.order._id.toString() }).lean();
-    assert.equal(events.length, 1, "a sequential replay must never create a second NEW_ORDER event");
+    const eventCount = await countEventsByPayloadOrderId("NEW_ORDER", first.order._id.toString());
+    assert.equal(eventCount, 1, "a sequential replay must never create a second NEW_ORDER event");
 
-    await Order.deleteOne({ _id: first.order._id });
-    await Event.deleteMany({ "payload.orderId": first.order._id.toString() });
+    await deleteRows("orders", "id", first.order._id);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [first.order._id.toString()]);
   });
 
   test("createOrder: concurrent idempotent replay (same key, simultaneous requests) still produces exactly one NEW_ORDER event", async () => {
@@ -139,11 +160,11 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(b.order._id.toString(), winnerId);
     assert.ok(a.replayed || b.replayed, "exactly one of the two concurrent requests must be the winner, the other a replay");
 
-    const events = await Event.find({ type: "NEW_ORDER", "payload.orderId": winnerId }).lean();
-    assert.equal(events.length, 1, "a concurrent replay race must never create a second NEW_ORDER event");
+    const eventCount = await countEventsByPayloadOrderId("NEW_ORDER", winnerId);
+    assert.equal(eventCount, 1, "a concurrent replay race must never create a second NEW_ORDER event");
 
-    await Order.deleteOne({ _id: winnerId });
-    await Event.deleteMany({ "payload.orderId": winnerId });
+    await deleteRows("orders", "id", winnerId);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [winnerId]);
   });
 
   test("cancelOrder: a forced Event.create failure rolls back the cancellation transaction — order status is unchanged, stock is not restored", async () => {
@@ -161,14 +182,14 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
       spy.mock.restore();
     }
 
-    const freshOrder = await Order.findById(order._id).lean();
+    const freshOrder = await Order.findById(order._id);
     assert.notEqual(freshOrder.status, "cancelled", "the order must remain in its pre-cancellation status — the transaction rolled back");
 
-    const cancelledEvents = await Event.countDocuments({ type: "ORDER_CANCELLED", "payload.orderId": order._id.toString() });
+    const cancelledEvents = await countEventsByPayloadOrderId("ORDER_CANCELLED", order._id.toString());
     assert.equal(cancelledEvents, 0);
 
-    await Order.deleteOne({ _id: order._id });
-    await Event.deleteMany({ "payload.orderId": order._id.toString() });
+    await deleteRows("orders", "id", order._id);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("cancelOrder: a successful cancellation commits both the status change and its two events atomically", async () => {
@@ -179,16 +200,16 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
 
     await cancelOrder(user._id, "customer", order._id.toString());
 
-    const freshOrder = await Order.findById(order._id).lean();
+    const freshOrder = await Order.findById(order._id);
     assert.equal(freshOrder.status, "cancelled");
 
-    const orderEvents = await Event.countDocuments({ channel: `order:${order._id}`, type: "ORDER_STATUS_UPDATED" });
-    const adminEvents = await Event.countDocuments({ type: "ORDER_CANCELLED", "payload.orderId": order._id.toString() });
+    const orderEvents = await countEventsByChannelType(`order:${order._id}`, "ORDER_STATUS_UPDATED");
+    const adminEvents = await countEventsByPayloadOrderId("ORDER_CANCELLED", order._id.toString());
     assert.equal(orderEvents, 1);
     assert.equal(adminEvents, 1);
 
-    await Order.deleteOne({ _id: order._id });
-    await Event.deleteMany({ "payload.orderId": order._id.toString() });
+    await deleteRows("orders", "id", order._id);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("codCreate: a forced Event.create failure rolls back the Payment creation and order-status change together", async () => {
@@ -206,14 +227,14 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
       spy.mock.restore();
     }
 
-    const freshOrder = await Order.findById(order._id).lean();
+    const freshOrder = await Order.findById(order._id);
     assert.equal(freshOrder.status, "pending", "the order status change must have rolled back with the failed event insert");
 
-    const paymentCount = await Payment.countDocuments({ order: order._id });
+    const paymentCount = await countPaymentsForOrder(order._id);
     assert.equal(paymentCount, 0, "no Payment document must exist — it rolled back with the same transaction");
 
-    await Order.deleteOne({ _id: order._id });
-    await Event.deleteMany({ "payload.orderId": order._id.toString() });
+    await deleteRows("orders", "id", order._id);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("codCreate: a successful COD creation commits the Payment, the order status change, and the event atomically", async () => {
@@ -224,16 +245,16 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
 
     await codCreate(order._id.toString(), user._id);
 
-    const freshOrder = await Order.findById(order._id).lean();
+    const freshOrder = await Order.findById(order._id);
     assert.equal(freshOrder.status, "processing");
-    const paymentCount = await Payment.countDocuments({ order: order._id });
+    const paymentCount = await countPaymentsForOrder(order._id);
     assert.equal(paymentCount, 1);
-    const eventCount = await Event.countDocuments({ channel: `order:${order._id}`, type: "ORDER_STATUS_UPDATED" });
+    const eventCount = await countEventsByChannelType(`order:${order._id}`, "ORDER_STATUS_UPDATED");
     assert.equal(eventCount, 1);
 
-    await Order.deleteOne({ _id: order._id });
-    await Payment.deleteMany({ order: order._id });
-    await Event.deleteMany({ "payload.orderId": order._id.toString() });
+    await deleteRows("orders", "id", order._id);
+    await deleteRows("payments", "order_id", order._id);
+    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("createProduct (non-transactional): the event write is genuinely AWAITED — the function does not return until the emit settles", async () => {
@@ -279,7 +300,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
       assert.ok(product);
       assert.equal(functionReturnedBeforeEmitResolved, false, "createProduct() must not resolve before its (best-effort) event write has settled");
 
-      await Product.deleteOne({ _id: product._id });
+      await deleteRows("products", "id", product._id);
     } finally {
       spy.mock.restore();
     }
@@ -310,13 +331,13 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     }
 
     assert.ok(product, "the product save itself must succeed even though its accompanying event write failed");
-    const found = await Product.findById(product._id).lean();
+    const found = await Product.findById(product._id);
     assert.ok(found, "the product must genuinely exist in the database — a best-effort event failure must never roll back a non-transactional save");
     assert.ok(
       consoleSpy.mock.calls.some((c) => String(c.arguments[0]).includes("event publish failed")),
       "the event-insert failure must be logged, never silently dropped",
     );
 
-    await Product.deleteOne({ _id: product._id });
+    await deleteRows("products", "id", product._id);
   });
 });

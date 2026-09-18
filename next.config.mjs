@@ -67,6 +67,19 @@ const nextConfig = {
   turbopack: {
     root: path.resolve(import.meta.dirname),
   },
+  // Dev-only: Next.js blocks cross-origin requests to dev assets/endpoints
+  // by default, including the Turbopack HMR websocket upgrade
+  // (node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
+  // — it's checked on the websocket upgrade path too, not just HTTP). Only
+  // `localhost` is allowed out of the box, so opening the dev server from
+  // another device on the LAN (e.g. http://192.168.68.31:3000) gets its
+  // HMR socket silently rejected — observed as repeated failed
+  // `ws://.../\_next/hmr` connections in the console, and (worse) an RSC
+  // Suspense boundary that streams in the real page but never reveals it,
+  // leaving product grids stuck showing their loading skeleton forever.
+  // This has zero effect in production (`allowedDevOrigins` is a dev-only
+  // config key) — see node_modules/next/dist/docs/.../allowedDevOrigins.md.
+  allowedDevOrigins: ["192.168.68.31", "192.168.68.*"],
   images: {
     // Phase 9 — HTTPS-only, minimally scoped to the remote origins this
     // app actually serves images from.

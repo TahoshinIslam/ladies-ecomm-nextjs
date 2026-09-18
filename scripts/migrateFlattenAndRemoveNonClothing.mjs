@@ -1,3 +1,18 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// One-time Mongo-era data migration (removed non-clothing departments,
+// flattened the remaining ones), already applied to the source MongoDB
+// database — its target end-state is what scripts/seedCatalog.mjs's
+// MySQL catalog already reflects. Imports Mongoose models directly,
+// incompatible with the current SQL model shape (models/*.js). Re-running
+// it against MySQL would be meaningless even if converted — the
+// restructuring it performs is already done.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // One-off migration: this shop is clothing-only now. Removes the
 // Cosmetics/Shoes/Sunglasses departments (and every product under them)
 // entirely, and un-nests Burqa/Hijab/Niqab/Abaya/Khimar/Modest-Sets/

@@ -35,7 +35,7 @@ export const GET = withRoute(async (request, { params }) => {
 
   const { id } = await params;
   requireObjectIdFormat(id, "id");
-  const order = await Order.findById(id).select("user").lean();
+  const order = await Order.findById(id);
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user.toString() === String(user._id);
   if (!isOwner && user.role !== "admin") throw new HttpError(403, "Not authorized");

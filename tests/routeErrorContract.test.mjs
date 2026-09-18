@@ -23,6 +23,7 @@ import {
   requestAs,
   createTestUser,
   createTestProduct,
+  deleteRows,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -89,7 +90,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -104,7 +105,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       assertErrorShape(json);
       assert.equal(json.message, "Order not found");
     } finally {
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -140,9 +141,9 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await Order.deleteMany({ user: user._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("orders", "user_id", user._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", user._id);
     }
   });
 
@@ -171,10 +172,10 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       assertErrorShape(json);
       assert.match(json.message, /already exists/i);
 
-      await User.deleteOne({ email });
+      await deleteRows("users", "email", email);
     } finally {
-      await User.deleteOne({ _id: user._id });
-      await User.deleteOne({ _id: other._id });
+      await deleteRows("users", "id", user._id);
+      await deleteRows("users", "id", other._id);
     }
   });
 
@@ -195,7 +196,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await User.deleteOne({ _id: customer._id });
+      await deleteRows("users", "id", customer._id);
     }
   });
 
@@ -221,9 +222,9 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await Order.deleteMany({ user: user._id });
-      await Product.deleteOne({ _id: product._id });
-      await User.deleteOne({ _id: user._id });
+      await deleteRows("orders", "user_id", user._id);
+      await deleteRows("products", "id", product._id);
+      await deleteRows("users", "id", user._id);
     }
   });
 

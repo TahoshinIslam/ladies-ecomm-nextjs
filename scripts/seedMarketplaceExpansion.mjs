@@ -1,3 +1,20 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// One-time Mongo-era catalog-expansion script (adds the 11
+// general-marketplace divisions — Food, Beauty & Health, Home &
+// Kitchen, etc. — alongside the original fashion catalog), already
+// applied to the source MongoDB database. Imports Mongoose models
+// directly, incompatible with the current SQL model shape (models/*.js).
+// scripts/seedCatalog.mjs (the current MySQL seed script) does NOT
+// include this expansion — the live MySQL catalog is fashion-only.
+// Converting it is a product/content decision, not a migration-
+// correctness one — out of scope here.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Expands the catalog from a single-vertical modest-fashion shop into a
 // multi-category general marketplace (Food, Baby Care, Diapers, Home
 // Cleaning, Pet Care, Beauty & Health, Home & Kitchen, Jewelry,

@@ -1,3 +1,19 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// One-time Mongo-era catalog-restructuring script (Cosmetics category
+// detail), already applied to the source MongoDB database. Imports
+// Mongoose models directly, incompatible with the current SQL model
+// shape (models/*.js). scripts/seedCatalog.mjs (the current MySQL seed
+// script) only seeds the original 9-department fashion catalog — this
+// script's marketplace-expansion category shape was never carried into
+// MySQL. Converting it is a product/content decision (expanding the
+// live catalog), not a migration-correctness one — out of scope here.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Restructures Cosmetics (under Beauty & Health) into the granular
 // product-type leaves a shopper actually browses by (Face Wash, Toner,
 // Moisturizer, Serum, Lipstick, Foundation, Shampoo, Hair Serum) instead of

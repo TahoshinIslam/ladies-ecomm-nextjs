@@ -181,13 +181,23 @@ describe("Phase 10 — robots.js and sitemap.js exist and are correctly scoped",
   });
 
   test("sitemap.js's product query is active-only and not capped at an admin-list-style page size (no .limit(100)/.skip(...) pagination ceiling)", () => {
-    const content = read("lib/serverDataCache.js");
-    const fnMatch = content.match(/getCachedSitemapProducts[\s\S]*?\n\}/);
-    assert.ok(fnMatch, "expected to find getCachedSitemapProducts in lib/serverDataCache.js");
-    const fn = fnMatch[0];
-    assert.match(fn, /isActive:\s*true/, "must only query active products");
-    assert.ok(!/\.limit\(/.test(fn), "must not impose a pagination-style limit on the sitemap product query");
-    assert.match(fn, /\.select\(/, "must project only the fields needed, never the full document");
+    const cacheContent = read("lib/serverDataCache.js");
+    const cacheFnMatch = cacheContent.match(/getCachedSitemapProducts[\s\S]*?\n\}/);
+    assert.ok(cacheFnMatch, "expected to find getCachedSitemapProducts in lib/serverDataCache.js");
+    assert.match(cacheFnMatch[0], /Product\.findSitemapEntries\(\)/, "must delegate to the model's dedicated sitemap query");
+    assert.ok(!/\.limit\(/.test(cacheFnMatch[0]), "must not impose a pagination-style limit on the sitemap product query");
+
+    // Post Mongo -> MySQL migration, the actual filter/projection live in
+    // models/productModel.js's findSitemapEntries() (a raw SQL query), not
+    // inline in getCachedSitemapProducts() the way a Mongoose
+    // .find({isActive:true}).select(...) chain used to be.
+    const modelContent = read("models/productModel.js");
+    const modelFnMatch = modelContent.match(/async function findSitemapEntries[\s\S]*?\n\}/);
+    assert.ok(modelFnMatch, "expected to find findSitemapEntries in models/productModel.js");
+    const fn = modelFnMatch[0];
+    assert.match(fn, /is_active\s*=\s*1/, "must only query active products");
+    assert.ok(!/LIMIT/i.test(fn), "must not impose a pagination-style limit on the sitemap product query");
+    assert.doesNotMatch(fn, /SELECT \*/, "must project only the fields needed, never the full row");
   });
 
   test("the sitemap product projection is tagged CATALOG, so product create/update/delete invalidation keeps it in sync automatically", () => {

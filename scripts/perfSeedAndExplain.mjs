@@ -1,3 +1,18 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// Performance-audit tool built around MongoDB's explain("executionStats")
+// against MONGO_URI_TEST. Genuinely still a useful KIND of tool for
+// MySQL/MariaDB (via EXPLAIN/ANALYZE against the InnoDB query planner),
+// but this file's implementation is Mongo-specific throughout and was
+// not rewritten as part of this migration — doing so is new tooling
+// work, not a data/behavior conversion. Write a MySQL-native version
+// from scratch if index/query performance auditing is needed again.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Performance audit Closure Pass 2 — Section 9 evidence gathering.
 //
 // Seeds a representative volume of synthetic data into the DISPOSABLE

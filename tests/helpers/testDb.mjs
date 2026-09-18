@@ -1,15 +1,14 @@
-// Shared fixtures for the Phase 1 regression-safety-net tests
-// (reviewOwnership, orderDuplicateRegression, adminOrderLimit).
+// Shared fixtures for the DB-backed regression-safety-net tests.
 //
-// Design constraints (see the Phase 1 CI-environment requirements):
-//   - Never touches MONGO_URI. Only ever connects via MONGO_URI_TEST, and
-//     only when NODE_ENV=test (config/db.js's own branching — see
-//     config/db.js:24). scripts/assertTestDbSafety.mjs enforces this before
-//     any test file even runs.
-//   - If MONGO_URI_TEST isn't configured, every consumer of `dbReady` skips
-//     itself instead of failing or silently falling back to MONGO_URI —
-//     the same pattern tests/relatedProducts.integration.test.mjs already
-//     uses for "dev server not reachable".
+// Design constraints (carried over from the original MongoDB-era version
+// of this file, adapted for the MySQL migration):
+//   - Never touches the app's own DB_NAME. Only ever connects using
+//     whatever DB_* vars are in effect when NODE_ENV=test (config/db.js's
+//     own pool) — scripts/assertTestDbSafety.mjs enforces this before any
+//     test file even runs.
+//   - If DB_NAME isn't configured (or doesn't look test-only), every
+//     consumer of `dbReady` skips itself instead of failing or silently
+//     running against the wrong database.
 //   - Route Handlers are called directly as functions (real `Request`
 //     objects, no HTTP round-trip, no running Next.js server required) —
 //     this repo's Route Handlers only ever read `request.headers`/
@@ -18,52 +17,107 @@
 //     safe outside of a real Next.js request lifecycle.
 
 import crypto from "node:crypto";
-import mongoose from "mongoose";
 
-export const dbReady = process.env.NODE_ENV === "test" && !!process.env.MONGO_URI_TEST;
+const TEST_DB_NAME_PATTERN = /(_test|_ci)$/i;
+
+export const dbReady =
+  process.env.NODE_ENV === "test" && !!process.env.DB_NAME && TEST_DB_NAME_PATTERN.test(process.env.DB_NAME);
 export const skipReason = dbReady
   ? undefined
-  : "MONGO_URI_TEST not configured — set NODE_ENV=test and MONGO_URI_TEST (see .env.test.example) to run this suite against a real database";
+  : "DB_NAME not configured as a test database — set NODE_ENV=test and a DB_NAME ending in \"_test\" (see .env.test.example) to run this suite against a real database";
 
 let connectPromise;
 export async function connectTestDb() {
   if (!dbReady) throw new Error(skipReason);
   if (!connectPromise) {
     const { default: connectDB } = await import("../../config/db.js");
-    connectPromise = connectDB().then((conn) => {
-      // Second, independent guard beyond scripts/assertTestDbSafety.mjs's
-      // pretest check — every test file's cleanup (deleteMany/deleteOne)
-      // runs against whatever this connects to, so refuse to proceed if the
-      // live database name doesn't clearly read as test-only, even if
-      // something upstream let a bad MONGO_URI_TEST through.
-      const dbName = conn.connection?.db?.databaseName || conn.connections?.[0]?.name;
-      if (!dbName || !/test/i.test(dbName)) {
-        throw new Error(
-          `Refusing to run test fixtures/cleanup against database "${dbName}" — its name doesn't contain "test".`,
-        );
-      }
-      return conn;
-    });
+    // Second, independent guard beyond scripts/assertTestDbSafety.mjs's
+    // pretest check — every test file's cleanup (TRUNCATE/DELETE) runs
+    // against whatever this connects to, so refuse to proceed if the
+    // configured database name doesn't clearly read as test-only, even if
+    // something upstream let a bad DB_NAME through. Checked again here
+    // (not just in dbReady above) so a test that imports this file without
+    // checking dbReady first still fails closed rather than silently
+    // running.
+    if (!TEST_DB_NAME_PATTERN.test(process.env.DB_NAME || "")) {
+      throw new Error(
+        `Refusing to run test fixtures/cleanup against database "${process.env.DB_NAME}" — its name doesn't end in "_test" or "_ci".`,
+      );
+    }
+    connectPromise = connectDB();
   }
   return connectPromise;
 }
 
 // Every DB-backed test file's outer `after()` must call this. Without it,
-// the open MongoDB socket keeps this file's test-runner process alive
-// after all assertions have already finished — Node's test runner then
-// waits on the process itself, not just the test callbacks, which (with
+// the open MySQL pool keeps this file's test-runner process alive after
+// all assertions have already finished — Node's test runner then waits on
+// the process itself, not just the test callbacks, which (with
 // `tests/**/*.test.mjs` running many files back-to-back) silently stalls
 // every subsequent file until each one individually hits the runner's
-// timeout. Same reasoning tests/relatedProducts.integration.test.mjs's
-// `after()` already documents for its own `Product.db.close()` call.
+// timeout.
 export async function disconnectTestDb() {
-  if (mongoose.connection.readyState !== 0) {
-    await mongoose.disconnect();
-  }
+  const { closePool } = await import("../../config/db.js");
+  await closePool();
   connectPromise = undefined;
 }
 
-// Phase 2: creates a REAL session via lib/session.js — the same function
+// Generic row-delete helper for test cleanup — replaces the old
+// `Model.deleteOne({_id})`/`Model.deleteMany({field: {$in: [...]}})` calls
+// scattered across every test file's `finally` block. The new SQL models
+// deliberately don't expose a generic Mongo-filter-shaped delete (see
+// models/README-migration.md: each model only implements what its real
+// service call sites need) — test cleanup goes straight through SQL
+// instead of growing every model's public API with test-only methods.
+// `column` + `values` (an id or array of ids) covers every cleanup shape
+// these test files actually use (`delete this one row` / `delete all rows
+// whose column is IN this set`).
+export async function deleteRows(table, column, values) {
+  const list = Array.isArray(values) ? values : [values];
+  if (!list.length) return;
+  const { query } = await import("../../config/db.js");
+  await query(`DELETE FROM ${table} WHERE ${column} IN (${list.map(() => "?").join(",")})`, list);
+}
+
+// Raw SQL escape hatch for test files that need to assert on something no
+// model function exposes (an index's existence, a column's raw value,
+// etc.) — re-exported here so test files don't each need their own
+// `config/db.js` import path.
+export async function rawQuery(sql, params) {
+  const { query } = await import("../../config/db.js");
+  return query(sql, params);
+}
+
+// Truncates every table this test suite writes to, in an order that
+// respects the schema's ON DELETE CASCADE relationships (see
+// sql/schema.sql) — a parent truncated first would otherwise leave FK
+// errors on the child tables that still reference rows about to vanish.
+// Called by individual test files' own before()/after() blocks (not
+// automatically) so each file controls exactly when its data resets;
+// dbReady/connectTestDb() already refuse to run this against anything
+// that isn't clearly a test database.
+const TRUNCATE_ORDER = [
+  "order_items", "orders", "cart_items", "carts", "coupon_usages", "coupon_categories", "coupons",
+  "payments", "wishlist_items", "wishlists", "notifications", "reviews", "addresses", "sessions",
+  "rate_limit_counters", "events", "product_attributes", "product_variants", "products",
+  "attribute_definition_options", "attribute_definition_label_overrides", "attribute_definition_categories",
+  "attribute_definitions", "brands", "categories", "promotions", "themes", "users",
+];
+
+export async function truncateAll() {
+  if (!dbReady) throw new Error(skipReason);
+  const { query } = await import("../../config/db.js");
+  await query("SET FOREIGN_KEY_CHECKS = 0");
+  try {
+    for (const table of TRUNCATE_ORDER) {
+      await query(`TRUNCATE TABLE ${table}`);
+    }
+  } finally {
+    await query("SET FOREIGN_KEY_CHECKS = 1");
+  }
+}
+
+// Creates a REAL session via lib/session.js — the same function
 // login/register use — against the test database, and returns the raw
 // {rawToken, rawCsrfToken} pair a real client would receive via Set-Cookie.
 // Deliberately not a shortcut/mock: this exercises the actual hashing,
@@ -71,7 +125,7 @@ export async function disconnectTestDb() {
 // reimplementation of it.
 export async function createTestSession(userId) {
   const { createSession } = await import("../../lib/session.js");
-  return createSession(userId, { userAgent: "phase2-test-suite" });
+  return createSession(userId, { userAgent: "test-suite" });
 }
 
 // Builds the `Cookie` header a browser would send for a given session —
@@ -111,10 +165,10 @@ export function requestAs({
   if (session && UNSAFE_METHODS.has(method) && !omitCsrfHeader) {
     headers.set("x-csrf-token", session.rawCsrfToken);
   }
-  // Phase 4: POST /api/orders requires an Idempotency-Key header. Tests that
-  // don't care about idempotency (the vast majority) get a fresh random one
-  // per call for free, so each call still creates its own independent
-  // order exactly like before this header existed. A test that DOES care
+  // POST /api/orders requires an Idempotency-Key header. Tests that don't
+  // care about idempotency (the vast majority) get a fresh random one per
+  // call for free, so each call still creates its own independent order
+  // exactly like before this header existed. A test that DOES care
   // (replay/dedup/conflict scenarios) passes `idempotencyKey` explicitly —
   // the same string across calls to exercise replay, or `idempotencyKey:
   // null` to deliberately test the missing-header (400) path.
@@ -170,7 +224,7 @@ export async function createTestProduct({ stock = 10, basePrice = 1000 } = {}) {
   const suffix = unique();
   return Product.create({
     name: `Test Product ${suffix}`,
-    description: "Created by the Phase 1 test suite — safe to delete.",
+    description: "Created by the test suite — safe to delete.",
     category: category._id,
     basePrice,
     images: ["https://placehold.co/400x400.png?text=test"],
@@ -180,38 +234,39 @@ export async function createTestProduct({ stock = 10, basePrice = 1000 } = {}) {
 
 export async function createDeliveredOrderFor(userId, productId, variantId) {
   const { default: Order } = await import("../../models/orderModel.js");
-  return Order.create({
-    user: userId,
-    items: [
+  const { withTransaction } = await import("../../lib/db/tx.js");
+  return withTransaction((conn) =>
+    Order.create(
       {
-        product: productId,
-        variantId,
-        quantity: 1,
-        snapshot: { name: "Test item", price: 1000 },
+        user: userId,
+        items: [
+          {
+            product: productId,
+            variantId,
+            quantity: 1,
+            snapshot: { name: "Test item", price: 1000 },
+          },
+        ],
+        shippingAddress: {
+          fullName: "Test Buyer",
+          phone: "0100000000",
+          street: "1 Test Street",
+          city: "Dhaka",
+          postalCode: "1200",
+          country: "Bangladesh",
+        },
+        subtotal: 1000,
+        total: 1000,
+        status: "delivered",
+        // Order.create() requires SOME idempotency key hash even outside the
+        // real checkout flow, since it's a NOT NULL-free but uniquely
+        // indexed column — a random one per fixture keeps the (user,
+        // idempotencyKeyHash) unique index happy across repeated fixture
+        // creation in the same test file.
+        idempotencyKeyHash: unique(),
+        idempotencyRequestHash: unique(),
       },
-    ],
-    shippingAddress: {
-      fullName: "Test Buyer",
-      phone: "0100000000",
-      street: "1 Test Street",
-      city: "Dhaka",
-      postalCode: "1200",
-      country: "Bangladesh",
-    },
-    subtotal: 1000,
-    total: 1000,
-    status: "delivered",
-  });
-}
-
-const createdModelDocs = [];
-export function trackForCleanup(doc, Model) {
-  createdModelDocs.push({ doc, Model });
-  return doc;
-}
-
-export async function cleanupTracked() {
-  for (const { doc, Model } of createdModelDocs.splice(0)) {
-    await Model.deleteOne({ _id: doc._id }).catch(() => {});
-  }
+      conn,
+    ),
+  );
 }

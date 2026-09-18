@@ -13,7 +13,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser } from "../helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, createTestUser, deleteRows } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -38,7 +38,7 @@ if (serverUp && dbReady) {
 const skip = !serverUp
   ? "test server not reachable — run via `npm run test:http`"
   : !dbConnectable
-    ? skipReason || "MONGO_URI_TEST not reachable — see .env.test.example"
+    ? skipReason || "database not reachable — check DB_NAME/DB_HOST in .env.test (see .env.test.example)"
     : false;
 
 class CookieJar {
@@ -89,18 +89,16 @@ async function adminReq(jar, path, opts = {}) {
 }
 
 describe("Admin promotions — real-server cache and eligibility behavior", { skip }, () => {
-  let Promotion;
   let adminJar;
   let createdIds = [];
 
   before(async () => {
-    ({ default: Promotion } = await import("../../models/promotionModel.js"));
     const admin = await createTestUser({ role: "admin" });
     adminJar = await loginAs(admin.email, "TestPassword123!");
   });
 
   after(async () => {
-    if (createdIds.length) await Promotion.deleteMany({ _id: { $in: createdIds } });
+    if (createdIds.length) await deleteRows("promotions", "id", createdIds);
     await disconnectTestDb();
   });
 

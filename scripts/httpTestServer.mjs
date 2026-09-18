@@ -1,22 +1,34 @@
 #!/usr/bin/env node
-// Deterministic HTTP-integration test-server harness (Phase 1, section D).
+// Deterministic HTTP-integration test-server harness (Phase 1, section D;
+// converted to MySQL/MariaDB as part of the Mongo -> MySQL migration).
 //
 // Orchestrates the whole lifecycle for tests/http/*.test.mjs in one place,
 // so no individual test file ever starts (or races to start) its own
 // server:
-//   1. Validate the isolated test database (reuses the same safety rules
-//      as scripts/assertTestDbSafety.mjs — never MONGO_URI, never a
-//      hosted-provider host, database name must contain "test").
-//   2. Wipe and re-seed that database (scripts/seedCatalog.mjs) so the two
-//      HTTP suites' seed-data assumptions (e.g. "Burqa"/"Hijab"
-//      departments exist) are met deterministically on every run.
+//   1. Validate the isolated test database (lib/testDbSafety.js — the same
+//      shared guard scripts/assertTestDbSafety.mjs uses: DB_NAME must be
+//      explicitly set, must not be "ladies_multi_ecomm", must end in
+//      "_test"/"_ci", and must be on localhost unless explicitly overridden).
+//   2. Connect via config/db.js's own pool, re-verify the LIVE connection
+//      really is talking to that exact database (defense in depth — never
+//      trust the resolved config alone right before a destructive
+//      operation), then TRUNCATE every table (tests/helpers/testDb.mjs's
+//      truncateAll(), which carries its own independent dbReady guard) and
+//      reseed via scripts/seedCatalog.mjs so the HTTP suites' seed-data
+//      assumptions (e.g. "Burqa"/"Hijab" departments exist) are met
+//      deterministically on every run.
 //   3. Pick a verified-free port (OS-assigned ephemeral port via `:0`,
 //      not a fixed number — avoids colliding with a developer's own
 //      `next dev` on 3000 or anything else already listening).
-//   4. Spawn `next start -p <port>` with the double-gated
-//      ALLOW_TEST_DB_OVERRIDE / TEST_SERVER_MONGO_URI env vars (see
-//      config/db.js) so this one server process — and only this one — is
-//      pointed at the disposable test database, never production/dev.
+//   4. Spawn `next start -p <port>` with DB_HOST/DB_PORT/DB_NAME/DB_USER/
+//      DB_PASSWORD explicitly set on its own env, sourced from THIS
+//      process's already-verified-safe values — never left to `next
+//      start`'s own .env/.env.local loading, which would resolve to the
+//      real ladies_multi_ecomm application database (see config/db.js:
+//      unlike the old Mongoose connectDB(), it has no MONGO_URI_DEV-style
+//      environment tiering of its own, so this explicit override is the
+//      ONLY thing standing between this harness and testing against
+//      production data).
 //   5. Poll a bounded health check; fail loudly on timeout, dumping the
 //      captured server log.
 //   6. Run the HTTP test files with HTTP_TEST_BASE_URL set to the actual
@@ -25,16 +37,23 @@
 //      interrupting signal (SIGINT/SIGTERM) — so no Node process is ever
 //      left running behind this script.
 //
-// Usage: node scripts/httpTestServer.mjs run [testFileGlob...]
+// Usage: node --env-file-if-exists=.env.test scripts/httpTestServer.mjs run [testFileGlob...]
 // Requires a completed `next build` (this script does not build itself —
 // see the "pretest:http" npm script, which runs `npm run build` first).
 
+// Forced here (not just relied on from the npm script) because
+// tests/helpers/testDb.mjs's dbReady / truncateAll() gate on this
+// explicitly, and this file is sometimes invoked directly during local
+// debugging without going through "npm run test:http".
+process.env.NODE_ENV = "test";
+
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdirSync, openSync, closeSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, openSync, closeSync, unlinkSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import mongoose from "mongoose";
+
+import { checkTestDbConfig, assertConnectedDbMatches } from "../lib/testDbSafety.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -47,27 +66,6 @@ function fail(message) {
 
 function log(message) {
   console.log(`[httpTestServer] ${message}`);
-}
-
-// ---- Reuse the same isolation rules as scripts/assertTestDbSafety.mjs ----
-function assertIsolatedTestUri(uri) {
-  const prodUri = process.env.MONGO_URI;
-  if (!uri) throw new Error("MONGO_URI_TEST is not set");
-  if (prodUri && uri === prodUri) throw new Error("MONGO_URI_TEST equals MONGO_URI — refusing to use it for the HTTP test server");
-  const hostPatterns = [/mongodb\.net/i, /\.mongodb\.com/i, /amazonaws\.com/i, /compute\.internal/i];
-  for (const p of hostPatterns) {
-    if (p.test(uri)) throw new Error(`MONGO_URI_TEST matches a hosted-provider pattern (${p}) — refusing to use it`);
-  }
-  let dbName;
-  try {
-    dbName = decodeURIComponent(new URL(uri).pathname.replace(/^\//, ""));
-  } catch {
-    throw new Error("MONGO_URI_TEST is not a parseable URI");
-  }
-  if (!dbName || !/test/i.test(dbName)) {
-    throw new Error(`MONGO_URI_TEST's database name ("${dbName}") does not contain "test" — refusing to seed/serve from it`);
-  }
-  return dbName;
 }
 
 // ---- Lockfile: prevent competing/overlapping harness invocations ----
@@ -117,6 +115,21 @@ function runToCompletion(cmd, args, { env, logFile, inherit = false }) {
   });
 }
 
+// The exact DB_* vars a spawned process needs to connect to the SAME
+// database this orchestrator itself just verified — never let a spawned
+// child (the reseed script, or the real `next start` server) fall back to
+// its own .env/.env.local resolution, which would silently point at the
+// real application database.
+function testDbEnv() {
+  return {
+    DB_HOST: process.env.DB_HOST,
+    DB_PORT: process.env.DB_PORT,
+    DB_NAME: process.env.DB_NAME,
+    DB_USER: process.env.DB_USER,
+    DB_PASSWORD: process.env.DB_PASSWORD ?? "",
+  };
+}
+
 async function main() {
   const [, , mode, ...rest] = process.argv;
   if (mode !== "run") {
@@ -131,11 +144,15 @@ async function main() {
   writeFileSync(serverLog, "");
   writeFileSync(seedLog, "");
 
-  let dbName;
-  try {
-    dbName = assertIsolatedTestUri(process.env.MONGO_URI_TEST);
-  } catch (err) {
-    fail(err.message);
+  const dbName = process.env.DB_NAME;
+  const dbHost = process.env.DB_HOST || "127.0.0.1";
+  const configCheck = checkTestDbConfig({
+    dbName,
+    host: dbHost,
+    allowRemoteHost: process.env.ALLOW_REMOTE_TEST_DB === "true",
+  });
+  if (!configCheck.ok) {
+    fail(configCheck.reason);
     process.exitCode = 1;
     return;
   }
@@ -151,35 +168,45 @@ async function main() {
   let serverProcess;
   let exitCode = 1;
   let cleanedUp = false;
+  let closePool;
 
-  const cleanup = () => {
+  const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
     if (serverProcess && serverProcess.exitCode === null) {
       log(`stopping test server (pid ${serverProcess.pid})`);
       serverProcess.kill("SIGTERM");
     }
+    if (closePool) await closePool().catch(() => {});
     releaseLock();
   };
-  process.once("SIGINT", () => {
-    cleanup();
+  process.once("SIGINT", async () => {
+    await cleanup();
     process.exit(130);
   });
-  process.once("SIGTERM", () => {
-    cleanup();
+  process.once("SIGTERM", async () => {
+    await cleanup();
     process.exit(143);
   });
 
   try {
     log(`isolated test database confirmed: "${dbName}"`);
 
-    log("wiping and reseeding the disposable test database...");
-    await mongoose.connect(process.env.MONGO_URI_TEST);
-    await mongoose.connection.dropDatabase();
-    await mongoose.disconnect();
+    // Connect via the app's own pool (config/db.js), re-verify the LIVE
+    // connection really is this exact database (not just the resolved
+    // config — see lib/testDbSafety.js's own doc comment for why), then
+    // truncate + reseed.
+    const dbModule = await import("../config/db.js");
+    closePool = dbModule.closePool;
+    await dbModule.default(); // connectDB() — cheap SELECT 1 reachability probe
+    await assertConnectedDbMatches(dbModule.query, dbName);
+
+    log("truncating and reseeding the disposable test database...");
+    const { truncateAll } = await import("../tests/helpers/testDb.mjs");
+    await truncateAll();
 
     const seedExit = await runToCompletion("node", ["scripts/seedCatalog.mjs"], {
-      env: { ...process.env, NODE_ENV: "test" },
+      env: { ...process.env, ...testDbEnv(), NODE_ENV: "test" },
       logFile: seedLog,
     });
     if (seedExit !== 0) {
@@ -188,6 +215,20 @@ async function main() {
       return;
     }
     log("seed complete");
+
+    // `unstable_cache()` (lib/serverDataCache.js) persists its entries to
+    // disk at .next/cache/fetch-cache — NOT just in-memory — and that
+    // directory survives across `next start` invocations, and even across
+    // `npm run build` (Next's build cache is deliberately incremental/
+    // persistent for build speed). Without clearing it, a `next start`
+    // spawned here can serve a page from a cache entry populated by an
+    // EARLIER run — one this run's own fresh truncate+reseed above never
+    // gets a chance to invalidate, since revalidateTag() only invalidates
+    // tags an actual mutation in THIS run calls, not stale entries left
+    // over from a previous one. This is exactly what "deterministic" in
+    // this file's own header comment promises and what a stale cache
+    // would silently violate.
+    rmSync(path.join(ROOT, ".next/cache/fetch-cache"), { recursive: true, force: true });
 
     const port = await findFreePort();
     log(`using free port ${port}`);
@@ -198,9 +239,12 @@ async function main() {
       cwd: ROOT,
       env: {
         ...process.env,
+        // Explicit DB_* override — see this file's own header comment for
+        // why this, not next start's own .env/.env.local resolution, is
+        // what actually keeps this real server instance off the real
+        // application database.
+        ...testDbEnv(),
         PORT: String(port),
-        ALLOW_TEST_DB_OVERRIDE: "true",
-        TEST_SERVER_MONGO_URI: process.env.MONGO_URI_TEST,
         // The port is only known once findFreePort() resolves, so it can't
         // come from a static .env.test value — set it explicitly here so
         // this harness exercises the SAME explicit-APP_ORIGIN code path a
@@ -225,6 +269,21 @@ async function main() {
         // against an actual running server.
         TRUST_PROXY_HEADERS: "true",
         TRUSTED_PROXY_HOP_COUNT: "1",
+        // Test-only cache-activity tracing for
+        // tests/http/serverCacheBehavior.integration.test.mjs — this is
+        // Next's own internal debug switch
+        // (node_modules/next/dist/server/lib/incremental-cache/file-system-cache.js's
+        // `FileSystemCache.debug`), which ONLY gates extra `console.log`
+        // calls inside FileSystemCache.get()/.set() (the key, and for
+        // .get(), whether it was served from the in-memory store). It does
+        // not change what gets cached, when, or for how long — verified by
+        // reading that file directly: every `if (FileSystemCache.debug)`
+        // block wraps only a console.log, nothing else. This lets that one
+        // test file observe real get/set cache-handler activity for the
+        // SPECIFIC request it just made (see this script's own
+        // HTTP_TEST_SERVER_LOG_PATH, below) instead of inferring anything
+        // from filesystem timing.
+        NEXT_PRIVATE_DEBUG_CACHE: "1",
       },
       stdio: ["ignore", logFd, logFd],
     });
@@ -266,7 +325,17 @@ async function main() {
       "node",
       ["--import", "./tests/helpers/nextResolveHook.mjs", "--test", "--test-concurrency=1", ...testGlob],
       {
-        env: { ...process.env, HTTP_TEST_BASE_URL: baseUrl, NODE_ENV: "test" },
+        env: {
+          ...process.env,
+          ...testDbEnv(),
+          HTTP_TEST_BASE_URL: baseUrl,
+          NODE_ENV: "test",
+          // Lets tests/http/serverCacheBehavior.integration.test.mjs tail
+          // this exact run's server log for the NEXT_PRIVATE_DEBUG_CACHE
+          // get/set lines above — same file the "server did not become
+          // ready" diagnostic above already reads from.
+          HTTP_TEST_SERVER_LOG_PATH: serverLog,
+        },
         inherit: true,
       },
     );
@@ -274,7 +343,7 @@ async function main() {
     fail(`httpTestServer.mjs failed: ${err.stack || err.message}`);
     exitCode = 1;
   } finally {
-    cleanup();
+    await cleanup();
   }
 
   process.exitCode = exitCode;

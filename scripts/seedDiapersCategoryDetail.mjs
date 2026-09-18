@@ -1,3 +1,16 @@
+// =============================================================================
+// DEPRECATED — Mongo -> MySQL migration (see docs/PRODUCTION_READINESS.md
+// and README.md's setup section for the current MariaDB architecture).
+// One-time Mongo-era catalog-restructuring script (Diapers category
+// detail), already applied to the source MongoDB database. Imports
+// Mongoose models directly, incompatible with the current SQL model
+// shape (models/*.js). See scripts/seedCosmeticsCategoryDetail.mjs's own
+// deprecation note for the full reasoning — identical situation.
+// Not wired into any package.json script and not imported by any
+// remaining live code path. Left in place for historical reference only —
+// do not run this against the current MySQL/MariaDB database.
+// =============================================================================
+
 // Restructures Diapers from a flat 2-level tree (division -> leaf
 // directly) into the same 3-level shape (division -> department -> style)
 // as Food/Beauty & Health/Home & Kitchen/Toys & Sports/Jewelry, so its

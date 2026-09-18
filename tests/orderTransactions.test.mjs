@@ -20,11 +20,13 @@ import {
   skipReason,
   connectTestDb,
   disconnectTestDb,
+  truncateAll,
   createTestSession,
   requestAs,
   createTestUser,
   createTestProduct,
   createTestCategory,
+  deleteRows,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -36,6 +38,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
 
   before(async () => {
     await connectTestDb();
+    await truncateAll();
     ({ POST: createOrderPOST } = await import("../app/api/orders/route.js"));
     ({ GET: getOrderGET } = await import("../app/api/orders/[id]/route.js"));
     ({ POST: cancelOrderPOST } = await import("../app/api/orders/[id]/cancel/route.js"));
@@ -68,10 +71,10 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
   }
 
   async function cleanup(buyer, ...products) {
-    await Order.deleteMany({ user: buyer._id });
-    await Cart.deleteOne({ userId: buyer._id });
-    for (const p of products) await Product.deleteOne({ _id: p._id });
-    await User.deleteOne({ _id: buyer._id });
+    await deleteRows("orders", "user_id", buyer._id);
+    await deleteRows("carts", "user_id", buyer._id);
+    for (const p of products) await deleteRows("products", "id", p._id);
+    await deleteRows("users", "id", buyer._id);
   }
 
   test("a successful multi-item order is created with server-computed totals", async () => {
@@ -178,11 +181,11 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(updated.variants[0].stock, 4, "the Small variant's own stock must decrement by 1");
       assert.equal(updated.variants[1].stock, 4, "the Large variant's own stock must decrement by 1, independently of the Small variant");
     } finally {
-      await Order.deleteMany({ user: buyer._id });
-      await Cart.deleteOne({ userId: buyer._id });
-      await Product.deleteOne({ _id: multiVariant._id });
-      await Category.deleteOne({ _id: category._id });
-      await User.deleteOne({ _id: buyer._id });
+      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("carts", "user_id", buyer._id);
+      await deleteRows("products", "id", multiVariant._id);
+      await deleteRows("categories", "id", category._id);
+      await deleteRows("users", "id", buyer._id);
     }
   });
 
@@ -284,7 +287,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
         "ROLLBACK CONFIRMED: the first item's decrement was undone along with the second item's failure — stock is back to its pre-transaction value, not left at 4",
       );
 
-      const orders = await Order.find({ user: buyer._id });
+      const orders = await Order.findMyOrders(buyer._id);
       assert.equal(orders.length, 0, "no Order document should exist for a rolled-back transaction");
     } finally {
       await cleanup(buyer, productA);
@@ -294,7 +297,9 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
   test("cart is cleared only after a successful order commit", async () => {
     const { buyer, productA } = await makeBuyerAndProducts();
     try {
-      await Cart.create({ userId: buyer._id, items: [{ productId: productA._id, variantId: productA.variants[0]._id, quantity: 1 }] });
+      const seedCart = await Cart.create(buyer._id);
+      seedCart.items = [{ productId: productA._id, variantId: productA.variants[0]._id, quantity: 1, snapshot: {} }];
+      await seedCart.save();
 
       const req = requestAs({
         method: "POST",
@@ -305,7 +310,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const res = await createOrderPOST(req);
       assert.equal(res.status, 201);
 
-      const cart = await Cart.findOne({ userId: buyer._id });
+      const cart = await Cart.findByUser(buyer._id);
       assert.deepEqual(cart.items, [], "cart must be emptied after a committed order");
     } finally {
       await cleanup(buyer, productA);
@@ -315,7 +320,9 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
   test("cart is PRESERVED (untouched) when the order transaction rolls back", async () => {
     const { buyer, productA } = await makeBuyerAndProducts();
     try {
-      await Cart.create({ userId: buyer._id, items: [{ productId: productA._id, variantId: productA.variants[0]._id, quantity: 1 }] });
+      const seedCart = await Cart.create(buyer._id);
+      seedCart.items = [{ productId: productA._id, variantId: productA.variants[0]._id, quantity: 1, snapshot: {} }];
+      await seedCart.save();
 
       const req = requestAs({
         method: "POST",
@@ -326,7 +333,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const res = await createOrderPOST(req);
       assert.equal(res.status, 400, "insufficient stock — the order is rejected before any commit");
 
-      const cart = await Cart.findOne({ userId: buyer._id });
+      const cart = await Cart.findByUser(buyer._id);
       assert.equal(cart.items.length, 1, "a rolled-back/rejected order must never touch the cart");
     } finally {
       await cleanup(buyer, productA);
@@ -461,7 +468,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(adminRes.status, 200);
     } finally {
       await cleanup(buyer, productA);
-      await User.deleteMany({ _id: { $in: [stranger._id, admin._id] } });
+      await deleteRows("users", "id", [stranger._id, admin._id]);
     }
   });
 });

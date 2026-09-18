@@ -20,7 +20,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "../helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, rawQuery } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
 
@@ -45,11 +45,10 @@ if (serverUp && dbReady) {
 const skip = !serverUp ? "test server not reachable — run via `npm run test:http`" : !dbConnectable ? skipReason || "MONGO_URI_TEST not reachable" : false;
 
 describe("Phase 3B closure — real HTTP: client-IP trust for register/reset-password", { skip }, () => {
-  let User, RateLimitCounter;
+  let User;
 
   before(async () => {
     ({ default: User } = await import("../../models/userModel.js"));
-    ({ default: RateLimitCounter } = await import("../../models/rateLimitModel.js"));
   });
 
   after(async () => {
@@ -74,7 +73,7 @@ describe("Phase 3B closure — real HTTP: client-IP trust for register/reset-pas
     assert.equal(res.status, 503, "an unresolvable/invalid trusted IP must fail closed on this route, never silently proceed unprotected");
     const json = await res.json();
     assert.equal(json.success, false);
-    assert.doesNotMatch(json.message, /proxy|forwarded|hop|mongo|internal/i, "no internal proxy-configuration detail leaks to the client");
+    assert.doesNotMatch(json.message, /proxy|forwarded|hop|mongo|mysql|internal/i, "no internal proxy-configuration detail leaks to the client");
 
     // Confirm the fail-closed response genuinely prevented account
     // creation — not just an unrelated coincidental error.
@@ -106,10 +105,16 @@ describe("Phase 3B closure — real HTTP: client-IP trust for register/reset-pas
     const second = await registerReq({ email: freshEmail(), xff: `totally-different-attacker-value-xyz, ${realIp}` });
     assert.equal(second.status, 201);
 
+    // models/rateLimitModel.js only exposes upsertAndIncrement() (see its
+    // own header comment — no generic findOne, this table's whole job is
+    // the atomic ON DUPLICATE KEY UPDATE counter itself) — this test's own
+    // direct-row verification goes straight through SQL instead, the same
+    // "test-only escape hatch" pattern tests/helpers/testDb.mjs's rawQuery()
+    // exists for.
     const keyHash = crypto.createHash("sha256").update(realIp).digest("hex");
-    const doc = await RateLimitCounter.findOne({ keyHash, action: "register:ip" });
-    assert.ok(doc, "a counter document keyed by the REAL (trusted-position) IP alone must exist");
-    assert.equal(doc.count, 2, "both requests incremented the SAME bucket — the prepended junk had zero effect on identity");
+    const [row] = await rawQuery("SELECT * FROM rate_limit_counters WHERE key_hash = ? AND action = ?", [keyHash, "register:ip"]);
+    assert.ok(row, "a counter row keyed by the REAL (trusted-position) IP alone must exist");
+    assert.equal(row.count, 2, "both requests incremented the SAME bucket — the prepended junk had zero effect on identity");
   });
 
   test("register: exceeding the configured IP limit returns a real 429 with a valid Retry-After header, over the actual network stack", async () => {

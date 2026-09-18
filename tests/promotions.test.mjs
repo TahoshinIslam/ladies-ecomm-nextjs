@@ -16,6 +16,8 @@ import {
   createTestUser,
   createTestCategory,
   createTestProduct,
+  deleteRows,
+  rawQuery,
 } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
@@ -71,19 +73,19 @@ describe("Admin-promotions feature", { skip: !canRun && reason }, () => {
         assert.equal(target.clickable, true);
         assert.equal(target.href, `/product/${product.slug}`);
       } finally {
-        await Product.findByIdAndDelete(product._id);
+        await deleteRows("products", "id", product._id);
       }
     });
 
     test("product target is non-clickable when the product is inactive", async () => {
       const product = await createTestProduct();
-      await Product.updateOne({ _id: product._id }, { isActive: false });
+      await rawQuery("UPDATE products SET is_active = 0 WHERE id = ?", [product._id]);
       try {
         const target = await resolvePromotionTarget({ targetType: "product", targetProduct: product._id });
         assert.equal(target.clickable, false);
         assert.equal(target.href, null);
       } finally {
-        await Product.findByIdAndDelete(product._id);
+        await deleteRows("products", "id", product._id);
       }
     });
 
@@ -100,18 +102,18 @@ describe("Admin-promotions feature", { skip: !canRun && reason }, () => {
         assert.equal(target.clickable, true);
         assert.equal(target.href, `/shop?category=${category._id}`);
       } finally {
-        await Category.findByIdAndDelete(category._id);
+        await deleteRows("categories", "id", category._id);
       }
     });
 
     test("category target is non-clickable when the category is inactive", async () => {
       const category = await createTestCategory();
-      await Category.updateOne({ _id: category._id }, { isActive: false });
+      await rawQuery("UPDATE categories SET is_active = 0 WHERE id = ?", [category._id]);
       try {
         const target = await resolvePromotionTarget({ targetType: "category", targetCategory: category._id });
         assert.equal(target.clickable, false);
       } finally {
-        await Category.findByIdAndDelete(category._id);
+        await deleteRows("categories", "id", category._id);
       }
     });
 
@@ -152,7 +154,7 @@ describe("Admin-promotions feature", { skip: !canRun && reason }, () => {
   describe("getEligiblePromotionsBase() — scheduling and deterministic ordering", () => {
     let created = [];
     after(async () => {
-      await Promotion.deleteMany({ _id: { $in: created.map((p) => p._id) } });
+      if (created.length) await deleteRows("promotions", "id", created.map((p) => p._id));
       created = [];
     });
 
@@ -200,14 +202,14 @@ describe("Admin-promotions feature", { skip: !canRun && reason }, () => {
 
     test("a promotion whose product target has gone inactive is OMITTED entirely, never returned as a dead link", async () => {
       const product = await createTestProduct();
-      await Product.updateOne({ _id: product._id }, { isActive: false });
+      await rawQuery("UPDATE products SET is_active = 0 WHERE id = ?", [product._id]);
       const p = await makePromotion({ targetType: "product", targetProduct: product._id });
       created.push(p);
       try {
         const results = await getEligiblePromotionsBase({ type: "carousel", placement: "home_hero", pageScope: "home" });
         assert.ok(!results.some((r) => r.id === String(p._id)));
       } finally {
-        await Product.findByIdAndDelete(product._id);
+        await deleteRows("products", "id", product._id);
       }
     });
 
@@ -279,7 +281,7 @@ describe("Admin-promotions feature", { skip: !canRun && reason }, () => {
   describe("Admin promotion API — auth, permission, CSRF, and validation", () => {
     let created = [];
     after(async () => {
-      await Promotion.deleteMany({ _id: { $in: created.map((p) => p._id) } });
+      if (created.length) await deleteRows("promotions", "id", created.map((p) => p._id));
       created = [];
     });
 
@@ -466,8 +468,8 @@ describe("Admin-promotions feature", { skip: !canRun && reason }, () => {
       });
       const res = await reorderPOST(req);
       assert.equal(res.status, 200);
-      const refreshedA = await Promotion.findById(a._id).lean();
-      const refreshedB = await Promotion.findById(b._id).lean();
+      const refreshedA = await Promotion.findById(a._id);
+      const refreshedB = await Promotion.findById(b._id);
       assert.equal(refreshedB.sortOrder, 0);
       assert.equal(refreshedA.sortOrder, 1);
     });

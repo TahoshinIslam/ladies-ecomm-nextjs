@@ -73,13 +73,17 @@ describe("views/HomePage.jsx — department grid renders in DEPARTMENT_ORDER's i
     assert.deepEqual(sorted, ["burqa"]);
   });
 
-  test("a child category (parent set) is never included, regardless of slug", () => {
-    const withChild = [
-      { _id: "burqa", slug: "burqa", parent: null },
-      { _id: "burqa-child", slug: "burqa", parent: "burqa" },
+  // Men/Women gender-division restructuring: the original 9 fashion
+  // departments (Burqa, Hijab, ...) now genuinely sit one level under a
+  // top-level "Women"/"Men" division, so this row must keep showing them
+  // by slug membership alone — requiring `!c.parent` would silently empty
+  // out the whole row the moment they stopped being root categories.
+  test("a department with a real parent set (e.g. Burqa under the Women division) is still included, matched by slug alone", () => {
+    const nested = [
+      { _id: "women", slug: "women", parent: null },
+      { _id: "burqa", slug: "burqa", parent: "women" },
     ];
-    const sorted = sortDepartmentsForFavourites(withChild);
-    assert.equal(sorted.length, 1);
-    assert.equal(sorted[0]._id, "burqa");
+    const sorted = sortDepartmentsForFavourites(nested).map((c) => c.slug);
+    assert.deepEqual(sorted, ["burqa"], "Burqa must appear even though it's no longer a root category; 'women' itself is correctly excluded (not in STOREFRONT_DEPARTMENT_SLUGS)");
   });
 });

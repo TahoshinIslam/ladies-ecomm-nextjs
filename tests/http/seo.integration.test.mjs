@@ -14,6 +14,7 @@ import {
   disconnectTestDb,
   createTestUser,
   createDeliveredOrderFor,
+  deleteRows,
 } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
@@ -97,7 +98,7 @@ function extractJsonLd(html) {
 }
 
 describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety", { skip }, () => {
-  let Product, Category, Order, User;
+  let Product, Category;
   let burqaLeafId, burqaDeptId;
   const createdIds = { products: [], users: [], orders: [] };
   let product;
@@ -106,12 +107,10 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
   before(async () => {
     ({ default: Product } = await import("../../models/productModel.js"));
     ({ default: Category } = await import("../../models/categoryModel.js"));
-    ({ default: Order } = await import("../../models/orderModel.js"));
-    ({ default: User } = await import("../../models/userModel.js"));
 
-    const burqa = await Category.findOne({ slug: "burqa" }).lean();
+    const burqa = await Category.findBySlug("burqa");
     assert.ok(burqa, "seed data must include the Burqa department");
-    const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
+    const [burqaLeaf] = await Category.findByParent(burqa._id);
     burqaDeptId = burqa._id.toString();
     burqaLeafId = burqaLeaf._id.toString();
 
@@ -129,9 +128,9 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
   });
 
   after(async () => {
-    if (createdIds.orders.length) await Order.deleteMany({ _id: { $in: createdIds.orders } });
-    if (createdIds.products.length) await Product.deleteMany({ _id: { $in: createdIds.products } });
-    if (createdIds.users.length) await User.deleteMany({ _id: { $in: createdIds.users } });
+    if (createdIds.orders.length) await deleteRows("orders", "id", createdIds.orders);
+    if (createdIds.products.length) await deleteRows("products", "id", createdIds.products);
+    if (createdIds.users.length) await deleteRows("users", "id", createdIds.users);
     await disconnectTestDb();
   });
 
@@ -325,15 +324,17 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     const ACTIVE_COUNT = 105;
     const INACTIVE_COUNT = 5;
 
-    // Bulk-built in one array and inserted via a single Product.create()
-    // call (mongoose parallelizes the underlying saves — still one round
-    // trip from this test's perspective, not 105 sequential HTTP
-    // requests or even 105 sequential DB calls). Each doc sets its own
-    // `slug` explicitly rather than relying on the pre("validate") hook,
-    // so this stays fast and deterministic regardless of hook timing.
+    // Bulk-built in one array and inserted via parallel Product.create()
+    // calls (models/productModel.js's create() takes one document at a
+    // time — no native bulk-insert entry point — so Promise.all() is what
+    // keeps this "105 concurrent DB round trips", not "105 sequential HTTP
+    // requests"). The real, auto-derived slug always comes from
+    // buildSlug(name, id) (see productModel.js's create()), so a unique
+    // `name` per doc is what actually keeps every resulting slug distinct
+    // and deterministic — not an explicit `slug` field, which create()
+    // doesn't accept as input.
     const activeDocs = Array.from({ length: ACTIVE_COUNT }, (_, i) => ({
       name: `__sitemap_scale_${suffix}_${i}`,
-      slug: `sitemap-scale-${suffix}-${i}`,
       description: "bulk sitemap scale fixture",
       category: burqaLeafId,
       topCategory: burqaDeptId,
@@ -344,7 +345,6 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     }));
     const inactiveDocs = Array.from({ length: INACTIVE_COUNT }, (_, i) => ({
       name: `__sitemap_scale_inactive_${suffix}_${i}`,
-      slug: `sitemap-scale-inactive-${suffix}-${i}`,
       description: "bulk sitemap scale fixture (inactive)",
       category: burqaLeafId,
       topCategory: burqaDeptId,
@@ -354,8 +354,8 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
       isActive: false,
     }));
 
-    const createdActive = await Product.create(activeDocs);
-    const createdInactive = await Product.create(inactiveDocs);
+    const createdActive = await Promise.all(activeDocs.map((doc) => Product.create(doc)));
+    const createdInactive = await Promise.all(inactiveDocs.map((doc) => Product.create(doc)));
     createdIds.products.push(...createdActive.map((p) => p._id), ...createdInactive.map((p) => p._id));
 
     const admin = await createTestUser({ role: "admin" });

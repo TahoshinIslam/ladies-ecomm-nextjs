@@ -19,6 +19,7 @@ import {
   createTestUser,
   createTestProduct,
   createDeliveredOrderFor,
+  deleteRows,
 } from "../helpers/testDb.mjs";
 
 const BASE_URL = process.env.HTTP_TEST_BASE_URL || "http://localhost:3000";
@@ -55,15 +56,13 @@ async function cookieHeaderFor(userId) {
 }
 
 describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { skip }, () => {
-  let Product, Order, User;
+  let Product;
   let product;
   let customer, otherCustomer, admin;
   const createdIds = { users: [], products: [], orders: [] };
 
   before(async () => {
     ({ default: Product } = await import("../../models/productModel.js"));
-    ({ default: Order } = await import("../../models/orderModel.js"));
-    ({ default: User } = await import("../../models/userModel.js"));
     const { default: Category } = await import("../../models/categoryModel.js");
 
     // The storefront's product list (home/shop) is scoped to real seeded
@@ -73,9 +72,9 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
     // there, not a bug. Attach it to a real "burqa" subcategory instead,
     // matching tests/http/productFilters.integration.test.mjs's own
     // fixture pattern.
-    const burqa = await Category.findOne({ slug: "burqa" }).lean();
+    const burqa = await Category.findBySlug("burqa");
     assert.ok(burqa, "seed data must include the Burqa department");
-    const burqaLeaf = await Category.findOne({ parent: burqa._id }).lean();
+    const [burqaLeaf] = await Category.findByParent(burqa._id);
     assert.ok(burqaLeaf, "Burqa needs at least one subcategory to attach a test product to");
 
     product = await createTestProduct({ stock: 5, basePrice: 4200 });
@@ -91,9 +90,9 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
   });
 
   after(async () => {
-    if (createdIds.orders.length) await Order.deleteMany({ _id: { $in: createdIds.orders } });
-    if (createdIds.products.length) await Product.deleteMany({ _id: { $in: createdIds.products } });
-    if (createdIds.users.length) await User.deleteMany({ _id: { $in: createdIds.users } });
+    if (createdIds.orders.length) await deleteRows("orders", "id", createdIds.orders);
+    if (createdIds.products.length) await deleteRows("products", "id", createdIds.products);
+    if (createdIds.users.length) await deleteRows("users", "id", createdIds.users);
     await disconnectTestDb();
   });
 

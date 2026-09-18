@@ -9,7 +9,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, rawQuery } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -60,7 +60,7 @@ describe("Phase 11 CORRECTION — no production emit call site uses silent fire-
       const totalEmitCalls = (content.match(/emit(Order|Admin)Event\(/g) || []).length;
       assert.ok(totalEmitCalls > 0, `${rel} should still call an emit function`);
 
-      const transactionalCalls = (content.match(/await emit(Order|Admin)Event\([\s\S]*?\{\s*session\s*\}\)/g) || []).length;
+      const transactionalCalls = (content.match(/await emit(Order|Admin)Event\([\s\S]*?\{\s*session:\s*\w+\s*\},?\s*\)/g) || []).length;
       const bestEffortCalls = (content.match(/emitBestEffort\(\s*\n?\s*emit(Order|Admin)Event\(/g) || []).length;
       assert.equal(
         transactionalCalls + bestEffortCalls,
@@ -72,19 +72,23 @@ describe("Phase 11 CORRECTION — no production emit call site uses silent fire-
 
   test("services/orderService.js: NEW_ORDER and cancellation events are written INSIDE their transactions", () => {
     const content = stripComments(fs.readFileSync(new URL("../services/orderService.js", import.meta.url), "utf8"));
-    assert.match(content, /await emitAdminEvent\(\{ type: "NEW_ORDER"[\s\S]*?\{ session \}\)/);
-    assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: "cancelled" \}, \{ session \}\)/);
-    assert.match(content, /await emitAdminEvent\(\{ type: "ORDER_CANCELLED"[\s\S]*?\{ session \}\)/);
+    assert.match(content, /await emitAdminEvent\(\{ type: "NEW_ORDER"[\s\S]*?\{ session: conn \}\)/);
+    assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: "cancelled" \}, \{ session: conn \}\)/);
+    assert.match(content, /await emitAdminEvent\(\s*\{ type: "ORDER_CANCELLED"[\s\S]*?\{ session: conn \},?\s*\)/);
   });
 
   test("services/paymentService.js: the COD order-status event is written INSIDE its transaction", () => {
     const content = stripComments(fs.readFileSync(new URL("../services/paymentService.js", import.meta.url), "utf8"));
-    assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: order\.status \}, \{ session \}\)/);
+    assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: order\.status \}, \{ session: conn \}\)/);
   });
 
-  test("lib/events.js's publish() passes { session } through to Event.create() using the array form (required for Mongoose to join a transaction)", () => {
+  test("lib/events.js's publish() passes the transaction connection through to Event.create() so the insert joins the caller's transaction", () => {
     const content = fs.readFileSync(new URL("../lib/events.js", import.meta.url), "utf8");
-    assert.match(content, /Event\.create\(\[doc\], \{ session \}\)/);
+    // SQL equivalent of the old Mongoose array-form + { session } call: a
+    // raw mysql2 PoolConnection passed as create()'s own second argument
+    // (see models/eventModel.js) — the option name `session` is kept as-is
+    // on every call site precisely so this didn't have to change shape.
+    assert.match(content, /Event\.create\(\{[\s\S]*?\},\s*session\)/);
   });
 
   test("lib/events.js's emitBestEffort logs failures via lib/logger.js's logEvent, never throws", () => {
@@ -94,15 +98,18 @@ describe("Phase 11 CORRECTION — no production emit call site uses silent fire-
   });
 });
 
-describe("Phase 11 — models/eventModel.js TTL and index shape", () => {
-  const content = fs.readFileSync(new URL("../models/eventModel.js", import.meta.url), "utf8");
+describe("Phase 11 — events table TTL-equivalent and index shape (MySQL)", () => {
+  const schema = fs.readFileSync(new URL("../sql/schema.sql", import.meta.url), "utf8");
 
-  test("declares an expiresAt TTL field matching the sessionModel/rateLimitModel pattern", () => {
-    assert.match(content, /expiresAt:\s*\{\s*type:\s*Date,\s*required:\s*true,\s*index:\s*\{\s*expires:\s*0\s*\}/);
+  test("declares an expires_at column, indexed for the cleanup sweep (MySQL has no native TTL index — see schema.sql's own comment)", () => {
+    const eventsTable = schema.slice(schema.indexOf("CREATE TABLE IF NOT EXISTS events"));
+    assert.match(eventsTable, /expires_at DATETIME\(3\) NOT NULL/);
+    assert.match(eventsTable, /KEY idx_events_expires_at \(expires_at\)/);
   });
 
-  test("declares a {channel, _id} compound index for the polling query", () => {
-    assert.match(content, /eventSchema\.index\(\{\s*channel:\s*1,\s*_id:\s*1\s*\}\)/);
+  test("declares a (channel, id) compound index for the polling query", () => {
+    const eventsTable = schema.slice(schema.indexOf("CREATE TABLE IF NOT EXISTS events"));
+    assert.match(eventsTable, /KEY idx_events_channel_id \(channel, id\)/);
   });
 });
 
@@ -137,7 +144,7 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
   });
 
   after(async () => {
-    await Event.deleteMany({ channel: /^phase11-distributed-events-test/ });
+    await rawQuery("DELETE FROM events WHERE channel LIKE 'phase11-distributed-events-test%'");
     await disconnectTestDb();
   });
 
@@ -201,8 +208,11 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
   test("a well-formed but nonexistent (deleted/expired) Last-Event-ID falls back to new-subscriber semantics", async () => {
     const channel = "phase11-distributed-events-test:deleted";
     const ev = await Event.create({ channel, type: "X", payload: {}, expiresAt: new Date(Date.now() + 60000) });
-    const neverExistedId = new (await import("mongoose")).default.Types.ObjectId();
-    const cursor = await resolveStartCursor(channel, neverExistedId.toString());
+    // Event ids are plain AUTO_INCREMENT integers now (see models/eventModel.js) —
+    // a huge, essentially-impossible-to-have-been-assigned value stands in
+    // for "well-formed but nonexistent" the same way a fresh ObjectId did.
+    const neverExistedId = "999999999";
+    const cursor = await resolveStartCursor(channel, neverExistedId);
     assert.equal(cursor.toString(), ev._id.toString(), "an unknown id must never be trusted as a real resume point");
   });
 
@@ -218,14 +228,16 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
 
   test("a genuine DB failure during cursor resolution propagates (never silently returns null / a full-history replay)", async (t) => {
     const channel = "phase11-distributed-events-test:db-failure";
-    const originalFindOne = Event.findOne;
-    t.mock.method(Event, "findOne", () => {
+    // resolveStartCursor(channel, null) — no Last-Event-ID supplied — goes
+    // straight to Event.findLatestId(channel), the SQL equivalent of the
+    // old findOne(...).sort({_id:-1}) "latest" lookup this mocked before.
+    const spy = t.mock.method(Event, "findLatestId", () => {
       throw new Error("simulated transient DB failure");
     });
     try {
       await assert.rejects(() => resolveStartCursor(channel, null), /simulated transient DB failure/);
     } finally {
-      Event.findOne = originalFindOne;
+      spy.mock.restore();
     }
   });
 });
