@@ -41,12 +41,17 @@ export default function CartPage() {
     }
   };
 
-  const subtotalUsd = items.reduce((sum, i) => {
+  // Normalized to BDT PER ITEM before summing — items can be a mix of
+  // already-BDT and still-USD products during the transitional BDT-only
+  // currency migration (see docs/CURRENCY_MIGRATION_PLAN.md); summing raw
+  // displayPrice values first and converting the total once would silently
+  // mis-convert a mixed cart (a BDT item's value would be multiplied by
+  // the exchange rate a second time).
+  const subtotal = items.reduce((sum, i) => {
     if (!i.product) return sum;
-    const { displayPrice } = resolveVariantPricing(i.product, i.variant);
-    return sum + displayPrice * i.quantity;
+    const { displayPrice, currency } = resolveVariantPricing(i.product, i.variant);
+    return sum + settings.toBdt(displayPrice, currency) * i.quantity;
   }, 0);
-  const subtotal = settings.toBdt(subtotalUsd);
   // Same settings-backed threshold CartDrawer/PDP read — never a number
   // invented in this component, so bag/drawer/checkout can't disagree.
   const threshold = settings.freeShippingThreshold();
@@ -108,7 +113,7 @@ export default function CartPage() {
             const id = p._id;
             const variantId = item.variantId;
             const busy = pending.has(keyOf(id, variantId));
-            const { displayPrice } = resolveVariantPricing(p, item.variant);
+            const { displayPrice, currency } = resolveVariantPricing(p, item.variant);
             const variantLine = formatVariantAttributes(item.variant?.attributes, locale);
 
             return (
@@ -169,7 +174,7 @@ export default function CartPage() {
                       increaseLabel={t("product.increaseQuantity")}
                     />
                     <div data-tabular className="text-[15.5px] font-semibold">
-                      {settings.formatPrice(displayPrice * item.quantity)}
+                      {settings.formatPrice(displayPrice * item.quantity, currency)}
                     </div>
                   </div>
                   <button
@@ -184,7 +189,7 @@ export default function CartPage() {
 
                 {/* sm+ grid cells */}
                 <div data-tabular className="hidden text-right text-[14.5px] sm:block">
-                  {settings.formatPrice(displayPrice)}
+                  {settings.formatPrice(displayPrice, currency)}
                 </div>
                 <div className="hidden justify-self-center sm:block">
                   <QuantityStepper
@@ -207,7 +212,7 @@ export default function CartPage() {
                   />
                 </div>
                 <div data-tabular className="hidden text-right text-[15.5px] font-semibold sm:block">
-                  {settings.formatPrice(displayPrice * item.quantity)}
+                  {settings.formatPrice(displayPrice * item.quantity, currency)}
                 </div>
                 <button
                   type="button"

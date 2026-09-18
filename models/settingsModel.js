@@ -17,9 +17,13 @@ const DEFAULT_TAX_RULES = [
   { region: "BD", label: "VAT", rate: 0.15, inclusive: true },
   { region: "INTL", label: "No tax", rate: 0, inclusive: false },
 ];
+// BDT-only currency migration: the INTL zone's tier is now BDT-denominated
+// too (3000/24000 = the same real-world $25/$200 figures, converted at the
+// 120 rate) — every charge this app produces is BDT, including
+// international shipping; see docs/CURRENCY_MIGRATION_PLAN.md.
 const DEFAULT_SHIPPING_ZONES = [
   { region: "BD", currency: "BDT", tiers: [{ name: "Inside Dhaka", baseCost: 60, freeAbove: 2000 }, { name: "Outside Dhaka", baseCost: 120, freeAbove: 2000 }] },
-  { region: "INTL", currency: "USD", tiers: [{ name: "Standard", baseCost: 25, freeAbove: 200 }] },
+  { region: "INTL", currency: "BDT", tiers: [{ name: "Standard", baseCost: 3000, freeAbove: 24000 }] },
 ];
 
 function jsonOrDefault(value, fallback) {

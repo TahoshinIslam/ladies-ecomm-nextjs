@@ -272,8 +272,8 @@ export default function CheckoutPage() {
     for (const it of items) {
       const p = it.product;
       if (!p) continue;
-      const usdPrice = p.discountPrice ?? p.basePrice;
-      subtotal += settings.toBdt(usdPrice) * it.quantity;
+      const price = p.discountPrice ?? p.basePrice;
+      subtotal += settings.toBdt(price, p.priceCurrency) * it.quantity;
     }
     return {
       subtotal,
@@ -287,30 +287,18 @@ export default function CheckoutPage() {
     };
   }, [items, settings]);
 
-  const rawTotals = serverTotals || fallbackTotals;
-  // Every totals.* field below is guaranteed Taka from this point on. The
-  // real, common path is already BDT (server preview for a Bangladesh
-  // address, or the fallback above) — this conversion only ever actually
-  // does something on the rare INTL-address server preview (see
-  // services/orderService.js's regionFromCountry/toRegionCurrency, a real,
-  // separate, USD-denominated order path this task intentionally leaves
-  // untouched) so that path still never shows a customer a dollar sign.
-  const rate = settings.currency?.usdToBdt || 120;
-  const toBdtTotal = (v) => (rawTotals.currency === "USD" ? Math.round(Number(v) * rate) : Number(v));
-  const totals = {
-    ...rawTotals,
-    subtotal: toBdtTotal(rawTotals.subtotal),
-    shippingCost: toBdtTotal(rawTotals.shippingCost),
-    tax: toBdtTotal(rawTotals.tax),
-    discount: toBdtTotal(rawTotals.discount),
-    total: toBdtTotal(rawTotals.total),
-  };
+  // BDT-only currency migration: services/orderService.js's calcTotals()
+  // now always returns `currency: "BDT"` — there is no more raw-USD
+  // server-preview path to compatibility-convert here (see
+  // docs/CURRENCY_MIGRATION_PLAN.md). `totals` is simply whichever of the
+  // two sources above is available, already BDT either way.
+  const totals = serverTotals || fallbackTotals;
 
-  // Raw catalog price (USD-denominated, see services/productService.js) to
-  // the checkout line-item's Taka amount — the same live exchange-rate
-  // conversion settings.formatPrice() applies, exposed as a raw number so
-  // line items can be summed before formatting.
-  const toCheckoutPrice = (usdPrice) => settings.toBdt(usdPrice);
+  // Raw catalog price (still USD for the 2 not-yet-migrated products, BDT
+  // for everything else — see Product.priceCurrency) to the checkout
+  // line-item's Taka amount, exposed as a raw number so line items can be
+  // summed before formatting.
+  const toCheckoutPrice = (price, currency) => settings.toBdt(price, currency);
 
   const handleNewAddress = async (data) => {
     try {
@@ -644,8 +632,8 @@ export default function CheckoutPage() {
               {items.map((it) => {
                 const p = it.product;
                 if (!p) return null;
-                const usdPrice = p.discountPrice ?? p.basePrice;
-                const lineTotal = toCheckoutPrice(usdPrice) * it.quantity;
+                const price = p.discountPrice ?? p.basePrice;
+                const lineTotal = toCheckoutPrice(price, p.priceCurrency) * it.quantity;
                 const variantLine = formatVariantAttributes(it.variant?.attributes, locale);
                 return (
                   <li key={`${p._id}-${it.variantId}`} className="py-3">

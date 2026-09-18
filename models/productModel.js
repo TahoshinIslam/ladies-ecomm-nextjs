@@ -98,6 +98,11 @@ function rowToProduct(row, { variants, attributes, brand, category } = {}) {
     ageGroup: row.age_group,
     basePrice: Number(row.base_price),
     discountPrice: row.discount_price == null ? null : Number(row.discount_price),
+    // Transitional BDT-migration flag — see sql/schema.sql's column
+    // comment and docs/CURRENCY_MIGRATION_PLAN.md. 'USD' (the DB default)
+    // for every not-yet-migrated product; callers computing a charge/
+    // display price must check this before applying the exchange rate.
+    priceCurrency: row.price_currency || "USD",
     images: jsonArray(row.images),
     variants: variants || [],
     attributes: attributes || [],

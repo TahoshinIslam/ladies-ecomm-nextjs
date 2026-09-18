@@ -44,7 +44,7 @@ async function serializeCart(cart) {
         variantId: item.variantId,
         quantity: item.quantity,
         product: product
-          ? { _id: product._id, name: product.name, slug: product.slug, images: product.images, basePrice: product.basePrice, discountPrice: product.discountPrice, brand: product.brand, isActive: product.isActive }
+          ? { _id: product._id, name: product.name, slug: product.slug, images: product.images, basePrice: product.basePrice, discountPrice: product.discountPrice, priceCurrency: product.priceCurrency, brand: product.brand, isActive: product.isActive }
           : null,
         variant: item.snapshot,
       };

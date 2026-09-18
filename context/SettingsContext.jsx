@@ -212,15 +212,19 @@ export const SettingsProvider = ({ children }) => {
        * Format a raw, USD-denominated catalog price (Product.basePrice,
        * variant.price, etc.) as Taka in the current UI language.
        */
-      formatPrice: (rawUsdValue) => formatMoney(rawUsdValue, locale, rate),
+      // `currency` is the transitional per-product BDT-migration flag
+      // (product.priceCurrency) — defaults to "USD" so a caller that
+      // hasn't been updated yet keeps the pre-migration behavior instead
+      // of silently treating a still-USD value as already-BDT.
+      formatPrice: (rawValue, currency = "USD") => formatMoney(rawValue, locale, rate, currency),
       /**
-       * Convert a raw USD-denominated catalog price to a Taka number (not
-       * formatted) — the same conversion formatPrice() applies, exposed
-       * separately so callers doing math (cart subtotal vs. free-shipping
-       * threshold, etc.) stay in Taka throughout instead of comparing a raw
-       * USD number against a BDT threshold.
+       * Convert a raw catalog price to a Taka number (not formatted) — the
+       * same conversion formatPrice() applies, exposed separately so
+       * callers doing math (cart subtotal vs. free-shipping threshold,
+       * etc.) stay in Taka throughout instead of comparing a raw USD
+       * number against a BDT threshold.
        */
-      toBdt: (rawUsdValue) => usdToBdt(rawUsdValue, rate),
+      toBdt: (rawValue, currency = "USD") => (currency === "BDT" ? Math.round(Number(rawValue) || 0) : usdToBdt(rawValue, rate)),
       /**
        * Format a value that's already in Taka (e.g. the output of toBdt(),
        * or an order/checkout total from the API — those are pre-converted
@@ -250,8 +254,8 @@ export const useSettings = () => {
       ...DEFAULTS,
       loaded: false,
       refresh: async () => {},
-      formatPrice: (v) => formatMoney(v, "bn-BD", DEFAULTS.currency.usdToBdt),
-      toBdt: (v) => usdToBdt(v, DEFAULTS.currency.usdToBdt),
+      formatPrice: (v, currency = "USD") => formatMoney(v, "bn-BD", DEFAULTS.currency.usdToBdt, currency),
+      toBdt: (v, currency = "USD") => (currency === "BDT" ? Math.round(Number(v) || 0) : usdToBdt(v, DEFAULTS.currency.usdToBdt)),
       formatBdt: (v) => formatBdt(v, "bn-BD"),
       freeShippingThreshold: () => null,
       freeShippingPitch: () => null,

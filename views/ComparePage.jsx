@@ -124,15 +124,15 @@ export default function ComparePage() {
         return hasDiscount ? (
           <span className="flex flex-col items-start">
             <span className="text-lg font-bold text-foreground">
-              {settings.formatPrice(p.discountPrice)}
+              {settings.formatPrice(p.discountPrice, p.priceCurrency)}
             </span>
             <span className="text-xs text-muted-foreground line-through">
-              {settings.formatPrice(p.basePrice)}
+              {settings.formatPrice(p.basePrice, p.priceCurrency)}
             </span>
           </span>
         ) : (
           <span className="text-lg font-bold text-foreground">
-            {settings.formatPrice(p.basePrice)}
+            {settings.formatPrice(p.basePrice, p.priceCurrency)}
           </span>
         );
       },

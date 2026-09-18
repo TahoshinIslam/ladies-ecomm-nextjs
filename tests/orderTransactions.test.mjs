@@ -96,12 +96,13 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(res.status, 201);
       const json = await res.json();
       assert.equal(json.order.items.length, 2);
-      // basePrice 1000 USD each (tests/helpers/testDb.mjs's createTestProduct)
-      // — services/orderService.js's toRegionCurrency() converts to BDT for
-      // the "Bangladesh" shipping address at the default settings.currency.
-      // usdToBdt rate of 120: (2*1000 + 1*1000) * 120 = 360000. Server-
-      // computed either way, not client-supplied.
-      assert.equal(json.order.subtotal, 360000);
+      // basePrice 1000 each (tests/helpers/testDb.mjs's createTestProduct).
+      // BDT-only currency migration: new products default to
+      // price_currency='BDT' (sql/schema.sql), so services/orderService.js's
+      // chargePrice() charges this value as-is, no exchange-rate conversion
+      // — (2*1000 + 1*1000) = 3000. Server-computed either way, not
+      // client-supplied.
+      assert.equal(json.order.subtotal, 3000);
     } finally {
       await cleanup(buyer, productA, productB);
     }
@@ -174,8 +175,9 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(json.order.items.length, 2);
       const skus = json.order.items.map((i) => i.snapshot?.sku).sort();
       assert.deepEqual(skus, ["TMV-L", "TMV-S"], "each line must resolve its OWN variant's snapshot, not the other line's");
-      // 800 + 1200 = 2000 USD * 120 BDT rate = 240000
-      assert.equal(json.order.subtotal, 240000, "each variant's own price must be charged — never the other variant's price");
+      // 800 + 1200 = 2000 (BDT-only currency migration: new products
+      // default to price_currency='BDT', no exchange-rate conversion).
+      assert.equal(json.order.subtotal, 2000, "each variant's own price must be charged — never the other variant's price");
 
       const updated = await Product.findById(multiVariant._id);
       assert.equal(updated.variants[0].stock, 4, "the Small variant's own stock must decrement by 1");
@@ -205,11 +207,13 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       const res = await createOrderPOST(req);
       assert.equal(res.status, 201);
       const json = await res.json();
-      // 1000 USD basePrice * 120 (BDT rate) = 120000 — see the subtotal
-      // comment in the previous test for why this isn't a bare 1000.
+      // 1000 basePrice, BDT-native (no exchange-rate conversion — see the
+      // subtotal comment in the earlier test). Below the settings BD
+      // shipping zone's ৳2,000 free-shipping threshold, so the "Inside
+      // Dhaka" tier's ৳60 base shipping cost is added: 1000 + 60 = 1060.
       assert.equal(
         json.order.total,
-        120000,
+        1060,
         "the server ignores the client-submitted `total`/`price` fields entirely — services/orderService.js's createOrder() destructures only { items, shippingAddress, shippingTier, couponCode, notes } and never reads a price/total from the request body; the real product basePrice is what's charged",
       );
     } finally {

@@ -271,7 +271,7 @@ export default function SearchModal() {
                           </span>
                         </span>
                         <span data-tabular className="text-[15.5px] font-semibold">
-                          {settings.formatPrice(p.discountPrice ?? p.basePrice)}
+                          {settings.formatPrice(p.discountPrice ?? p.basePrice, p.priceCurrency)}
                         </span>
                       </button>
                     ))}

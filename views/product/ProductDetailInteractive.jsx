@@ -331,12 +331,12 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
 
           <div className="mt-5 flex items-baseline gap-3">
             <span className="font-heading text-4xl font-black">
-              {settings.formatPrice(pricing.displayPrice)}
+              {settings.formatPrice(pricing.displayPrice, pricing.currency)}
             </span>
             {pricing.hasDiscount && (
               <>
                 <span className="text-xl text-muted-foreground line-through">
-                  {settings.formatPrice(pricing.price)}
+                  {settings.formatPrice(pricing.price, pricing.currency)}
                 </span>
                 <Badge variant="danger">
                   {t("product.discountBadge", {
@@ -534,7 +534,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
         >
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{product.name}</div>
-            <div data-tabular className="text-base font-bold">{settings.formatPrice(pricing.displayPrice)}</div>
+            <div data-tabular className="text-base font-bold">{settings.formatPrice(pricing.displayPrice, pricing.currency)}</div>
           </div>
           <button
             onClick={handleWishlist}

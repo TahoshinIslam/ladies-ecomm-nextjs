@@ -48,12 +48,14 @@ export default function CartDrawer() {
     }
   };
 
-  const subtotalUsd = items.reduce((sum, i) => {
+  // Normalized to BDT PER ITEM before summing — see views/CartPage.jsx's
+  // identical fix for why (a mixed cart during the transitional BDT-only
+  // currency migration must not be summed as raw numbers first).
+  const subtotal = items.reduce((sum, i) => {
     if (!i.product) return sum;
-    const { displayPrice } = resolveVariantPricing(i.product, i.variant);
-    return sum + displayPrice * i.quantity;
+    const { displayPrice, currency } = resolveVariantPricing(i.product, i.variant);
+    return sum + settings.toBdt(displayPrice, currency) * i.quantity;
   }, 0);
-  const subtotal = settings.toBdt(subtotalUsd);
   // Same settings-backed threshold PDP's free-shipping perk reads — never a
   // number invented in this component, so cart and checkout can't disagree.
   const threshold = settings.freeShippingThreshold();
@@ -120,7 +122,7 @@ export default function CartDrawer() {
               if (!p) return null;
               const variantId = item.variantId;
               const busy = isBusy(p._id, variantId);
-              const { displayPrice } = resolveVariantPricing(p, item.variant);
+              const { displayPrice, currency } = resolveVariantPricing(p, item.variant);
               const variantLine = formatVariantAttributes(item.variant?.attributes, locale);
 
               return (
@@ -169,7 +171,7 @@ export default function CartDrawer() {
                         )}
                       </div>
                       <div data-tabular className="text-[15.5px] font-semibold">
-                        {settings.formatPrice(displayPrice * item.quantity)}
+                        {settings.formatPrice(displayPrice * item.quantity, currency)}
                       </div>
                     </div>
 

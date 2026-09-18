@@ -312,11 +312,11 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           </div>
           <div className="mt-1.5 flex items-baseline justify-center gap-2">
             <span data-tabular className="text-[15.5px] font-semibold text-ink">
-              {settings.formatPrice(price)}
+              {settings.formatPrice(price, product.priceCurrency)}
             </span>
             {discounted && (
               <span data-tabular className="text-[13px] text-stone line-through">
-                {settings.formatPrice(product.basePrice)}
+                {settings.formatPrice(product.basePrice, product.priceCurrency)}
               </span>
             )}
           </div>

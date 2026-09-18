@@ -28,18 +28,22 @@ import useDialogFocus from "../../hooks/useDialogFocus.js";
 //   attribute-facet convention ShopPage's sidebar uses.
 // - Garment answers are this store's six real departments, resolved to
 //   their DB `_id` (the `category` filter needs the id, not the slug).
-// - Budget thresholds are raw USD — Product.basePrice's own unit (see
-//   services/productService.js's "stored in USD" note) — chosen so they
-//   land on clean round Taka figures (~৳3,000/৳6,000) at the *default*
-//   exchange rate; the button label always shows the *live* converted
-//   amount via settings.toBdt(), never a hardcoded Taka figure that could
-//   drift from the admin's current rate.
+// - Budget thresholds are BDT (see docs/CURRENCY_MIGRATION_PLAN.md — the
+//   thresholds used to be raw USD, ×120'd here to the same real-world
+//   boundaries now that most of the catalog's basePrice is BDT-native).
+//   KNOWN, ACCEPTED TRANSITIONAL LIMITATION: `basePrice` filtering
+//   (services/productService.js's buildFilter()) compares the raw stored
+//   number with no currency awareness — a still-USD product (see
+//   Product.priceCurrency) will filter against these BDT-scale thresholds
+//   incorrectly (its small USD number will always read as "under budget")
+//   until it's migrated too. Only 2 of 14 products are still USD at the
+//   time of this comment.
 const OCCASION_VALUES = ["everyday", "prayer", "eid", "formal"];
 const DEPARTMENT_SLUGS = ["burqa", "abaya", "hijab", "niqab", "khimar", "modest-sets"];
 const BUDGET_ANSWERS = [
-  { id: "under", basePrice: { lte: 25 } },
-  { id: "mid", basePrice: { gte: 25, lte: 50 } },
-  { id: "over", basePrice: { gte: 50 } },
+  { id: "under", basePrice: { lte: 3000 } },
+  { id: "mid", basePrice: { gte: 3000, lte: 6000 } },
+  { id: "over", basePrice: { gte: 6000 } },
   { id: "noLimit", basePrice: undefined },
 ];
 
@@ -63,14 +67,17 @@ export default function ProductFinder() {
   const { data: catsData } = useGetCategoriesQuery();
   const departments = (catsData?.categories ?? []).filter((c) => !c.parent);
 
+  // BUDGET_ANSWERS' thresholds are already BDT (see this file's header
+  // comment) — formatBdt() only, never toBdt()/formatPrice(), which would
+  // incorrectly re-apply the exchange rate to an already-BDT number.
   const budgetLabel = (b) => {
     if (!b.basePrice) return t("finder.budgetNoLimit");
     const { gte, lte } = b.basePrice;
     if (gte != null && lte != null) {
-      return t("finder.budgetRange", { min: settings.formatBdt(settings.toBdt(gte)), max: settings.formatBdt(settings.toBdt(lte)) });
+      return t("finder.budgetRange", { min: settings.formatBdt(gte), max: settings.formatBdt(lte) });
     }
-    if (lte != null) return t("finder.budgetUnder", { amount: settings.formatBdt(settings.toBdt(lte)) });
-    return t("finder.budgetOver", { amount: settings.formatBdt(settings.toBdt(gte)) });
+    if (lte != null) return t("finder.budgetUnder", { amount: settings.formatBdt(lte) });
+    return t("finder.budgetOver", { amount: settings.formatBdt(gte) });
   };
 
   const QUESTIONS = useMemo(
@@ -231,7 +238,7 @@ export default function ProductFinder() {
                             </span>
                           </span>
                           <span data-tabular className="text-[15.5px] font-semibold">
-                            {settings.formatPrice(p.discountPrice ?? p.basePrice)}
+                            {settings.formatPrice(p.discountPrice ?? p.basePrice, p.priceCurrency)}
                           </span>
                         </Link>
                       ))}

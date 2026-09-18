@@ -180,7 +180,7 @@ export default function AdminProductsPage() {
       header: "Price",
       align: "right",
       sortable: true,
-      render: (p) => <span data-tabular className="font-bold">{settings.formatPrice(p.basePrice)}</span>,
+      render: (p) => <span data-tabular className="font-bold">{settings.formatPrice(p.basePrice, p.priceCurrency)}</span>,
     },
     {
       key: "stock",

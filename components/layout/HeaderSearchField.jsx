@@ -179,7 +179,7 @@ export default function HeaderSearchField() {
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{p.name}</span>
                 <span data-tabular className="text-[13px] text-stone">
-                  {settings.formatPrice(p.discountPrice ?? p.basePrice)}
+                  {settings.formatPrice(p.discountPrice ?? p.basePrice, p.priceCurrency)}
                 </span>
               </button>
             ))

@@ -184,7 +184,7 @@ export default function QuickAddSheet() {
                     {product.name}
                   </h2>
                   <div data-tabular className="mt-1.5 text-[16px] font-semibold text-ink">
-                    {settings.formatPrice(pricing.displayPrice)}
+                    {settings.formatPrice(pricing.displayPrice, pricing.currency)}
                   </div>
                 </div>
                 <button

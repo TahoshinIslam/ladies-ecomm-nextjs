@@ -327,7 +327,7 @@ export default function SettingsPage() {
       <Section title="Currency">
         <Field
           label="Default display currency"
-          help="What customers see before they pick a region at checkout."
+          help="Not currently read anywhere in the app — every customer sees BDT. Kept for a possible future multi-currency relaunch."
         >
           <Select
             value={settings.currency.defaultDisplay}
@@ -339,7 +339,7 @@ export default function SettingsPage() {
         </Field>
         <Field
           label="Exchange rate (1 USD = X BDT)"
-          help="Product prices are stored in USD. This rate converts to BDT for BD customers."
+          help="The store is BDT-only now — this rate only still applies to the handful of legacy products not yet migrated to native BDT pricing (see each product's currency in the catalog). Once every product is migrated, this rate no longer affects anything."
         >
           <Input
             type="number"
