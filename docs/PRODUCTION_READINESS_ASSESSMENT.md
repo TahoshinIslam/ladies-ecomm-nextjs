@@ -73,5 +73,21 @@ Rubric (unchanged, fixed for this whole engagement):
   GitHub Actions execution (would require pushing to `origin` — not done
   without separate authorization, per this session's git-safety rules).
 
-**Final score: 90/100** (was 85/100 at the start of this pass). Full
-breakdown and evidence in the chat response this document accompanies.
+**2026-09-18, real CI verification (commit `7ebf051`, run `35371928684`):**
+Pushed to `origin` (github.com/leotechbd/NextJs-singlevendor-multiproduct-Ecom)
+and watched the actual GitHub Actions run to completion via `gh run watch`
+— every step passed: MariaDB service provisioning, schema import, lint,
+main test suite, HTTP integration suite, multi-instance realtime and
+cold-start regression suites, critical-skip verification, and build. Total
+5m18s. Also confirmed the PREVIOUS push (`3e3344f`) already had a real
+successful CI run (5m20s) from earlier in this engagement, and that the
+original pre-fix commit (`9aed53c`, still MongoDB-shaped CI) genuinely
+FAILED — independent confirmation the CI diagnosis and fix were both
+correct, not just locally-plausible.
+
+This closes the "real CI execution unverified" item from Testing &
+maintainability. Updated score: **5/5** for that category (was 4/5).
+
+**Final score: 91/100** (was 85/100 at the start of this pass, 90/100
+before this CI verification). Full breakdown and evidence in the chat
+response this document accompanies.
