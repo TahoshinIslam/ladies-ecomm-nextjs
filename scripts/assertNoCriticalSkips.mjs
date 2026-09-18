@@ -33,6 +33,18 @@ const output = logPaths.map((p) => readFileSync(p, "utf8")).join("\n");
 // database or the module-mocking flag. Any of these appearing in a strict
 // run means a suite that should have executed didn't.
 const CRITICAL_SKIP_MARKERS = [
+  // Confirmed audit finding, fixed: these two markers were still the
+  // MongoDB-era skip strings and no longer matched anything the current
+  // MySQL/MariaDB-based tests/helpers/testDb.mjs actually emits (its real
+  // `skipReason` is "DB_NAME not configured as a test database...") — so
+  // this check could never have detected a real DB-unavailable skip in CI
+  // since the migration, silently defeating its own purpose. A handful of
+  // individual test files also still have stale `"MONGO_URI_TEST not
+  // reachable"`-shaped fallback strings of their own (dead text — they only
+  // fire if testDb.mjs's own skipReason were ever falsy, which it never is
+  // when dbReady is false), so both the old and current marker text are
+  // matched here for defense in depth.
+  "DB_NAME not configured as a test database",
   "MONGO_URI_TEST not configured",
   "MONGO_URI_TEST not reachable",
   "module mocking unavailable",

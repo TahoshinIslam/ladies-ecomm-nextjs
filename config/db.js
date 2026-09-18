@@ -56,25 +56,81 @@ function buildPool() {
     throw new Error(hostCheck.reason);
   }
 
-  return mysql.createPool({
+  const connectionLimit = Number(process.env.DB_POOL_MAX || 20);
+
+  const pool = mysql.createPool({
     host,
     port,
     database,
     user,
     password,
     waitForConnections: true,
-    connectionLimit: Number(process.env.DB_POOL_MAX || 20),
-    queueLimit: 0,
+    connectionLimit,
+    // Bounded, not unlimited: a request that can't get a pooled connection
+    // within a reasonable wait fails fast with a clear, translatable error
+    // (see acquireConnection() below) instead of queuing indefinitely under
+    // sustained pool exhaustion — confirmed audit finding, `queueLimit: 0`
+    // previously meant "unlimited queue depth," not "no queueing."
+    // Confirmed via a real regression while testing this fix: a much
+    // tighter bound (connectionLimit * 4) broke a legitimate bulk-seed
+    // workload (tests/http/seo.integration.test.mjs creating 105 products
+    // for its sitemap-scale test) with mysql2's own hard, un-translated
+    // "Queue limit reached." error — the goal here is to stop genuinely
+    // UNBOUNDED growth (the original `queueLimit: 0` bug), not to
+    // throttle legitimate concurrent bursts below what real admin/seed
+    // operations already need. This is generous enough to absorb that,
+    // while still being a real, finite ceiling (not "unlimited"), and
+    // configurable for deployments with different burst profiles.
+    queueLimit: Number(process.env.DB_POOL_QUEUE_LIMIT) || connectionLimit * 50,
     // Fails a query within a few seconds against a genuinely unreachable/
     // misconfigured database instead of hanging until the platform's own
     // function-duration limit kills it — same intent as the old Mongoose
-    // serverSelectionTimeoutMS/connectTimeoutMS.
+    // serverSelectionTimeoutMS/connectTimeoutMS. Note this only bounds the
+    // TCP/handshake step of opening a brand-new physical connection — it
+    // does NOT bound how long a caller waits for an already-open pooled
+    // connection to free up under load; see acquireConnection()'s own
+    // timeout for that.
     connectTimeout: 5000,
     dateStrings: false,
     timezone: "Z",
     charset: "utf8mb4_unicode_ci",
     decimalNumbers: true,
   });
+
+  // Confirmed audit finding: this app's DATETIME(3) columns are meant to
+  // hold UTC (every comparison in lib/expiryCleanup.js, models/sessionModel.js,
+  // models/couponModel.js deliberately uses a JS-computed cutoff instead of
+  // SQL NOW() specifically because "the real server's own session time_zone
+  // is SYSTEM, not UTC" — see those files' own comments). But SYSTEM here
+  // resolves to this host's local zone (confirmed UTC+6 / Asia-Dhaka on the
+  // verified dev host), and nothing was ever setting the *session*
+  // time_zone the live app's pooled connections actually run queries on —
+  // sql/schema.sql's own `SET time_zone = '+00:00'` (line ~65) only ever
+  // affected the one-off schema-bootstrap script's session, never a single
+  // request-serving connection from this pool. The practical effect:
+  // DEFAULT CURRENT_TIMESTAMP(3)/ON UPDATE CURRENT_TIMESTAMP(3) column
+  // defaults and every explicit `NOW(3)` in models/*.js (session
+  // created_at/revoked_at/last_seen_at, payment paid_at/refunded_at, cart/
+  // wishlist updated_at, notification read_at, ...) were computed in local
+  // server time and stored as if they were UTC wall-clock values — a
+  // reproducible, confirmed 6-hour drift (verified directly against this
+  // pool's own config: a DEFAULT CURRENT_TIMESTAMP row came back ~360
+  // minutes ahead of the real UTC instant it was inserted at).
+  //
+  // Fixed here, once, for every physical connection the pool ever opens
+  // (not per-query, not per-model) — `timezone: "Z"` above already tells
+  // mysql2 to treat every DATETIME it reads/writes as UTC; this makes that
+  // true by setting each connection's own SESSION (never GLOBAL — this
+  // never touches the server's own configured timezone, and never needs
+  // elevated privileges) time_zone to '+00:00' before the pool ever hands
+  // that connection to application code.
+  pool.on("connection", (connection) => {
+    connection.query("SET time_zone = '+00:00'", (err) => {
+      if (err) console.error("Failed to set connection session time_zone to UTC:", err);
+    });
+  });
+
+  return pool;
 }
 
 /**
@@ -92,6 +148,62 @@ export function getPool() {
   return cache.pool;
 }
 
+// Confirmed audit finding: `connectTimeout` (above) only bounds the TCP/
+// handshake step of opening a brand-new physical connection — it does
+// nothing for a caller waiting on `pool.getConnection()` when every
+// physical connection is already checked out and busy. Previously nothing
+// bounded that wait at all beyond the platform's own function-duration
+// limit, so sustained pool exhaustion produced a slow, confusing hang
+// instead of a fast, clear error.
+const POOL_ACQUIRE_TIMEOUT_MS = Number(process.env.DB_POOL_ACQUIRE_TIMEOUT_MS || 8000);
+
+export class PoolExhaustedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "PoolExhaustedError";
+  }
+}
+
+/**
+ * Checks out a connection from the pool with an explicit wait bound
+ * (POOL_ACQUIRE_TIMEOUT_MS), instead of trusting `connectTimeout` (which
+ * doesn't apply here — see above) or the pool's own queue to fail fast.
+ * If the timeout wins the race, the real `getConnection()` call is still
+ * outstanding; when it eventually resolves, it is released straight back
+ * to the pool rather than left dangling — a slow acquire must never leak a
+ * connection or leave an unreleased handle for a transaction that was
+ * never actually started.
+ */
+async function acquireConnection(pool) {
+  const pending = pool.getConnection();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      // Reads the same DB_POOL_MAX value buildPool() used, rather than
+      // reaching into mysql2's internal pool.pool.config shape (undocumented,
+      // not worth depending on) just to report a number in an error message.
+      const connectionLimit = Number(process.env.DB_POOL_MAX || 20);
+      reject(
+        new PoolExhaustedError(
+          `Timed out after ${POOL_ACQUIRE_TIMEOUT_MS}ms waiting for a database connection from the pool (all ${connectionLimit} in use). The database may be overloaded or a prior query/transaction is holding connections open too long.`,
+        ),
+      );
+      // The real `pending` request is still outstanding underneath this
+      // race — if/when it eventually resolves, release it straight back to
+      // the pool instead of leaking an open, never-used connection. Errors
+      // here (pool destroyed, etc.) are deliberately swallowed: the caller
+      // already has its own PoolExhaustedError to handle.
+      pending.then((conn) => conn.release()).catch(() => {});
+    }, POOL_ACQUIRE_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Runs `fn` with a single dedicated connection checked out from the pool,
  * for callers that need several statements to share one session (a
@@ -103,7 +215,7 @@ export function getPool() {
  */
 export async function withConnection(fn) {
   const pool = getPool();
-  const conn = await pool.getConnection();
+  const conn = await acquireConnection(pool);
   try {
     return await fn(conn);
   } finally {
@@ -118,8 +230,21 @@ export async function withConnection(fn) {
  */
 export async function query(sql, params) {
   const pool = getPool();
-  const [rows] = await pool.query(sql, params);
-  return rows;
+  try {
+    const [rows] = await pool.query(sql, params);
+    return rows;
+  } catch (err) {
+    // pool.query() manages its own connection acquisition internally
+    // (unlike withConnection()'s explicit acquireConnection() above) and
+    // throws mysql2's own plain, un-typed `Error('Queue limit reached.')`
+    // when DB_POOL_QUEUE_LIMIT is exceeded — normalized here to the same
+    // PoolExhaustedError shape lib/http.js already translates to a clean,
+    // no-detail-leaked 503, instead of a raw message reaching the client.
+    if (err.message === "Queue limit reached.") {
+      throw new PoolExhaustedError(err.message);
+    }
+    throw err;
+  }
 }
 
 /**

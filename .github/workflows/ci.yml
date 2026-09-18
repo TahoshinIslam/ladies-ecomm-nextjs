@@ -1,22 +1,35 @@
 name: CI
 
-# Phase 1 regression safety net. Every job here uses ONLY isolated,
-# CI-local test values defined directly in this file (see the `env:` block
-# below) — nothing is pulled from repository secrets, and no step ever
-# references a production MongoDB URI. This workflow triggers on
-# `pull_request` (never `pull_request_target`), so a fork's PR branch never
-# runs with access to any repository secret in the first place — and since
-# no step here references `secrets.*` at all, there is nothing to expose
-# even on a same-repo PR.
+# Confirmed audit finding, fixed: this workflow previously still
+# provisioned a MongoDB replica set and set MONGO_URI_TEST — stale from
+# before this project's MongoDB -> MySQL/MariaDB migration. The actual test
+# harness (scripts/assertTestDbSafety.mjs, tests/helpers/testDb.mjs) has
+# required DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD for a MySQL/MariaDB
+# database since that migration — as configured, this workflow's `pretest`
+# gate (CI=true, so strict mode) would have hard-failed on a missing
+# DB_NAME before a single test ever ran. Now provisions a real MariaDB
+# service container and imports sql/schema.sql into it before testing,
+# matching this project's actual runtime (InnoDB on a single standalone
+# server — no replica set needed; MariaDB, not MySQL, to match the local
+# dev/test setup documented in .env.test.example).
+#
+# Every job here uses ONLY isolated, CI-local test values defined directly
+# in this file (see the `env:` block below) — nothing is pulled from
+# repository secrets, and no step ever references a production database.
+# This workflow triggers on `pull_request` (never `pull_request_target`),
+# so a fork's PR branch never runs with access to any repository secret in
+# the first place — and since no step here references `secrets.*` at all,
+# there is nothing to expose even on a same-repo PR.
 #
 # scripts/assertTestDbSafety.mjs additionally enforces database isolation
-# at runtime, inside the test run itself (checks the URI naming, refuses to
-# match MONGO_URI, refuses known hosted-provider hostnames, and — because
-# CI=true/REQUIRE_TEST_DB=true below — hard-fails if MONGO_URI_TEST is
-# missing or not actually transaction-capable, rather than letting
-# database-backed suites silently skip). scripts/assertNoCriticalSkips.mjs
-# then inspects the captured test output and fails the job if any
-# database-backed suite reported itself skipped anyway.
+# at runtime, inside the test run itself (checks DB_NAME's naming, refuses
+# to match the real app's database name, refuses a non-localhost host
+# unless explicitly confirmed, and — because CI=true/REQUIRE_TEST_DB=true
+# below — hard-fails if the database is missing or not actually reachable/
+# transaction-capable, rather than letting database-backed suites silently
+# skip). scripts/assertNoCriticalSkips.mjs then inspects the captured test
+# output and fails the job if any database-backed suite reported itself
+# skipped anyway.
 
 on:
   push:
@@ -46,12 +59,17 @@ jobs:
       NODE_ENV: test
       CI: "true"
       REQUIRE_TEST_DB: "true"
-      # Local-to-this-job replica-set MongoDB — provisioned by the
-      # supercharge/mongodb-github-action step below, torn down with the
-      # runner. Never points at anything outside this job. Database name
-      # deliberately contains "test" — scripts/assertTestDbSafety.mjs
-      # refuses to run against a database whose name doesn't.
-      MONGO_URI_TEST: mongodb://127.0.0.1:27017/tahos_test_ci?replicaSet=test-rs&directConnection=true
+      # Local-to-this-job MariaDB service container (below), torn down
+      # with the runner. Never points at anything outside this job. DB_NAME
+      # deliberately ends in "_ci" — scripts/assertTestDbSafety.mjs refuses
+      # to run against a database whose name doesn't end in "_test"/"_ci",
+      # and separately refuses the one known real application database
+      # name outright.
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      DB_NAME: ladies_multi_ecomm_ci
+      DB_USER: root
+      DB_PASSWORD: ci_root_password
       # JWT_SECRET/JWT_EXPIRES_IN were removed here as of the Phase 2
       # session-cookie migration (jsonwebtoken is uninstalled; nothing in
       # this codebase signs or verifies a JWT anymore) — no test file's
@@ -59,12 +77,35 @@ jobs:
       # requirement, only a historical artifact of the old bearer-JWT setup.
       CLIENT_URL: http://localhost:3000
 
+    # Runner-local MariaDB, matching the version documented in
+    # .env.test.example (XAMPP MariaDB 10.4.28) closely enough for this
+    # schema's needs (InnoDB, utf8mb4, JSON columns, window functions) —
+    # pinned to a specific minor version, not `:latest`, so a CI run is
+    # reproducible. GitHub Actions health-checks this automatically before
+    # any step below runs, but the explicit `mysqladmin ping` step further
+    # down still double-checks readiness the same way a real deployment's
+    # own health check would, rather than assuming the service block's
+    # healthcheck alone is sufficient.
+    services:
+      mariadb:
+        image: mariadb:10.11
+        ports:
+          - 3306:3306
+        env:
+          MARIADB_ROOT_PASSWORD: ci_root_password
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -pci_root_password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
     steps:
       # Pinned to the v7.0.1 release commit (actions/checkout).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Pinned to the v7.0.0 release commit (actions/setup-node). Node
-      # version pinned to the exact patch used during Phase 1 development.
+      # version pinned to match package.json's "engines" field and this
+      # project's actual local dev version exactly.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22.18.0"
@@ -73,17 +114,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Single-node replica set — required because
-      # services/orderService.js's createOrder() uses a real Mongoose
-      # transaction (session.withTransaction), which MongoDB only supports
-      # on a replica set. Pinned to the 1.12.1 release commit (third-party
-      # action — pinned to an immutable commit SHA, not just a tag, per the
-      # Phase 1 CI-hardening requirements).
-      - name: Start MongoDB (replica set)
-        uses: supercharge/mongodb-github-action@315db7fe45ac2880b7758f1933e6e5d59afd5e94 # 1.12.1
-        with:
-          mongodb-version: "7.0"
-          mongodb-replica-set: test-rs
+      - name: Wait for MariaDB and create the CI database
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h127.0.0.1 -P3306 -uroot -pci_root_password --silent && break
+            echo "Waiting for MariaDB... ($i/30)"
+            sleep 2
+          done
+          mysql -h127.0.0.1 -P3306 -uroot -pci_root_password -e "CREATE DATABASE IF NOT EXISTS \`ladies_multi_ecomm_ci\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+      # sql/schema.sql is entirely CREATE TABLE IF NOT EXISTS — safe to
+      # import into a brand-new, empty database exactly like this one.
+      - name: Import schema
+        run: mysql -h127.0.0.1 -P3306 -uroot -pci_root_password ladies_multi_ecomm_ci < sql/schema.sql
 
       - name: Lint
         run: npm run lint
@@ -101,12 +144,11 @@ jobs:
           set -o pipefail
           npm run test:core 2>&1 | tee test-core-output.log
 
-      # scripts/httpTestServer.mjs builds, seeds the same isolated
-      # MONGO_URI_TEST database, starts one `next start` server on a
-      # verified-free port pointed ONLY at that database (config/db.js's
-      # double-gated ALLOW_TEST_DB_OVERRIDE/TEST_SERVER_MONGO_URI — see
-      # that file), runs tests/http/*.test.mjs against it, and always
-      # stops the server afterward (success, failure, or interruption).
+      # scripts/httpTestServer.mjs builds, seeds the same isolated MariaDB
+      # database (DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD above), starts
+      # one `next start` server on a verified-free port pointed ONLY at that
+      # database, runs tests/http/*.test.mjs against it, and always stops
+      # the server afterward (success, failure, or interruption).
       - name: Test (HTTP integration suites)
         shell: bash
         run: |

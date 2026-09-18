@@ -12,6 +12,8 @@ import { HttpError } from "../lib/http.js";
 import { emitOrderEvent, emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
+import { enforceRateLimit } from "../lib/rateLimit.js";
+import { ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS } from "../lib/rateLimitConfig.js";
 
 // Matches the "danger" row-highlight threshold ProductsPage.jsx already
 // uses for total stock — reusing the same number so "low stock" means the
@@ -27,16 +29,27 @@ const CUSTOMER_STATUS_MESSAGE = {
   refunded: (n) => `Order #${n} was refunded`,
 };
 
+// BDT-only currency migration (see docs/CURRENCY_MIGRATION_PLAN.md):
+// `region` now selects a shipping/tax ZONE only — it is no longer tied to
+// currency. Every charge in this app is BDT, full stop; there is no more
+// "raw USD for an INTL address" branch. `region` stays a plain
+// country-derived zone key ("BD" vs "INTL") purely to pick which shipping
+// tier / tax rule applies (see settings.shippingZones/taxRules), same as
+// before this migration.
 const regionFromCountry = (country) => {
   const c = String(country || "").toUpperCase();
   if (c === "BD" || c === "BANGLADESH") return "BD";
   return "INTL";
 };
 
-const toRegionCurrency = (usdPrice, region, settings) => {
-  if (region === "BD") return Math.round(usdPrice * settings.currency.usdToBdt);
-  return usdPrice;
-};
+// BDT has no minor unit in how this store prices/displays it (always a
+// whole-taka integer). Every function in this file that produces a money
+// AMOUNT must run its result through roundMoney() before it is summed
+// with anything else — summing un-rounded floats (e.g. a rate multiply)
+// can reintroduce float noise before it's added into a running total.
+function roundMoney(amount) {
+  return Math.round(amount + Number.EPSILON);
+}
 
 const calcShipping = (region, subtotal, settings, tierName) => {
   const zone = settings.shippingZones.find((z) => z.region === region);
@@ -47,7 +60,7 @@ const calcShipping = (region, subtotal, settings, tierName) => {
   if (tier.freeAbove > 0 && subtotal >= tier.freeAbove) {
     return { cost: 0, tier: tier.name };
   }
-  return { cost: tier.baseCost, tier: tier.name };
+  return { cost: roundMoney(tier.baseCost), tier: tier.name };
 };
 
 const calcTax = (region, subtotal, settings) => {
@@ -55,20 +68,32 @@ const calcTax = (region, subtotal, settings) => {
   if (!rule || rule.rate === 0) return { amount: 0, label: "", inclusive: false };
 
   if (rule.inclusive) {
-    const taxAmount = Math.round((subtotal * rule.rate) / (1 + rule.rate));
+    const taxAmount = roundMoney((subtotal * rule.rate) / (1 + rule.rate));
     return { amount: taxAmount, label: `${rule.label} ${(rule.rate * 100).toFixed(0)}% (incl.)`, inclusive: true };
   }
-  return { amount: Math.round(subtotal * rule.rate), label: `${rule.label} ${(rule.rate * 100).toFixed(0)}%`, inclusive: false };
+  return { amount: roundMoney(subtotal * rule.rate), label: `${rule.label} ${(rule.rate * 100).toFixed(0)}%`, inclusive: false };
 };
 
 function findVariant(product, variantId) {
   return product.variants.find((v) => String(v._id) === String(variantId));
 }
 
-function chargePriceUsd(product, variant) {
+// Resolves a line item's charge, ALWAYS in BDT. `product.priceCurrency`
+// (see models/productModel.js / sql/schema.sql) is the transitional flag
+// from the BDT-only currency migration: 'BDT' products' stored
+// base_price/discount_price/variant price are already true Taka values —
+// used as-is, never multiplied. 'USD' products (not yet migrated — see
+// docs/CURRENCY_MIGRATION_PLAN.md for exactly which ones and why) still
+// use the live exchange rate to produce a BDT charge — but unlike before
+// this migration, this conversion now happens unconditionally (no more
+// raw-USD-for-INTL-addresses branch): every order this app creates is
+// BDT-denominated, regardless of shipping region.
+function chargePrice(product, variant, settings) {
   const effectivePrice = variant.price ?? product.basePrice;
   const effectiveDiscount = variant.discountPrice ?? product.discountPrice;
-  return effectiveDiscount ?? effectivePrice;
+  const chargeInProductCurrency = effectiveDiscount ?? effectivePrice;
+  if (product.priceCurrency === "BDT") return roundMoney(chargeInProductCurrency);
+  return roundMoney(chargeInProductCurrency * settings.currency.usdToBdt);
 }
 
 const calcTotals = async (
@@ -82,7 +107,10 @@ const calcTotals = async (
 ) => {
   const settings = await Settings.getSingleton();
   const region = regionFromCountry(shippingAddress?.country);
-  const currency = region === "BD" ? "BDT" : "USD";
+  // BDT-only currency migration: every order is BDT now, regardless of
+  // shipping region — `region` still selects a shipping/tax zone above,
+  // it no longer selects a currency.
+  const currency = "BDT";
 
   let subtotal = 0;
   const lineItems = [];
@@ -103,9 +131,11 @@ const calcTotals = async (
         `Insufficient stock for ${product.name}${variant ? ` (${variant.variantName})` : ""}`,
       );
     }
-    const baseUsd = chargePriceUsd(product, variant);
-    const price = toRegionCurrency(baseUsd, region, settings);
-    subtotal += price * it.quantity;
+    const price = chargePrice(product, variant, settings);
+    // roundMoney() again after the multiply: `price` is already rounded,
+    // but `price * it.quantity` can reintroduce float noise before it's
+    // added into the running subtotal.
+    subtotal = roundMoney(subtotal + roundMoney(price * it.quantity));
     lineItems.push({
       product: product._id,
       variantId: variant._id,
@@ -144,11 +174,19 @@ const calcTotals = async (
         throw new HttpError(400, "You have already used this coupon the maximum number of times");
       }
     }
+    // Coupon discountValue/maxDiscount are BDT-denominated, full stop —
+    // no currency ambiguity to resolve here (0 coupons existed at the
+    // time of the BDT-only currency migration; any coupon created from
+    // now on is entered directly in Taka).
     discount =
       couponDoc.discountType === "percentage"
-        ? Math.round((subtotal * couponDoc.discountValue) / 100)
-        : couponDoc.discountValue;
-    if (couponDoc.maxDiscount) discount = Math.min(discount, couponDoc.maxDiscount);
+        ? roundMoney((subtotal * couponDoc.discountValue) / 100)
+        : roundMoney(couponDoc.discountValue);
+    if (couponDoc.maxDiscount) discount = Math.min(discount, roundMoney(couponDoc.maxDiscount));
+    // A flat discount is deliberately NOT capped to the subtotal here —
+    // see tests/coupons.test.mjs's "DOCUMENTED LIMITATION" test, an
+    // existing, intentional product/test decision this fix does not
+    // change. The final order total is still floored at 0 below.
   }
 
   const tax = calcTax(region, subtotal, settings);
@@ -167,7 +205,7 @@ const calcTotals = async (
   }
 
   const taxToAdd = tax.inclusive ? 0 : tax.amount;
-  const total = Math.max(0, subtotal + taxToAdd + ship.cost - discount);
+  const total = roundMoney(Math.max(0, subtotal + taxToAdd + ship.cost - discount));
 
   return {
     lineItems,
@@ -234,6 +272,17 @@ export async function createOrder(
     }
     return { order: redactIdempotencyFields(priorOrder), replayed: true };
   }
+
+  // Confirmed audit finding, fixed: order creation had no rate limit at
+  // all. Checked ONLY here — after the sequential-replay fast path above
+  // has already returned for any request reusing an existing Idempotency-
+  // Key — so retrying/resubmitting the SAME checkout never consumes a
+  // slot or can be blocked by this limiter; only genuinely NEW order
+  // attempts count against it. See lib/rateLimitConfig.js's
+  // ORDER_CREATE_USER_LIMIT for the full reasoning.
+  await enforceRateLimit([
+    { identity: String(userId), action: "order-create:user", limit: ORDER_CREATE_USER_LIMIT, windowMs: ORDER_CREATE_USER_WINDOW_MS },
+  ]);
 
   let createdOrder;
   try {
@@ -373,6 +422,31 @@ export async function getOrder(userId, role, orderId) {
   return redactIdempotencyFields(order);
 }
 
+// Shared by cancelOrder() (customer/admin-initiated) and updateOrderStatus()
+// (admin status-machine move to "cancelled") so BOTH entry points that can
+// land an order in "cancelled" restore stock and coupon usage the same way,
+// inside the same transaction as the status write. Before this fix,
+// updateOrderStatus() could move an order straight to "cancelled" (a
+// transition ORDER_STATUS_TRANSITIONS always allowed from pending/paid/
+// processing, and schemas/orderSchemas.js's ORDER_STATUSES always accepted
+// as a valid PUT /status body) without ever restoring the stock or coupon
+// usage cancelOrder() restores — a confirmed correctness gap, not a
+// hypothetical race.
+async function restoreStockAndCoupon(conn, order) {
+  for (const it of order.items) {
+    await Product.incrementVariantStock(conn, it.product, it.variantId, it.quantity);
+  }
+  if (order.coupon) {
+    // Symmetric with the global-usage rollback: cancelling an order
+    // restores both the global usedCount AND the per-user usage count.
+    // (This mirrors the FIRST-order promo's deliberately opposite
+    // choice — claimFirstOrderPromo's flag is sticky and never restored
+    // on cancel — but that is a distinct, separately-reasoned guarantee.)
+    await Coupon.restoreGlobalUsage(conn, order.coupon);
+    await CouponUsage.restorePerUserUsage(conn, order.coupon, order.user);
+  }
+}
+
 export async function cancelOrder(userId, role, orderId) {
   requireObjectIdFormat(orderId, "orderId");
   const updatedOrder = await withTransaction(async (conn) => {
@@ -384,18 +458,7 @@ export async function cancelOrder(userId, role, orderId) {
     if (!["pending", "paid", "processing"].includes(order.status)) {
       throw new HttpError(400, `Cannot cancel an order in status "${order.status}"`);
     }
-    for (const it of order.items) {
-      await Product.incrementVariantStock(conn, it.product, it.variantId, it.quantity);
-    }
-    if (order.coupon) {
-      // Symmetric with the global-usage rollback: cancelling an order
-      // restores both the global usedCount AND the per-user usage count.
-      // (This mirrors the FIRST-order promo's deliberately opposite
-      // choice — claimFirstOrderPromo's flag is sticky and never restored
-      // on cancel — but that is a distinct, separately-reasoned guarantee.)
-      await Coupon.restoreGlobalUsage(conn, order.coupon);
-      await CouponUsage.restorePerUserUsage(conn, order.coupon, order.user);
-    }
+    await restoreStockAndCoupon(conn, order);
     order.status = "cancelled";
     await Order.saveOrderOnConnection(conn, order);
 
@@ -450,51 +513,86 @@ function isOrderStatusTransitionAllowed(from, to) {
   return (ORDER_STATUS_TRANSITIONS[from] || []).includes(to);
 }
 
+// Previously a plain findById() -> mutate -> order.save(), with no row lock
+// and no transaction — two concurrent admin requests (e.g. one setting
+// "shipped", another concurrently setting "cancelled") could both read the
+// same starting status, both pass isOrderStatusTransitionAllowed(), and the
+// last UPDATE would silently win with no side effects re-evaluated against
+// the actual final state. Now mirrors cancelOrder()'s pattern: a single
+// transaction holds a row lock (SELECT ... FOR UPDATE) across the read,
+// the transition check, the write, and every side effect that must commit
+// or roll back with it — so a losing concurrent request fails with a clear
+// 409 against the row's real current status instead of clobbering it.
 export async function updateOrderStatus(orderId, { status, trackingNumber }) {
   requireObjectIdFormat(orderId, "orderId");
-  const order = await Order.findById(orderId);
-  if (!order) throw new HttpError(404, "Order not found");
 
-  if (!isOrderStatusTransitionAllowed(order.status, status)) {
-    throw new HttpError(409, `Cannot change order status from "${order.status}" to "${status}"`);
-  }
+  const { order, changed } = await withTransaction(async (conn) => {
+    const current = await Order.findByIdForUpdate(conn, orderId);
+    if (!current) throw new HttpError(404, "Order not found");
 
-  const isSameStatus = order.status === status;
-  const trackingChanged = !!trackingNumber && trackingNumber !== order.trackingNumber;
-
-  if (isSameStatus && !trackingChanged) {
-    return { order, changed: false };
-  }
-
-  if (!isSameStatus) order.status = status;
-  if (trackingChanged) order.trackingNumber = trackingNumber;
-  if (!isSameStatus && status === "delivered") order.deliveredAt = new Date();
-  await order.save();
-
-  if (!isSameStatus && status === "delivered") {
-    await Payment.markCompletedForCod(order._id);
-  }
-
-  await emitBestEffort(emitOrderEvent(orderId, { orderId, status, trackingNumber: order.trackingNumber }));
-
-  if (!isSameStatus) {
-    const orderNumber = orderId.toString().slice(-6);
-    await emitBestEffort(emitAdminEvent({ type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status }));
-    if (["cancelled", "refunded"].includes(status)) {
-      createAdminNotification({
-        message: `Order #${orderNumber} marked as ${status}`,
-        url: "/admin/orders",
-      }).catch(() => {});
+    if (!isOrderStatusTransitionAllowed(current.status, status)) {
+      throw new HttpError(409, `Cannot change order status from "${current.status}" to "${status}"`);
     }
 
-    const customerMessage = CUSTOMER_STATUS_MESSAGE[status];
-    if (customerMessage) {
-      createUserNotification({
-        recipient: order.user,
-        message: customerMessage(orderNumber),
-        url: `/orders/${orderId}`,
-      }).catch(() => {});
+    const isSameStatus = current.status === status;
+    const trackingChanged = !!trackingNumber && trackingNumber !== current.trackingNumber;
+
+    if (isSameStatus && !trackingChanged) {
+      return { order: current, changed: false };
     }
+
+    if (!isSameStatus) current.status = status;
+    if (trackingChanged) current.trackingNumber = trackingNumber;
+    if (!isSameStatus && status === "delivered") current.deliveredAt = new Date();
+
+    // Coordinate with the side effects each destination status requires,
+    // inside the same lock/transaction as the status write itself — never
+    // as a separate, unguarded follow-up query.
+    if (!isSameStatus && status === "cancelled") {
+      await restoreStockAndCoupon(conn, current);
+    }
+
+    await Order.saveOrderOnConnection(conn, current);
+
+    if (!isSameStatus && status === "delivered") {
+      await Payment.markCompletedForCod(current._id, conn);
+    }
+    if (!isSameStatus && status === "refunded") {
+      await Payment.markRefunded(conn, current._id, "Marked refunded by admin status change");
+    }
+
+    // Transactional outbox, same discipline as cancelOrder()/createOrder():
+    // written inside this transaction so it's atomic with the status write
+    // (and everything else above) rather than a best-effort afterthought.
+    await emitOrderEvent(orderId, { orderId, status, trackingNumber: current.trackingNumber }, { session: conn });
+    if (!isSameStatus) {
+      const orderNumber = orderId.toString().slice(-6);
+      await emitAdminEvent(
+        { type: "ORDER_STATUS_CHANGED", orderId: orderId.toString(), orderNumber, status },
+        { session: conn },
+      );
+    }
+
+    return { order: current, changed: true };
+  });
+
+  if (!changed) return { order, changed: false };
+
+  const orderNumber = orderId.toString().slice(-6);
+  if (["cancelled", "refunded"].includes(status)) {
+    createAdminNotification({
+      message: `Order #${orderNumber} marked as ${status}`,
+      url: "/admin/orders",
+    }).catch(() => {});
+  }
+
+  const customerMessage = CUSTOMER_STATUS_MESSAGE[status];
+  if (customerMessage) {
+    createUserNotification({
+      recipient: order.user,
+      message: customerMessage(orderNumber),
+      url: `/orders/${orderId}`,
+    }).catch(() => {});
   }
 
   return { order, changed: true };

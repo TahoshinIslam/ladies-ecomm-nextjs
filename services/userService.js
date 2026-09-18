@@ -8,6 +8,41 @@ import { revokeAllSessionsForUser } from "../lib/session.js";
 import { buildAppUrl } from "../lib/appUrl.js";
 import { requireObjectIdFormat, isHexTokenFormat } from "../lib/validation.js";
 
+// Explicit allowlist for every user object an ADMIN-facing endpoint
+// returns (list/detail/update — app/api/users/route.js, app/api/users/[id]/
+// route.js). Confirmed defect this fixes: models/userModel.js's rowToUser()
+// puts `password` (the bcrypt hash) and `resetPasswordToken` (the SHA-256
+// hash of an active reset token) on every user object as plain enumerable
+// fields, and listUsers()/getUserById()/updateUser() below previously
+// returned that object straight into NextResponse.json() with no
+// sanitization at all — unlike the self-service paths (registers/login/
+// getMe/updateMe), which already only ever return a hand-picked safe
+// shape (see authService.js's publicUser() and updateMe() above). An admin
+// legitimately needs more than the self-service shape (phone, permissions,
+// verification/lock state, timestamps) — this is that same idea, just with
+// the admin-relevant fields added back in, while still never including
+// password or either reset-password field.
+function toAdminSafeUser(user) {
+  if (!user) return user;
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    permissions: user.permissions || [],
+    avatar: user.avatar,
+    phone: user.phone,
+    isVerified: user.isVerified,
+    loginAttempts: user.loginAttempts,
+    lockUntil: user.lockUntil,
+    isLocked: user.isLocked,
+    lastLogin: user.lastLogin,
+    firstOrderPromoUsed: user.firstOrderPromoUsed,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
 // ========== SELF-SERVICE ==========
 
 export async function updateMe(userId, body) {
@@ -135,7 +170,7 @@ export async function listUsers({ page = 1, limit = 20, search, sortBy, sortOrde
     User.countDocuments(filter),
   ]);
   return {
-    users,
+    users: users.map(toAdminSafeUser),
     total,
     page: pageNum,
     limit: limitNum,
@@ -147,7 +182,7 @@ export async function getUserById(id) {
   requireObjectIdFormat(id, "id");
   const user = await User.findById(id);
   if (!user) throw new HttpError(404, "User not found");
-  return user;
+  return toAdminSafeUser(user);
 }
 
 export async function updateUser(id, body, actingUser) {
@@ -192,7 +227,7 @@ export async function updateUser(id, body, actingUser) {
 
   Object.assign(user, updates);
   await user.save();
-  return user;
+  return toAdminSafeUser(user);
 }
 
 export async function deleteUser(id) {

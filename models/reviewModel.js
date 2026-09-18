@@ -95,21 +95,18 @@ async function findByUserAndProducts(userId, productIds) {
   return Promise.all(rows.map((r) => populateOne(r, { populateUser: true, populateReplier: true })));
 }
 
+// Lets a genuine ER_DUP_ENTRY (from the reviews.uq_reviews_user_product
+// unique index) propagate as-is instead of translating it into a
+// MongoDB-shaped `{code: 11000}` error — that translation was Mongo-era
+// compatibility scaffolding for reviewService.js, which now checks the
+// real MySQL error directly via lib/idempotency.js's isDuplicateKeyError(),
+// the same helper every other duplicate-key path in this codebase uses.
 async function create({ user, product, rating, title, comment, images, isVerifiedPurchase }) {
   const id = generateObjectId();
-  try {
-    await query(
-      "INSERT INTO reviews (id, user_id, product_id, rating, title, comment, images, is_verified_purchase, admin_reply_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, user, product, rating, title || "", comment, JSON.stringify(images || []), isVerifiedPurchase ? 1 : 0, ""],
-    );
-  } catch (err) {
-    if (err.code === "ER_DUP_ENTRY") {
-      const dupErr = new Error("duplicate review");
-      dupErr.code = 11000;
-      throw dupErr;
-    }
-    throw err;
-  }
+  await query(
+    "INSERT INTO reviews (id, user_id, product_id, rating, title, comment, images, is_verified_purchase, admin_reply_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, user, product, rating, title || "", comment, JSON.stringify(images || []), isVerifiedPurchase ? 1 : 0, ""],
+  );
   await recalcProductRating(product);
   return findById(id);
 }
@@ -129,12 +126,6 @@ async function saveReview(review) {
     ],
   );
   return review;
-}
-
-async function incrementHelpful(id) {
-  const result = await query("UPDATE reviews SET helpful_count = helpful_count + 1 WHERE id = ?", [id]);
-  if (result.affectedRows === 0) return null;
-  return findById(id);
 }
 
 const REVIEW_SORT_COLUMNS = { createdAt: "created_at", rating: "rating", helpfulCount: "helpful_count" };
@@ -188,7 +179,6 @@ const Review = {
   ratingBreakdown,
   findByUserAndProducts,
   create,
-  incrementHelpful,
   findAdminList,
 };
 

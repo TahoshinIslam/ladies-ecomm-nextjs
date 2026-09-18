@@ -260,6 +260,20 @@ CREATE TABLE IF NOT EXISTS products (
   age_group ENUM('adult', 'kids', 'girls') NOT NULL DEFAULT 'adult',
   base_price DECIMAL(12,2) NOT NULL,
   discount_price DECIMAL(12,2) NULL,
+  -- Transitional column for the BDT-only currency migration (see
+  -- docs/CURRENCY_MIGRATION_PLAN.md and scripts/migrations/0003_*): most
+  -- catalog prices are USD-denominated (converted to BDT at display/
+  -- checkout time via the live exchange rate); a product is flipped to
+  -- 'BDT' once its base_price/discount_price/variant prices have been
+  -- migrated to true, already-BDT values that must NEVER be multiplied by
+  -- the exchange rate again. Once every product is 'BDT', this column
+  -- (and the exchange-rate conversion path entirely) can be dropped.
+  -- Default is 'BDT', not 'USD': every product has been migrated (see
+  -- scripts/migrations/0003_bdt_price_currency.mjs / 0004_bdt_hijab_burqa.mjs)
+  -- and the store is BDT-only going forward — a fresh install, and every
+  -- new product created from now on, should assume BDT unless a future
+  -- multi-currency relaunch reintroduces USD deliberately.
+  price_currency ENUM('USD', 'BDT') NOT NULL DEFAULT 'BDT',
   -- JSON string array — display-only, never individually queried (see header).
   images JSON NOT NULL,
   measurement_height_range VARCHAR(120) NOT NULL DEFAULT '',
@@ -319,7 +333,16 @@ CREATE TABLE IF NOT EXISTS product_variants (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   KEY idx_product_variants_product (product_id, position),
-  KEY idx_product_variants_sku (sku),
+  -- Confirmed audit finding, fixed: previously a plain (non-unique) KEY,
+  -- enforcement left entirely to services/productService.js's
+  -- assertSkusUnique() check-then-insert (a real TOCTOU gap under
+  -- concurrent admin writes). This UNIQUE constraint only benefits a
+  -- brand-new database import — an already-deployed database must run
+  -- scripts/migrations/0002_product_variants_sku_unique.mjs instead (which
+  -- refuses to apply while any duplicate SKU still exists — see that
+  -- file and docs/CATALOG_REPAIR_PROPOSAL.md for the exact conflicts
+  -- found in this project's dev database and how to resolve them).
+  UNIQUE KEY uq_product_variants_sku (sku),
   CONSTRAINT fk_product_variants_product FOREIGN KEY (product_id)
     REFERENCES products (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -597,6 +620,20 @@ CREATE TABLE IF NOT EXISTS reviews (
   UNIQUE KEY uq_reviews_user_product (user_id, product_id),
   KEY idx_reviews_product_created (product_id, created_at DESC),
   KEY idx_reviews_created (created_at DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Per-user helpful-vote dedupe (added post-launch; see
+-- scripts/migrations/0001_review_helpful_votes.mjs for the ALTER-equivalent
+-- migration an already-deployed database must run — this CREATE TABLE IF
+-- NOT EXISTS only benefits a brand-new database import). No FK on
+-- review_id/user_id, matching this schema's top-level-reference convention
+-- (see header comment).
+CREATE TABLE IF NOT EXISTS review_helpful_votes (
+  review_id CHAR(24) NOT NULL,
+  user_id CHAR(24) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (review_id, user_id),
+  KEY idx_review_helpful_votes_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================

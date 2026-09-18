@@ -3,6 +3,7 @@ import Category from "../models/categoryModel.js";
 import AttributeDefinition from "../models/attributeDefinitionModel.js";
 import Brand from "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
+import { isDuplicateKeyError } from "../lib/idempotency.js";
 import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
 import { FASHION_DEPARTMENT_SLUGS, STOREFRONT_DEPARTMENT_SLUGS } from "../lib/storefrontDepartments.js";
@@ -864,7 +865,22 @@ export async function createProduct(body, actorId) {
   assertDiscountsValid(data);
   await assertRequiredAttributes(data, category.parent);
 
-  const product = await Product.create(data);
+  // assertSkusUnique() above is a read-then-write check with no lock — a
+  // real TOCTOU gap under concurrent admin requests (confirmed audit
+  // finding). The DB-level `uq_product_variants_sku` constraint (see
+  // sql/schema.sql / scripts/migrations/0002_product_variants_sku_unique.mjs)
+  // is the actual guarantee; this catch turns a losing concurrent
+  // request's raw ER_DUP_ENTRY into the same clean 400 assertSkusUnique()
+  // itself would have given if it had won the race instead.
+  let product;
+  try {
+    product = await Product.create(data);
+  } catch (err) {
+    if (isDuplicateKeyError(err, "uq_product_variants_sku")) {
+      throw new HttpError(400, "That SKU is already used by another product");
+    }
+    throw err;
+  }
   await emitBestEffort(
     emitAdminEvent({ type: "PRODUCT_CREATED", productId: product._id.toString(), name: product.name, actorId }),
   );
@@ -886,7 +902,14 @@ export async function updateProduct(id, body, actorId) {
   await assertRequiredAttributes({ ...product, ...data }, category.parent);
 
   Object.assign(product, data);
-  await product.save();
+  try {
+    await product.save();
+  } catch (err) {
+    if (isDuplicateKeyError(err, "uq_product_variants_sku")) {
+      throw new HttpError(400, "That SKU is already used by another product");
+    }
+    throw err;
+  }
   // Product.findById() (unlike findByIdOrSlug(), which the storefront PDP
   // needs populated) is meant to mirror the original bare Mongoose
   // `Model.findById()` this route used before the migration — no

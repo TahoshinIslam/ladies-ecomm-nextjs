@@ -196,27 +196,44 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     assert.equal(json.helpfulCount, 1, "the author's own click counts exactly like anyone else's — no self-vote exclusion exists");
   });
 
-  test("the SAME user can call markHelpful repeatedly — each call increments again, with no dedup", async () => {
+  // Confirmed audit finding, fixed: markHelpful() previously had no
+  // per-user vote tracking at all — see services/reviewService.js's
+  // markHelpful() and scripts/migrations/0001_review_helpful_votes.mjs.
+  // These three tests replace the old ones that documented the
+  // vulnerability itself ("no dedup", "no user identity recorded") — they
+  // now assert the fixed, dedup'd behavior instead.
+  test("the SAME user calling markHelpful repeatedly only ever counts once — idempotent, not an error", async () => {
     const { review } = await makeReview();
     for (let i = 1; i <= 3; i++) {
       const req = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(otherCustomer._id) });
       const res = await helpfulPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
-      assert.equal(res.status, 200);
+      assert.equal(res.status, 200, `repeat vote #${i} from the same user must still succeed (idempotent no-op), not 409/error`);
       const json = await res.json();
-      assert.equal(json.helpfulCount, i, `call #${i} from the same user should still increment — there is no per-user vote tracking to dedup against`);
+      assert.equal(json.helpfulCount, 1, `call #${i} from the same user must NOT increment past 1 — per-user vote is deduplicated`);
     }
   });
 
-  test("helpful votes are NOT associated with any user identity — only a bare counter exists on the Review document", async () => {
+  test("different users each get their own vote counted", async () => {
+    const { review } = await makeReview();
+    const req1 = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(owner._id) });
+    const res1 = await helpfulPOST(req1, { params: Promise.resolve({ id: review._id.toString() }) });
+    assert.equal((await res1.json()).helpfulCount, 1);
+
+    const req2 = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(otherCustomer._id) });
+    const res2 = await helpfulPOST(req2, { params: Promise.resolve({ id: review._id.toString() }) });
+    assert.equal((await res2.json()).helpfulCount, 2, "a genuinely different user's vote still increments the count");
+  });
+
+  test("helpful votes ARE now recorded per user identity, in review_helpful_votes", async () => {
     const { review } = await makeReview();
     const req = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(otherCustomer._id) });
     await helpfulPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    const stored = await Review.findById(review._id);
-    assert.equal(typeof stored.helpfulCount, "number");
-    assert.equal(stored.helpfulBy, undefined, "confirmed: no field recording which users voted exists on the schema at all");
+    const { query } = await import("../config/db.js");
+    const rows = await query("SELECT * FROM review_helpful_votes WHERE review_id = ? AND user_id = ?", [review._id, otherCustomer._id]);
+    assert.equal(rows.length, 1, "confirmed: the vote is now recorded against the voting user's identity");
   });
 
-  test("the increment itself IS atomic — N concurrent requests (even from the same user) produce exactly N, no lost updates", async () => {
+  test("N concurrent requests from the SAME user still land on exactly one vote — atomic dedup, not a race", async () => {
     const { review } = await makeReview();
     const CONCURRENT = 10;
     const fire = async () => {
@@ -229,9 +246,24 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     const final = await Review.findById(review._id);
     assert.equal(
       final.helpfulCount,
-      CONCURRENT,
-      "MongoDB's atomic $inc means concurrent requests never lose an update — this is a separate fact from whether they're deduplicated (they are not, per the tests above)",
+      1,
+      "the review_helpful_votes PRIMARY KEY (review_id, user_id) makes this atomic across a real race, not just sequential calls — exactly one of the 10 concurrent requests actually increments",
     );
+  });
+
+  test("N concurrent requests from DIFFERENT users all count — dedup is per-user, not a global lock", async () => {
+    const { review } = await makeReview();
+    const CONCURRENT = 8;
+    const voters = await Promise.all(Array.from({ length: CONCURRENT }, () => createTestUser({ role: "customer" })));
+    const fire = async (voter) => {
+      const req = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(voter._id) });
+      return helpfulPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
+    };
+    const results = await Promise.all(voters.map(fire));
+    for (const res of results) assert.equal(res.status, 200);
+
+    const final = await Review.findById(review._id);
+    assert.equal(final.helpfulCount, CONCURRENT, "every distinct concurrent voter's vote is counted, with no lost updates");
   });
 
   test("markHelpful is rejected unauthenticated (401)", async () => {

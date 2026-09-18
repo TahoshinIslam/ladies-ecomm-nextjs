@@ -5,6 +5,8 @@ import { createAdminNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
 import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
+import { isDuplicateKeyError } from "../lib/idempotency.js";
+import { withTransaction } from "../lib/db/tx.js";
 
 export async function getProductReviews(productId, { page = 1, limit = 10 } = {}) {
   const skip = (Number(page) - 1) * Number(limit);
@@ -76,8 +78,12 @@ export async function createReview(userId, productId, { rating, title, comment, 
       isVerifiedPurchase: true,
     });
   } catch (err) {
-    // Unique index on (user, product) throws ER_DUP_ENTRY on duplicate.
-    if (err.code === 11000) throw new HttpError(400, "You've already reviewed this product");
+    // Unique index reviews.uq_reviews_user_product throws ER_DUP_ENTRY on
+    // duplicate — checked via the shared MySQL duplicate-key helper (see
+    // lib/idempotency.js), not a leftover MongoDB `code: 11000` check.
+    if (isDuplicateKeyError(err, "uq_reviews_user_product")) {
+      throw new HttpError(400, "You've already reviewed this product");
+    }
     throw err;
   }
 
@@ -119,11 +125,38 @@ export async function deleteReview(reviewId, actingUser) {
   return { productId };
 }
 
-export async function markHelpful(reviewId) {
+// Confirmed audit finding, fixed: this previously called
+// Review.incrementHelpful(), an unconditional `helpful_count + 1` with no
+// record of who voted — a single authenticated user (the route already
+// requires requireUser(), so there is no anonymous-vote case to handle
+// here) could call this repeatedly to inflate a review's score. Dedupe is
+// enforced by review_helpful_votes' real (review_id, user_id) PRIMARY KEY
+// (see scripts/migrations/0001_review_helpful_votes.mjs), not just an
+// app-level check — INSERT IGNORE either wins the PK race and increments,
+// or loses it and no-ops, so two truly concurrent requests from the same
+// user still land on exactly one recorded vote. The review row is locked
+// first (SELECT ... FOR UPDATE) so the increment itself is race-free
+// against another user's concurrent vote too.
+export async function markHelpful(reviewId, userId) {
   requireObjectIdFormat(reviewId, "reviewId");
-  const review = await Review.incrementHelpful(reviewId);
-  if (!review) throw new HttpError(404, "Review not found");
-  return review.helpfulCount;
+  return withTransaction(async (conn) => {
+    const [reviewRows] = await conn.query("SELECT helpful_count FROM reviews WHERE id = ? FOR UPDATE", [reviewId]);
+    if (!reviewRows.length) throw new HttpError(404, "Review not found");
+
+    const [voteResult] = await conn.query(
+      "INSERT IGNORE INTO review_helpful_votes (review_id, user_id) VALUES (?, ?)",
+      [reviewId, userId],
+    );
+    if (voteResult.affectedRows === 0) {
+      // Already voted — idempotent no-op, not an error: returns the
+      // current count unchanged rather than double-counting or 409ing on
+      // a harmless repeat click/request.
+      return reviewRows[0].helpful_count;
+    }
+
+    await conn.query("UPDATE reviews SET helpful_count = helpful_count + 1 WHERE id = ?", [reviewId]);
+    return reviewRows[0].helpful_count + 1;
+  });
 }
 
 // ========== ADMIN ==========
