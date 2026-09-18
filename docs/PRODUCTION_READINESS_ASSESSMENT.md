@@ -44,4 +44,34 @@ Rubric (unchanged, fixed for this whole engagement):
 
 ## Log
 
-(appended as work proceeds)
+**2026-09-18, session commit `54fc1f9`:**
+- Security: session idle timeout implemented (`lib/session.js`) and tested
+  (`tests/session.test.mjs`, 2 new tests). HSTS `includeSubDomains` remains
+  deliberately deferred — no verified subdomain inventory to safely apply it.
+- E-commerce/DB correctness: 6 new regression tests
+  (`tests/bdtPricingIntegrity.test.mjs`) covering admin-creation BDT
+  default, DB/app default agreement, end-to-end ৳1,000 consistency,
+  migration-idempotency guard, duplicate-SKU rejection, inactive-product
+  rejection. Timestamp drift fix persisted as a real regression test
+  (`tests/dbTimezoneCorrectness.test.mjs`, 3 tests). Found and fixed a live
+  regression risk in `scripts/seedCatalog.mjs` (re-seeding would have
+  silently corrupted migrated BDT prices back to stale USD-scale numbers).
+- Deployment/observability: scheduled-cleanup endpoint implemented and
+  tested (`app/api/admin/cron/cleanup`, `tests/scheduledCleanup.test.mjs`,
+  5 tests) — extends cleanup to the `events` table too. Backup/restore
+  mechanism implemented AND actually drilled against the disposable test
+  database (see `docs/DEPLOYMENT_RUNBOOK.md` §1 for the exact drill record).
+- Verified: 1259/1259 main tests, 191/191 HTTP integration tests, lint
+  clean (0 errors), build clean.
+- **Not addressed this pass** (time-boxed, not blocked): further caching
+  spot-checks, performance/accessibility/SEO work. These carry the same
+  point values as the last full scorecard (13/15, 7/10 respectively) —
+  unchanged, not re-verified, not claimed as improved.
+- **Genuine external blockers, unchanged:** no production DB host/TLS/
+  grants, no real production backup (only the local mechanism+drill),
+  no scheduler actually wired to the new cleanup endpoint, no real
+  GitHub Actions execution (would require pushing to `origin` — not done
+  without separate authorization, per this session's git-safety rules).
+
+**Final score: 90/100** (was 85/100 at the start of this pass). Full
+breakdown and evidence in the chat response this document accompanies.
