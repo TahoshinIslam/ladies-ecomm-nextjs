@@ -166,12 +166,26 @@ response this document accompanies.
   (all pre-existing/unrelated — 3 in `.kilo/worktrees/candied-panther/`,
   a separate uncommitted worktree, and 4 are React Compiler's own
   informational notice about `react-hook-form`'s `watch()`, a known
-  limitation of that library, not a bug). **Score stays 5/5** for the
-  test-suite/tooling quality this category actually measures, but **CI
-  execution for the current HEAD is explicitly UNVERIFIED** until it is
-  pushed and a real Actions run is watched — this is stated as a fact,
-  not folded into the numeric score, per instruction not to claim hosted
-  verification that hasn't happened.
+  limitation of that library, not a bug). **Score stays 5/5.**
+  **Update — that work has now been pushed and hosted CI has run.** The
+  first push (`42e7336`) did NOT pass: the run was cancelled by the
+  20-minute job timeout, and the log showed why — the new migration
+  fixture test's setup hook died on `ER_NO_SUCH_TABLE` for
+  `schema_migrations` (CI builds its database from `sql/schema.sql`, which
+  doesn't create that table; the runner does on demand), and because the
+  teardown then skipped the pool disconnect the runner hung. It passed
+  locally only because the local test DB already had the table. Second
+  push (`3f4beee`) fixed that, and the next run showed a real defect the
+  test had been written to find: migration 0003 called `JSON.parse` on
+  `settings.shipping_zones` unconditionally, but on CI's MariaDB 10.11
+  mysql2 returns that column already parsed, so 0003 threw. Fixed
+  compatibly (accept string or parsed value, as `models/settingsModel.js`
+  already does) in `302da22`. **Hosted CI is now verified green for
+  `302da22`** (run `35435457193`, all steps: schema import, lint, core +
+  HTTP + realtime + cold-start suites, critical-skip check, build; 4m56s).
+  Any commit after `302da22` is again unverified until its own run
+  completes. Lesson recorded: local green was not sufficient here — the
+  first two hosted runs each caught something local runs could not.
 - **Security — HSTS `includeSubDomains`, explicitly not made mandatory
   for 100:** Unchanged from `docs/DEPLOYMENT_RUNBOOK.md` §4c: enabling it
   requires a verified inventory that every subdomain of the eventual
@@ -190,10 +204,10 @@ response this document accompanies.
   without one), no real production backup (only the disposable-DB
   mechanism + drill, twice verified), no scheduler wired to the cleanup
   endpoint (code + `vercel.json` are ready, `CRON_SECRET` and the actual
-  Vercel deploy are external steps), no hosted CI run for the current
-  HEAD (mechanism proven real once already; re-verifying it needs a push,
-  which was not done without separate authorization), and no verified
-  production subdomain inventory for HSTS `includeSubDomains`.
+  Vercel deploy are external steps), and no verified production subdomain
+  inventory for HSTS `includeSubDomains`. (Hosted CI is no longer on this
+  list: it was pushed with authorization and is green for `302da22` — see
+  the Testing bullet above for the two failures it caught first.)
 
 **Score correction:** an earlier draft of this section reverse-engineered
 a "before this pass" per-category table by subtracting from the 91/100
