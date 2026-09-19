@@ -1,7 +1,10 @@
 import slugify from "slugify";
 
-import { query, withConnection } from "../config/db.js";
+import { query } from "../config/db.js";
+import { withTransaction } from "../lib/db/transaction.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { columnExists } from "../lib/columnExists.js";
+import { parseFramingListColumn } from "../lib/imageFraming.js";
 import Category from "./categoryModel.js";
 import AttributeDefinition from "./attributeDefinitionModel.js";
 import Brand from "./brandModel.js";
@@ -104,6 +107,9 @@ function rowToProduct(row, { variants, attributes, brand, category } = {}) {
     // display price must check this before applying the exchange rate.
     priceCurrency: row.price_currency || "USD",
     images: jsonArray(row.images),
+    // [{ url, framing }]; [] = nothing framed (everything renders as it
+    // always did). A database without migration 0006 has no such column.
+    imageFraming: parseFramingListColumn(row.image_framing),
     variants: variants || [],
     attributes: attributes || [],
     measurements: {
@@ -131,8 +137,8 @@ function rowToProduct(row, { variants, attributes, brand, category } = {}) {
 }
 
 function attachInstanceMethods(product) {
-  product.save = async function save() {
-    return saveProduct(this);
+  product.save = async function save(options) {
+    return saveProduct(this, options);
   };
 }
 
@@ -286,9 +292,50 @@ async function resolveDerivedFields(data) {
   return { topCategory, attributes };
 }
 
-async function writeVariantsAndAttributes(conn, productId, product) {
-  await conn.query("DELETE FROM product_variants WHERE product_id = ?", [productId]);
-  await conn.query("DELETE FROM product_attributes WHERE product_id = ?", [productId]);
+/**
+ * Variant identity survives an edit: carts, wishlists and order lines
+ * reference a variant BY ID, so re-inserting the same variant with a fresh id
+ * would orphan them. A submitted variant keeps its id when it carries a
+ * `_id` that already belongs to THIS product, or — for API clients that never
+ * send ids — when its SKU matches one of this product's existing variants.
+ * Anything else is a new variant. (Rows are deleted and re-inserted rather
+ * than updated in place so two variants can swap SKUs in one edit without
+ * tripping uq_product_variants_sku mid-way.)
+ */
+function resolveVariantIds(existing, submitted) {
+  const existingIds = new Set(existing.map((r) => r.id));
+  const idBySku = new Map(existing.map((r) => [String(r.sku).toLowerCase(), r.id]));
+  const used = new Set();
+  return submitted.map((v) => {
+    let id = v._id && existingIds.has(String(v._id)) ? String(v._id) : null;
+    if (!id && !v._id) id = idBySku.get(String(v.sku).toLowerCase()) || null;
+    if (id && used.has(id)) id = null;
+    if (id) used.add(id);
+    return id || generateObjectId();
+  });
+}
+
+async function writeVariantsAndAttributes(conn, productId, product, { isNew = false } = {}) {
+  // No range statements (`... WHERE product_id = ?` with FOR UPDATE / DELETE)
+  // inside this transaction: on an index range InnoDB takes GAP locks, and two
+  // concurrent creates each holding a gap lock on the same empty range then
+  // deadlock on their inserts (reproduced by the 105-product sitemap test).
+  // A NEW product has nothing to remove, so it skips straight to the inserts;
+  // an edit reads the current rows plainly (the products-row UPDATE that
+  // precedes this call already serialises edits of the same product) and
+  // deletes them by PRIMARY KEY, which takes record locks only.
+  let variantIds = (product.variants || []).map(() => generateObjectId());
+  if (!isNew) {
+    const [existingRows] = await conn.query("SELECT id, sku FROM product_variants WHERE product_id = ?", [productId]);
+    variantIds = resolveVariantIds(existingRows, product.variants || []);
+    if (existingRows.length) {
+      await conn.query(`DELETE FROM product_variants WHERE id IN (${existingRows.map(() => "?").join(",")})`, existingRows.map((r) => r.id));
+    }
+    const [attrRows] = await conn.query("SELECT id FROM product_attributes WHERE product_id = ?", [productId]);
+    if (attrRows.length) {
+      await conn.query(`DELETE FROM product_attributes WHERE id IN (${attrRows.map(() => "?").join(",")})`, attrRows.map((r) => r.id));
+    }
+  }
 
   const variants = product.variants || [];
   for (let i = 0; i < variants.length; i++) {
@@ -297,7 +344,7 @@ async function writeVariantsAndAttributes(conn, productId, product) {
       `INSERT INTO product_variants (id, product_id, variant_name, sku, attributes, price, discount_price, stock, images, position)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        v._id || generateObjectId(),
+        variantIds[i],
         productId,
         v.variantName,
         v.sku,
@@ -322,17 +369,33 @@ async function writeVariantsAndAttributes(conn, productId, product) {
   }
 }
 
+// InnoDB can still pick one of two overlapping transactions as a deadlock
+// victim (rolled back completely, nothing half-written). That is retryable by
+// design: re-run the whole transaction a couple of times before surfacing it.
+async function withDeadlockRetry(fn, attempts = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await withTransaction(fn);
+    } catch (err) {
+      if (err?.code !== "ER_LOCK_DEADLOCK" || attempt >= attempts) throw err;
+    }
+  }
+}
+
 function tagsText(tags) {
   return (tags || []).join(" ");
 }
 
-async function saveProduct(product) {
+async function saveProduct(product, { framingList } = {}) {
   const derived = await resolveDerivedFields(product);
   product.topCategory = derived.topCategory;
   product.attributes = derived.attributes;
   product.slug = buildSlug(product.name, product._id);
 
-  await withConnection(async (conn) => {
+  // One transaction: the product row, its variants and its facet rows commit
+  // or roll back together — a variant that fails (duplicate SKU, bad value)
+  // must never leave a product with the OLD variants deleted or half written.
+  await withDeadlockRetry(async (conn) => {
     await conn.query(
       `UPDATE products SET
          name=?, name_bn=?, slug=?, description=?, description_bn=?, category_id=?, top_category_id=?,
@@ -370,17 +433,20 @@ async function saveProduct(product) {
       ],
     );
     await writeVariantsAndAttributes(conn, product._id, product);
+    await writeFramingInTx(conn, product._id, framingList);
   });
   return findById(product._id);
 }
 
-async function create(data) {
+async function create(data, { framingList } = {}) {
   const id = generateObjectId();
   const draft = { ...data, _id: id, variants: data.variants || [], attributes: data.attributes || [] };
   const derived = await resolveDerivedFields(draft);
   const slug = buildSlug(draft.name, id);
 
-  await withConnection(async (conn) => {
+  // Atomic: no product row may exist without ALL of its variants (a duplicate
+  // SKU on the 2nd variant used to leave a variant-less, invisible product).
+  await withDeadlockRetry(async (conn) => {
     await conn.query(
       `INSERT INTO products
          (id, name, name_bn, slug, description, description_bn, category_id, top_category_id, brand_id,
@@ -429,7 +495,8 @@ async function create(data) {
         draft.ogImage || "",
       ],
     );
-    await writeVariantsAndAttributes(conn, id, { variants: draft.variants, attributes: derived.attributes });
+    await writeVariantsAndAttributes(conn, id, { variants: draft.variants, attributes: derived.attributes }, { isNew: true });
+    await writeFramingInTx(conn, id, framingList);
   });
   return findById(id);
 }
@@ -460,7 +527,46 @@ async function findVariantForLowStockCheck(productId, variantId) {
   return rows[0] || null;
 }
 
+// Framing lives in its own statement (not in create()/save()'s big column
+// lists) so ordinary product writes keep working unchanged on a database
+// where migration 0006_image_framing hasn't been applied yet.
+const imageFramingInstalled = () => columnExists("products", "image_framing");
+
+// Same write, but inside the caller's transaction. `undefined` = leave the
+// column alone (and skip entirely on a database without migration 0006).
+async function writeFramingInTx(conn, id, framingList) {
+  if (framingList === undefined || !(await imageFramingInstalled())) return;
+  const hasAny = Array.isArray(framingList) && framingList.length > 0;
+  await conn.query("UPDATE products SET image_framing = ? WHERE id = ?", [hasAny ? JSON.stringify(framingList) : null, id]);
+}
+
+/**
+ * Permanently removes a product, after logging a full snapshot of it (with its
+ * variants and facets) to `deleted_products`. One transaction: either the log
+ * row is written AND the product is gone, or nothing changed. Variants/facets
+ * cascade with the product row; carts and wishlists holding it are cleared.
+ * Order lines keep their own name/price/sku snapshots, so order history is
+ * unaffected. Returns false when the product doesn't exist.
+ */
+async function deleteWithLog(id, { deletedBy = null } = {}) {
+  const product = await findById(id);
+  if (!product) return false;
+  const { save, deleteOne, ...snapshot } = product; // eslint-disable-line no-unused-vars
+  await withDeadlockRetry(async (conn) => {
+    await conn.query(
+      "INSERT INTO deleted_products (product_id, name, slug, deleted_by, snapshot) VALUES (?, ?, ?, ?, ?)",
+      [product._id, product.name, product.slug, deletedBy, JSON.stringify(snapshot)],
+    );
+    await conn.query("DELETE FROM cart_items WHERE product_id = ?", [product._id]);
+    await conn.query("DELETE FROM wishlist_items WHERE product_id = ?", [product._id]);
+    await conn.query("DELETE FROM products WHERE id = ?", [product._id]);
+  });
+  return true;
+}
+
 const Product = {
+  deleteWithLog,
+  imageFramingInstalled,
   findById,
   findByName,
   findBySlug,

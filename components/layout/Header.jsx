@@ -214,7 +214,8 @@ export default function Header({ initialDepartments = [] }) {
             been removed here entirely on mobile, not just hidden while
             the overlay is open. Desktop keeps its own HeaderSearchField
             row further down (the `hidden md:block` section) — that one
-            is unaffected, since the bottom nav is mobile-only. */}
+            is unaffected. (The bottom nav now also shows on tablets, below
+            `lg`, where that inline field remains.) */}
 
         {/* Main row — EShopper's logo / search / action-buttons row. The
             ONE brand-green section of the header (matching Footer.jsx's own

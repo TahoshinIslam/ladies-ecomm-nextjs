@@ -65,6 +65,8 @@ export default async function ShopPage({ searchParams }) {
   // this is not a second, competing data source, only a first-paint seed.
   const [categories, publicSettings] = await Promise.all([getCachedCategories(), getCachedPublicSettings()]);
   const departmentImages = publicSettings?.homepage?.departmentImages || {};
+  // Saved crops for the category-tile row (Admin → Shop Config → Departments).
+  const imageFraming = publicSettings?.homepage?.imageFraming || {};
 
   // A category that itself has children (e.g. "Cosmetics", or "Food") is a
   // browsing waypoint, not a leaf shoppers file real products under —
@@ -166,6 +168,7 @@ export default async function ShopPage({ searchParams }) {
         facets={facets}
         initialCategories={serializeForClient(categories)}
         initialDepartmentImages={departmentImages}
+        initialImageFraming={imageFraming}
       />
     </>
   );

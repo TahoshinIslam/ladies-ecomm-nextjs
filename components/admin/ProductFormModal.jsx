@@ -21,6 +21,7 @@ import Select from "../ui/Select.jsx";
 import Textarea from "../ui/Textarea.jsx";
 import Button from "../ui/Button.jsx";
 import Modal from "../ui/Modal.jsx";
+import ConfirmDialog from "../ui/ConfirmDialog.jsx";
 import ImageDropzone from "./ImageDropzone.jsx";
 
 import {
@@ -33,6 +34,12 @@ import {
   useUpdateProductMutation,
 } from "../../store/productApi.js";
 import { cn, isDepartmentCategory } from "../../lib/utils.js";
+import {
+  findVariantRowProblems,
+  findMissingRequiredAttributes,
+  pickApplicableAttributes,
+  findUnsavedAttributeKeys,
+} from "../../lib/variantFormRules.js";
 import { AGE_GROUP_VALUES_LIST, AVAILABILITY_VALUES } from "../../schemas/catalogSchemas.js";
 
 // Auto-generated SKUs for "Generate variants" — an admin typing "BUR-SAU-
@@ -78,15 +85,19 @@ export function generateVariantSku(productName, attributes) {
 }
 
 const variantSchema = z.object({
-  variantName: z.string().min(1, "Required"),
-  sku: z.string().min(1, "Required"),
+  variantName: z.string().trim().min(1, "Required"),
+  sku: z.string().trim().min(1, "SKU is required"),
   // Arbitrary key/value bag (color/size/fabric for clothing, shade/
   // volumeMl for cosmetics, ...) driven by AttributeDefinition.derivedFromVariant
   // — see the dynamic ComboField rendering in step 2 below.
   attributes: z.record(z.string()).default({}),
   price: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
   discountPrice: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
-  stock: z.coerce.number().int().min(0, "Required"),
+  // An empty box must be an error, not silently 0 (z.coerce.number("") === 0).
+  stock: z.preprocess(
+    (v) => (v === "" || v == null ? NaN : v),
+    z.coerce.number({ invalid_type_error: "Enter the stock (0 or more)" }).int("Whole number only").min(0, "Can't be negative"),
+  ),
   images: z.array(z.string()).default([]),
 });
 
@@ -106,6 +117,8 @@ const productSchema = z.object({
   discountPrice: z.union([z.coerce.number().positive(), z.literal("")]).optional(),
   availability: z.enum(AVAILABILITY_VALUES),
   images: z.array(z.string()).min(1, "At least one image"),
+  // [{ url, framing }] — validated by the server's framingSchema.
+  imageFraming: z.array(z.any()).optional(),
   tags: z.string().optional(),
   isFeatured: z.boolean().optional(),
   isActive: z.boolean().optional(),
@@ -118,6 +131,10 @@ const productSchema = z.object({
   metaDescription: z.string().optional(),
   metaKeywords: z.string().optional(),
   ogImage: z.string().optional(),
+}).superRefine((data, ctx) => {
+  for (const { index, field, message } of findVariantRowProblems(data.variants)) {
+    ctx.addIssue({ code: "custom", path: ["variants", index, field], message });
+  }
 });
 
 // =================== PRODUCT FORM (single page) ===================
@@ -155,6 +172,7 @@ export default function ProductFormModal({ product, onClose }) {
         discountPrice: product.discountPrice ?? "",
         availability: product.availability || "readyStock",
         images: product.images || [],
+        imageFraming: product.imageFraming || [],
         tags: (product.tags || []).join(", "),
         isFeatured: product.isFeatured,
         isActive: product.isActive,
@@ -163,6 +181,9 @@ export default function ProductFormModal({ product, onClose }) {
         sleeveLength: product.measurements?.sleeveLength || "",
         includedItems: (product.includedItems || []).join(", "),
         variants: (product.variants || []).map((v) => ({
+          // Kept so the server updates THIS variant instead of replacing it —
+          // carts, wishlists and orders reference variants by id.
+          _id: v._id,
           variantName: v.variantName,
           sku: v.sku,
           attributes: { ...v.attributes },
@@ -189,6 +210,7 @@ export default function ProductFormModal({ product, onClose }) {
         discountPrice: "",
         availability: "readyStock",
         images: [],
+        imageFraming: [],
         tags: "",
         isFeatured: false,
         isActive: true,
@@ -209,6 +231,7 @@ export default function ProductFormModal({ product, onClose }) {
     control,
     watch,
     setValue,
+    setError,
     formState: { errors, isDirty },
   } = useForm({ resolver: zodResolver(productSchema), defaultValues: defaults });
 
@@ -219,6 +242,7 @@ export default function ProductFormModal({ product, onClose }) {
 
   const department = watch("department");
   const images = watch("images");
+  const imageFraming = watch("imageFraming");
   const variants = watch("variants");
   const basePrice = watch("basePrice");
   const productName = watch("name");
@@ -266,10 +290,27 @@ export default function ProductFormModal({ product, onClose }) {
     setColorImagesState((m) => ({ ...m, [value]: imgs }));
     setColorImagesTouched(true);
   };
+  // What the admin sees/saves for one color: their edit if they made one,
+  // otherwise the photos the variants of that color already have. (The seed
+  // state above is built before the department's attributes have loaded, so
+  // on an EDIT it is empty — falling back here is what stops a save from
+  // wiping every existing per-color photo.)
+  const imagesForColor = (value) => {
+    if (colorImages[value]) return colorImages[value];
+    const holder = (variants || []).find((v) => v.attributes?.[swatchKey] === value && v.images?.length);
+    return holder?.images || [];
+  };
+
+  // Values typed under another department's fields (e.g. Color, then the
+  // department was switched to one without Color). Kept in the form so
+  // switching back restores them, but NOT saved — say so instead of dropping
+  // them silently.
+  const unsavedAttrKeys = attrData ? findUnsavedAttributeKeys(variants, variantAttrDefs) : [];
 
   const duplicateVariant = (index) => {
     const src = variants[index];
-    insertVariant(index + 1, { ...src, variantName: `${src.variantName} (copy)`, sku: "" });
+    // A copy is a NEW variant: no _id, and a blank SKU (SKUs are unique).
+    insertVariant(index + 1, { ...src, _id: undefined, variantName: `${src.variantName} (copy)`, sku: "" });
   };
 
   // Bulk price/stock edit for the variant table, tracked by useFieldArray's
@@ -366,6 +407,24 @@ export default function ProductFormModal({ product, onClose }) {
   };
 
   const onSubmit = async (data) => {
+    // The variant fields come from the department's attribute definitions; if
+    // those haven't loaded (or failed to), saving would silently drop every
+    // Color/Size value — refuse instead.
+    if (!attrData) {
+      toast.error("This department's attributes haven't loaded yet — wait a moment and try again.");
+      return;
+    }
+    // Required variant attributes (an attribute marked required in
+    // Admin → Product configuration) — field-level errors, no request sent.
+    const missing = findMissingRequiredAttributes(data.variants, variantAttrDefs);
+    for (const { index, key, message } of missing) {
+      setError(`variants.${index}.attributes.${key}`, { type: "required", message });
+    }
+    if (missing.length) {
+      toast.error(`Fill in: ${missing.slice(0, 4).map((m) => `${m.message.replace(" is required", "")} (row ${m.index + 1})`).join(", ")}${missing.length > 4 ? "…" : ""}`);
+      return;
+    }
+
     const attributes = attributeDefs
       .map((def) => {
         const raw = data[`attr_${def.key}`];
@@ -384,6 +443,7 @@ export default function ProductFormModal({ product, onClose }) {
       discountPrice: data.discountPrice === "" ? null : data.discountPrice,
       availability: data.availability,
       images: data.images,
+      imageFraming: data.imageFraming || [],
       tags: data.tags ? data.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
       includedItems: data.includedItems ? data.includedItems.split(",").map((t) => t.trim()).filter(Boolean) : [],
       measurements: {
@@ -398,16 +458,20 @@ export default function ProductFormModal({ product, onClose }) {
       metaDescription: data.metaDescription || "",
       metaKeywords: data.metaKeywords || "",
       ogImage: data.ogImage || "",
-      variants: data.variants.map((v) => {
+      variants: data.variants.map((v, i) => {
         const swatchValue = swatchKey ? v.attributes?.[swatchKey] : null;
+        // Only this department's own variant fields, blanks dropped.
+        const variantAttributes = pickApplicableAttributes(v.attributes, variantAttrDefs);
+        const existingId = variantFields[i]?._id;
         return {
+          ...(existingId ? { _id: existingId } : {}),
           variantName: v.variantName,
           sku: v.sku,
-          attributes: { ...v.attributes },
+          attributes: variantAttributes,
           price: v.price === "" ? null : v.price,
           discountPrice: v.discountPrice === "" ? null : v.discountPrice,
           stock: v.stock,
-          images: swatchValue ? colorImages[swatchValue] || [] : v.images || [],
+          images: swatchValue ? imagesForColor(swatchValue) : v.images || [],
         };
       }),
     };
@@ -434,9 +498,16 @@ export default function ProductFormModal({ product, onClose }) {
   // silently discarding an in-progress edit — closing after only saving
   // (onSubmit above) never goes through this, since there's nothing left
   // to lose by then.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const hasUnsavedChanges = isDirty || colorImagesTouched;
   const handleClose = () => {
-    if (hasUnsavedChanges && !window.confirm("Discard unsaved changes to this product?")) return;
+    // Escape in the confirm dialog also reaches this handler; while the
+    // dialog is open it alone decides, so the form stays open behind it.
+    if (confirmDiscard) return;
+    if (hasUnsavedChanges) {
+      setConfirmDiscard(true);
+      return;
+    }
     onClose();
   };
 
@@ -546,6 +617,9 @@ export default function ProductFormModal({ product, onClose }) {
                 value={images || []}
                 onChange={(next) => setValue("images", next, { shouldDirty: true, shouldValidate: true })}
                 folder="products"
+                framingPlacement="product.gallery"
+                framings={imageFraming}
+                onFramingsChange={(next) => setValue("imageFraming", next, { shouldDirty: true })}
               />
               {errors.images && <p className="mt-1 text-xs text-danger">{errors.images.message}</p>}
             </div>
@@ -561,9 +635,12 @@ export default function ProductFormModal({ product, onClose }) {
                     <div key={value} className="rounded-lg border border-border p-3">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{value}</p>
                       <ImageDropzone
-                        value={colorImages[value] || []}
+                        value={imagesForColor(value)}
                         onChange={(next) => setColorImages(value, next)}
                         folder="products/variants"
+                        framingPlacement="product.gallery"
+                        framings={imageFraming}
+                        onFramingsChange={(next) => setValue("imageFraming", next, { shouldDirty: true })}
                       />
                     </div>
                   ))}
@@ -575,10 +652,25 @@ export default function ProductFormModal({ product, onClose }) {
 
         <FormSection title="Variants & pricing" defaultOpen>
           <div className="space-y-4">
-            {variantAttrDefs.length === 0 ? (
+            {!department ? (
               <p className="text-xs text-muted-foreground">Pick a department above to see its variant fields.</p>
+            ) : attrData && variantAttrDefs.length === 0 ? (
+              <p className="rounded-lg border border-border bg-muted p-3 text-xs text-muted-foreground" role="status">
+                This department has no variant fields (such as Color or Size) assigned, so variants can only be told apart by
+                name and SKU. Assign them under{" "}
+                <a href="/admin/categories" className="underline">Categories → Attributes</a> (tick &ldquo;Variant field&rdquo;).
+              </p>
+            ) : variantAttrDefs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Loading this department&apos;s variant fields…</p>
             ) : (
               <VariantGenerator variantAttrDefs={variantAttrDefs} onGenerate={generateVariants} />
+            )}
+
+            {unsavedAttrKeys.length > 0 && (
+              <p className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs" role="status">
+                Some variants have values for {unsavedAttrKeys.join(", ")}, which this department doesn&apos;t use. They are
+                kept while you edit but will <strong>not be saved</strong> — switch the department back to keep them.
+              </p>
             )}
 
             {selectedVariantIds.size > 0 && (
@@ -703,6 +795,15 @@ export default function ProductFormModal({ product, onClose }) {
           <Button type="submit" loading={creating || updating}>{isEdit ? "Update" : "Create"}</Button>
         </div>
       </form>
+      <ConfirmDialog
+        open={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        onConfirm={onClose}
+        title="Discard unsaved changes?"
+        description="Your edits to this product will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+      />
     </Modal>
   );
 }

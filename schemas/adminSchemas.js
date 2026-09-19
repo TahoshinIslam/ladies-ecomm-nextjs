@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { paginationSchema, nonNegativeFiniteNumber, boundedIntParam } from "./commonSchemas.js";
+import { homepageFramingMapSchema } from "./framingSchema.js";
 
 // A theme color token — hex or oklch/hsl/rgb, kept permissive (this app
 // doesn't enforce one specific color-string grammar) but bounded so it
@@ -110,6 +111,7 @@ export const updateSettingsSchema = z
             burqa: z.string().trim().max(2000),
             abaya: z.string().trim().max(2000),
             hijab: z.string().trim().max(2000),
+            khimar: z.string().trim().max(2000),
           })
           .strict()
           .partial(),
@@ -145,6 +147,9 @@ export const updateSettingsSchema = z
           .partial(),
         guidedFinderImage: z.string().trim().max(2000),
         occasionMenuImage: z.string().trim().max(2000),
+        // Per-placement crop/fit for the images above, keyed
+        // "<placement>[:<slug>]" (lib/imageFraming.js PLACEMENTS).
+        imageFraming: homepageFramingMapSchema,
         banner: z
           .object({
             enabled: z.boolean(),

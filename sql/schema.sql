@@ -276,6 +276,9 @@ CREATE TABLE IF NOT EXISTS products (
   price_currency ENUM('USD', 'BDT') NOT NULL DEFAULT 'BDT',
   -- JSON string array — display-only, never individually queried (see header).
   images JSON NOT NULL,
+  -- { "<image url>": framing } — per-photo Fit/Fill/zoom/focal-point for the
+  -- product card + detail gallery (lib/imageFraming.js); NULL = unframed.
+  image_framing JSON NULL,
   measurement_height_range VARCHAR(120) NOT NULL DEFAULT '',
   measurement_chest VARCHAR(120) NOT NULL DEFAULT '',
   measurement_sleeve_length VARCHAR(120) NOT NULL DEFAULT '',
@@ -654,6 +657,10 @@ CREATE TABLE IF NOT EXISTS promotions (
   cta_label_bn VARCHAR(60) NOT NULL DEFAULT '',
   desktop_image VARCHAR(1024) NOT NULL,
   mobile_image VARCHAR(1024) NOT NULL DEFAULT '',
+  -- Per-placement crop/fit records (lib/imageFraming.js); NULL = unframed,
+  -- i.e. the image renders exactly as it did before framing existed.
+  desktop_framing JSON NULL,
+  mobile_framing JSON NULL,
   image_alt VARCHAR(200) NOT NULL DEFAULT '',
   image_alt_bn VARCHAR(200) NOT NULL DEFAULT '',
   target_type VARCHAR(32) NOT NULL DEFAULT 'none',
@@ -752,4 +759,21 @@ CREATE TABLE IF NOT EXISTS events (
   PRIMARY KEY (id),
   KEY idx_events_channel_id (channel, id),
   KEY idx_events_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Deleted-products log: deleting a product REMOVES it from products (and, via
+-- ON DELETE CASCADE, its variants/facets) so it disappears from every list,
+-- and first records a full snapshot here so nothing is lost. No FK: rows must
+-- outlive the product. See scripts/migrations/0008_deleted_products_log.mjs.
+CREATE TABLE IF NOT EXISTS deleted_products (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  product_id CHAR(24) NOT NULL,
+  name VARCHAR(500) NOT NULL,
+  slug VARCHAR(600) NOT NULL,
+  deleted_by CHAR(24) NULL,
+  deleted_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  snapshot LONGTEXT NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_deleted_products_product (product_id),
+  KEY idx_deleted_products_deleted_at (deleted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

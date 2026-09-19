@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Image from "next/image";
 import { motion, Reorder } from "framer-motion";
-import { UploadCloud, Upload, X, GripVertical, Loader2 } from "lucide-react";
+import { UploadCloud, Upload, X, GripVertical, Loader2, Crop } from "lucide-react";
 import { toast } from "sonner";
 
 import Button from "../ui/Button.jsx";
@@ -12,6 +12,8 @@ import {
   useUploadMultipleMutation,
 } from "../../store/shopApi.js";
 import { cn, resolveImage } from "../../lib/utils.js";
+import ImageFramingEditor from "./imageFraming/ImageFramingEditor.jsx";
+import { framingForUrl, setFramingForUrl } from "../../lib/imageFraming.js";
 
 /**
  * Image dropzone with:
@@ -36,6 +38,12 @@ import { cn, resolveImage } from "../../lib/utils.js";
  *    there's never more than one thumbnail to reorder.
  *
  * Returns image URLs as strings — caller stores them in whatever shape it wants.
+ *
+ * Optional per-photo framing (gallery mode): pass `framingPlacement` (a key of
+ * lib/imageFraming.js PLACEMENTS), `framings` ([{ url, framing }]) and
+ * `onFramingsChange`. Each thumbnail then gets an "Adjust framing" button that
+ * opens the shared framing editor. Photos without a saved framing render
+ * exactly as they always have; the original file is never modified.
  */
 export default function ImageDropzone({
   value,
@@ -45,6 +53,9 @@ export default function ImageDropzone({
   multiple = true,
   accept = "image/*",
   className,
+  framingPlacement,
+  framings,
+  onFramingsChange,
 }) {
   const [uploadImage, { isLoading: uploadingOne }] = useUploadImageMutation();
   const [uploadMultiple, { isLoading: uploadingMany }] =
@@ -52,6 +63,7 @@ export default function ImageDropzone({
   const uploading = uploadingOne || uploadingMany;
 
   const [isDragOver, setIsDragOver] = useState(false);
+  const [framingUrl, setFramingUrl] = useState(null);
   // dragLeave fires when the cursor crosses any child element. Counter pattern
   // keeps the highlight stable while the cursor moves between nested nodes.
   const dragCounter = useRef(0);
@@ -235,6 +247,24 @@ export default function ImageDropzone({
                   <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/40 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100">
                     <GripVertical className="h-3 w-3" />
                   </span>
+                  {framingPlacement && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFramingUrl(img);
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      aria-label={`Adjust framing${framingForUrl(framings, img) ? " (framed)" : ""}`}
+                      title="Adjust framing"
+                      className={cn(
+                        "absolute bottom-0.5 right-0.5 rounded-full p-0.5 text-white",
+                        framingForUrl(framings, img) ? "bg-accent" : "bg-black/55",
+                      )}
+                    >
+                      <Crop className="h-3 w-3" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -315,6 +345,19 @@ export default function ImageDropzone({
               : "Upload file"}
         </Button>
       </motion.div>
+      {framingUrl && framingPlacement && (
+        <ImageFramingEditor
+          title="Adjust framing"
+          placements={[framingPlacement]}
+          source={{ url: framingUrl }}
+          initialFramings={{ [framingPlacement]: framingForUrl(framings, framingUrl) }}
+          onSave={({ framings: saved }) => {
+            onFramingsChange?.(setFramingForUrl(framings, framingUrl, saved[framingPlacement]));
+            setFramingUrl(null);
+          }}
+          onCancel={() => setFramingUrl(null)}
+        />
+      )}
     </div>
   );
 }

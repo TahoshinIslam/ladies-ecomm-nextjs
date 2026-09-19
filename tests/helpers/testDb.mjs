@@ -99,7 +99,7 @@ export async function rawQuery(sql, params) {
 const TRUNCATE_ORDER = [
   "order_items", "orders", "cart_items", "carts", "coupon_usages", "coupon_categories", "coupons",
   "payments", "wishlist_items", "wishlists", "notifications", "reviews", "addresses", "sessions",
-  "rate_limit_counters", "events", "product_attributes", "product_variants", "products",
+  "rate_limit_counters", "events", "deleted_products", "product_attributes", "product_variants", "products",
   "attribute_definition_options", "attribute_definition_label_overrides", "attribute_definition_categories",
   "attribute_definitions", "brands", "categories", "promotions", "themes", "users",
 ];

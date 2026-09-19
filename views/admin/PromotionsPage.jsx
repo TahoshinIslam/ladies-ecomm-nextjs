@@ -27,7 +27,9 @@ import Button from "../../components/ui/Button.jsx";
 import Badge from "../../components/ui/Badge.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import ConfirmDialog from "../../components/ui/ConfirmDialog.jsx";
-import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
+import FramedImageInput from "../../components/admin/imageFraming/FramedImageInput.jsx";
+import FramePreview from "../../components/admin/imageFraming/FramePreview.jsx";
+import { resolveSlotFraming, sanitizeFraming } from "../../lib/imageFraming.js";
 import ProductSearchSelect from "../../components/admin/ProductSearchSelect.jsx";
 
 import {
@@ -63,6 +65,10 @@ const promotionFormSchema = z
     ctaLabelBn: z.string().trim().max(60).optional().default(""),
     desktopImage: z.string().trim().min(1, "A desktop image is required"),
     mobileImage: z.string().trim().optional().default(""),
+    // Crop/fit records — shape-checked by the server's framingSchema; here they
+    // only need to survive form validation untouched.
+    desktopFraming: z.any().nullable().optional(),
+    mobileFraming: z.any().nullable().optional(),
     imageAlt: z.string().trim().max(200).optional().default(""),
     imageAltBn: z.string().trim().max(200).optional().default(""),
     targetType: z.enum(["product", "category", "collection", "shop_filter", "internal_url", "none"]),
@@ -302,6 +308,7 @@ function PromotionFormModal({ promotion, defaultType, onClose }) {
     handleSubmit,
     watch,
     control,
+    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(promotionFormSchema),
@@ -332,6 +339,17 @@ function PromotionFormModal({ promotion, defaultType, onClose }) {
   const targetType = watch("targetType");
   const type = watch("type");
   const watched = watch();
+
+  // Which destination each slot feeds depends on the promotion type
+  // (lib/imageFraming.js PLACEMENTS).
+  const desktopKey = type === "popup" ? "popup.desktop" : "hero.desktop";
+  const mobileKey = type === "popup" ? "popup.mobile" : "hero.mobile";
+  const mobileFraming = resolveSlotFraming({
+    own: watched.mobileFraming,
+    ownSrc: watched.mobileImage || watched.desktopImage,
+    other: watched.desktopFraming,
+    otherSrc: watched.desktopImage,
+  });
 
   const onSubmit = async (raw) => {
     const body = {
@@ -397,20 +415,44 @@ function PromotionFormModal({ promotion, defaultType, onClose }) {
           <fieldset className="space-y-3 rounded-lg border border-border p-4">
             <legend className="px-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">Creative</legend>
             <div>
-              <p className="mb-1.5 text-sm font-medium text-ink">Desktop image</p>
               <Controller
                 control={control}
                 name="desktopImage"
-                render={({ field }) => <ImageDropzone value={field.value} onChange={field.onChange} multiple={false} folder="promotions" />}
+                render={({ field }) => (
+                  <FramedImageInput
+                    label="Desktop image"
+                    placements={[desktopKey]}
+                    folder="promotions"
+                    url={field.value || ""}
+                    framings={{ [desktopKey]: watched.desktopFraming }}
+                    onChange={({ url, framings }) => {
+                      field.onChange(url);
+                      setValue("desktopFraming", framings[desktopKey] ?? null, { shouldDirty: true });
+                    }}
+                  />
+                )}
               />
               {errors.desktopImage && <p className="mt-1 text-xs text-danger">{errors.desktopImage.message}</p>}
             </div>
             <div>
-              <p className="mb-1.5 text-sm font-medium text-ink">Mobile image (optional — falls back to desktop)</p>
               <Controller
                 control={control}
                 name="mobileImage"
-                render={({ field }) => <ImageDropzone value={field.value} onChange={field.onChange} multiple={false} folder="promotions" />}
+                render={({ field }) => (
+                  <FramedImageInput
+                    label="Mobile image (optional)"
+                    placements={[mobileKey]}
+                    folder="promotions"
+                    url={field.value || ""}
+                    fallbackUrl={watched.desktopImage || ""}
+                    fallbackNote="No mobile image: phones use the desktop image, and — unless you save a separate mobile crop — the desktop crop's mode and focal point. Adjust framing to give phones their own crop, or upload a dedicated mobile image."
+                    framings={{ [mobileKey]: mobileFraming }}
+                    onChange={({ url, framings }) => {
+                      field.onChange(url);
+                      setValue("mobileFraming", framings[mobileKey] ?? null, { shouldDirty: true });
+                    }}
+                  />
+                )}
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -523,31 +565,30 @@ function PromotionFormModal({ promotion, defaultType, onClose }) {
   );
 }
 
+// Previews use the destination's REAL frame shapes and the same renderer as
+// the storefront (FramePreview -> FramedImage), so what's shown here is how
+// the banner/popup will actually look — the old preview used its own made-up
+// 16:6 / 9:12 boxes with object-cover and never matched the site.
 function LivePreview({ values }) {
-  const title = values.title || "Untitled promotion";
+  const popup = values.type === "popup";
+  const desktopKey = popup ? "popup.desktop" : "hero.desktop";
+  const mobileKey = popup ? "popup.mobile" : "hero.mobile";
+  const mobileSrc = values.mobileImage || values.desktopImage;
+  const mobileFraming = resolveSlotFraming({
+    own: values.mobileFraming,
+    ownSrc: mobileSrc,
+    other: values.desktopFraming,
+    otherSrc: values.desktopImage,
+  });
   return (
     <div className="space-y-4">
       <div>
         <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Desktop</p>
-        <div className="relative aspect-[16/6] w-full overflow-hidden rounded-lg bg-muted">
-          {values.desktopImage && (
-            <Image src={resolveImage(values.desktopImage, 500)} alt="" fill sizes="400px" className="object-cover" />
-          )}
-          {values.title && (
-            <div className="absolute inset-0 flex flex-col justify-center bg-black/30 p-3 text-white">
-              <p className="text-sm font-bold">{title}</p>
-              {values.subtitle && <p className="text-xs opacity-90">{values.subtitle}</p>}
-            </div>
-          )}
-        </div>
+        <FramePreview placement={desktopKey} url={values.desktopImage} framing={sanitizeFraming(values.desktopFraming)} maxWidthPx={320} />
       </div>
       <div>
         <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Mobile</p>
-        <div className="relative mx-auto aspect-[9/12] w-32 overflow-hidden rounded-lg bg-muted">
-          {(values.mobileImage || values.desktopImage) && (
-            <Image src={resolveImage(values.mobileImage || values.desktopImage, 300)} alt="" fill sizes="128px" className="object-cover" />
-          )}
-        </div>
+        <FramePreview placement={mobileKey} url={mobileSrc} framing={mobileFraming} maxWidthPx={240} />
       </div>
     </div>
   );

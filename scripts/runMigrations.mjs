@@ -61,6 +61,9 @@ async function main() {
     import("./migrations/0003_bdt_price_currency.mjs"),
     import("./migrations/0004_bdt_hijab_burqa.mjs"),
     import("./migrations/0005_bdt_default_currency.mjs"),
+    import("./migrations/0006_image_framing.mjs"),
+    import("./migrations/0007_repair_variant_attribute_assignments.mjs"),
+    import("./migrations/0008_deleted_products_log.mjs"),
   ]);
   const migrations = modules.map((m) => m.default);
 

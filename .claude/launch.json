@@ -12,6 +12,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["--env-file=.env.test", "scripts/devTestDb.mjs", "-p", "3100"],
       "port": 3100
+    },
+    {
+      "name": "tahos-prod-measure",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "--", "-p", "3200"],
+      "port": 3200
     }
   ]
 }

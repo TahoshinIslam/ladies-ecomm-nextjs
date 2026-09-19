@@ -5,6 +5,7 @@ import { requireObjectIdFormat } from "../lib/validation.js";
 const WRITABLE_FIELDS = [
   "key",
   "label",
+  "labelBn",
   "labelOverrides",
   "type",
   "options",

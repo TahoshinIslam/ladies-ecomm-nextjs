@@ -49,6 +49,8 @@ import {
   repairVariantSelection,
   resolveVariantPricing,
 } from "../../lib/utils.js";
+import FramedImage from "../../components/ui/FramedImage.jsx";
+import { framingForUrl } from "../../lib/imageFraming.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel as translateAttrLabel, attrValue as translateAttrValue, departmentName } from "../../lib/i18n/catalog.js";
@@ -244,6 +246,20 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
               // high-fetch-priority image on this route (thumbnails below
               // stay default/lazy, per this phase's "thumbnails must not be
               // priority" rule).
+              framingForUrl(product.imageFraming, galleryImages[selectedImage]) ? (
+                // Saved crop/fit for this photo — same FramedImage the admin
+                // editor previews with; unframed photos keep the render below.
+                <FramedImage
+                  src={galleryImages[selectedImage]}
+                  framing={framingForUrl(product.imageFraming, galleryImages[selectedImage])}
+                  placement="product.gallery"
+                  alt={product.name}
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                  loading="eager"
+                  lcp
+                  onError={() => setImageFailed(true)}
+                />
+              ) : (
               <Image
                 src={resolveImage(galleryImages[selectedImage], 800)}
                 alt={product.name}
@@ -261,6 +277,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
                 className="object-contain"
                 onError={() => setImageFailed(true)}
               />
+              )
             ) : imageFailed ? (
               <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center text-stone">
                 <ImageOff className="h-5 w-5" strokeWidth={1.6} />

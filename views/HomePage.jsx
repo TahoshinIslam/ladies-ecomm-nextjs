@@ -26,6 +26,8 @@ import { getT, getServerLocale } from "../lib/i18n/server.js";
 import { localizeProductList, localizeCategoryList } from "../lib/i18n/localize.js";
 import { departmentName } from "../lib/i18n/catalog.js";
 import { resolveImage } from "../lib/utils.js";
+import FramedImage from "../components/ui/FramedImage.jsx";
+import { homepageFramingFor } from "../lib/imageFraming.js";
 import { sortDepartmentsForFavourites } from "../lib/storefrontDepartments.js";
 
 const FABRICS = [
@@ -172,7 +174,7 @@ export default async function HomePage() {
     burqa: homepageSettings.carouselImages?.burqa || heroBurqa[0]?.images?.[0] || null,
     abaya: homepageSettings.carouselImages?.abaya || heroAbaya[0]?.images?.[0] || null,
     hijab: homepageSettings.carouselImages?.hijab || heroHijab[0]?.images?.[0] || null,
-    khimar: heroKhimar[0]?.images?.[0] || null,
+    khimar: homepageSettings.carouselImages?.khimar || heroKhimar[0]?.images?.[0] || null,
   };
   // Admin-set images (Shop Config → Departments/Fabric Story/Occasions/
   // Guided Discovery) — every key defaults to "" server-side, so a plain
@@ -181,6 +183,23 @@ export default async function HomePage() {
   const fabricImages = homepageSettings.fabricImages || {};
   const occasionImages = homepageSettings.occasionImages || {};
   const guidedFinderImage = homepageSettings.guidedFinderImage || null;
+  // Saved crop/fit per image slot (Admin → Shop Config → Adjust framing).
+  // A slot with no saved framing renders exactly as it always has.
+  const imageFraming = homepageSettings.imageFraming || {};
+  // Crops for the admin-set carousel images (Shop Config → Carousel). Only an
+  // admin-set override can carry a crop — the auto-derived product photo has
+  // none, so it keeps rendering exactly as before.
+  const heroFramingBySlug = Object.fromEntries(
+    ["burqa", "abaya", "hijab", "khimar"].map((slug) => [
+      slug,
+      homepageSettings.carouselImages?.[slug]
+        ? {
+            desktop: homepageFramingFor(imageFraming, "hero.desktop", slug),
+            mobile: homepageFramingFor(imageFraming, "hero.mobile", slug),
+          }
+        : null,
+    ]),
+  );
 
   return (
     <>
@@ -205,7 +224,7 @@ export default async function HomePage() {
           close under the header instead of floating in extra whitespace. */}
       <section aria-label={t("home.heroLabel")} className="container-x pt-3 sm:pt-5">
         <div className="mx-auto aspect-[4/3] w-full sm:aspect-[16/7] sm:max-h-[560px]">
-          <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} promotions={carouselPromotions} />
+          <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} heroFramingBySlug={heroFramingBySlug} promotions={carouselPromotions} />
         </div>
       </section>
 
@@ -227,6 +246,7 @@ export default async function HomePage() {
               href={`/shop?category=${d._id}`}
               label={departmentName(locale, d.slug, d.name)}
               image={departmentImages[d.slug] || heroImageBySlug[d.slug] || null}
+              framing={departmentImages[d.slug] ? homepageFramingFor(imageFraming, "department.tile", d.slug) : null}
             />
           ))}
         </div>
@@ -280,7 +300,15 @@ export default async function HomePage() {
                   {t("home.productCount", { count: departmentCounts[d._id] ?? 0 })}
                 </p>
                 <div className="relative mt-3 aspect-4/3 overflow-hidden bg-media">
-                  {deptImage ? (
+                  {deptImage && departmentImages[d.slug] && homepageFramingFor(imageFraming, "department.card", d.slug) ? (
+                    <FramedImage
+                      src={deptImage}
+                      framing={homepageFramingFor(imageFraming, "department.card", d.slug)}
+                      placement="department.card"
+                      sizes="(max-width: 1024px) 100vw, 33vw"
+                      className="transition-transform duration-300 group-hover:scale-[1.04]"
+                    />
+                  ) : deptImage ? (
                     <Image
                       src={resolveImage(deptImage, 500)}
                       alt=""
@@ -301,33 +329,35 @@ export default async function HomePage() {
 
       {/* Promotional banner — Shop Config → Banner. Admin-set image only;
           renders nothing when disabled or no image is set. */}
-      {homepageSettings.banner?.enabled && homepageSettings.banner?.imageUrl && (
-        <section aria-label={t("home.bannerLabel")} className="container-x pt-32">
-          {homepageSettings.banner.href ? (
-            <Link href={homepageSettings.banner.href} className="block overflow-hidden rounded-2xl focus-ring">
-              <Image
-                src={resolveImage(homepageSettings.banner.imageUrl, 1400)}
-                alt=""
-                width={1400}
-                height={420}
-                sizes="100vw"
-                className="h-auto w-full object-cover"
-              />
-            </Link>
-          ) : (
-            <div className="overflow-hidden rounded-2xl">
-              <Image
-                src={resolveImage(homepageSettings.banner.imageUrl, 1400)}
-                alt=""
-                width={1400}
-                height={420}
-                sizes="100vw"
-                className="h-auto w-full object-cover"
-              />
-            </div>
-          )}
-        </section>
-      )}
+      {homepageSettings.banner?.enabled && homepageSettings.banner?.imageUrl && (() => {
+        const bannerFraming = homepageFramingFor(imageFraming, "banner.home");
+        const bannerImage = bannerFraming ? (
+          // Framed: a fixed 10:3 box the saved crop was made against.
+          <div className="relative aspect-[10/3] w-full overflow-hidden">
+            <FramedImage src={homepageSettings.banner.imageUrl} framing={bannerFraming} placement="banner.home" sizes="100vw" />
+          </div>
+        ) : (
+          <Image
+            src={resolveImage(homepageSettings.banner.imageUrl, 1400)}
+            alt=""
+            width={1400}
+            height={420}
+            sizes="100vw"
+            className="h-auto w-full object-cover"
+          />
+        );
+        return (
+          <section aria-label={t("home.bannerLabel")} className="container-x pt-32">
+            {homepageSettings.banner.href ? (
+              <Link href={homepageSettings.banner.href} className="block overflow-hidden rounded-2xl focus-ring">
+                {bannerImage}
+              </Link>
+            ) : (
+              <div className="overflow-hidden rounded-2xl">{bannerImage}</div>
+            )}
+          </section>
+        );
+      })()}
 
       {/* Featured / "Trending now" — a real, standalone section with
           Leo's functional category-tab pattern layered on top (filters
@@ -438,7 +468,14 @@ export default async function HomePage() {
               data-reveal
               className="group relative flex min-h-[220px] flex-col justify-end overflow-hidden rounded-2xl bg-media p-6 focus-ring"
             >
-              {fabricImages[f.value] ? (
+              {fabricImages[f.value] && homepageFramingFor(imageFraming, "fabric.tile", f.value) ? (
+                <FramedImage
+                  src={fabricImages[f.value]}
+                  framing={homepageFramingFor(imageFraming, "fabric.tile", f.value)}
+                  placement="fabric.tile"
+                  sizes="(max-width: 1024px) 50vw, 20vw"
+                />
+              ) : fabricImages[f.value] ? (
                 <Image
                   src={resolveImage(fabricImages[f.value], 500)}
                   alt=""
@@ -481,7 +518,18 @@ export default async function HomePage() {
               data-reveal
               className="group relative flex min-h-[200px] flex-col justify-end overflow-hidden rounded-2xl border border-line p-6 transition-colors hover:border-ink focus-ring"
             >
-              {occasionImages[o.value] && (
+              {occasionImages[o.value] && homepageFramingFor(imageFraming, "occasion.tile", o.value) && (
+                <>
+                  <FramedImage
+                    src={occasionImages[o.value]}
+                    framing={homepageFramingFor(imageFraming, "occasion.tile", o.value)}
+                    placement="occasion.tile"
+                    sizes="(max-width: 1024px) 50vw, 25vw"
+                  />
+                  <div aria-hidden="true" className="absolute inset-0 scrim" />
+                </>
+              )}
+              {occasionImages[o.value] && !homepageFramingFor(imageFraming, "occasion.tile", o.value) && (
                 <>
                   <Image
                     src={resolveImage(occasionImages[o.value], 500)}
@@ -508,7 +556,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <GuidedFinderSection image={guidedFinderImage} />
+      <GuidedFinderSection image={guidedFinderImage} framing={guidedFinderImage ? homepageFramingFor(imageFraming, "guided.panel") : null} />
 
       {/* Campaign — real, admin-configurable content (Shop Config →
           Campaign), kept; restyled from the old dark diagonal-line/italic-

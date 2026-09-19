@@ -50,10 +50,13 @@ const CampaignPopup = dynamic(() => import("@/components/layout/CampaignPopup.js
  */
 export default function StorefrontLayout({ children, initialDepartments }) {
   return (
-    <div className="flex min-h-screen flex-col bg-canvas">
+    // The bottom padding reserves room for MobileNav (its 66px tab row + 1px
+    // top border plus max(10px, safe-area) padding, shown below `lg`) at the very END of the
+    // page, so the footer's last rows are never hidden under the fixed bar.
+    <div className="flex min-h-screen flex-col bg-canvas pb-[calc(67px+max(10px,env(safe-area-inset-bottom)))] lg:pb-0">
       <OfflineBanner />
       <Header initialDepartments={initialDepartments} />
-      <main id="main" className="flex-1 pb-[76px] md:pb-0">
+      <main id="main" className="flex-1">
         {children}
       </main>
       <Footer initialDepartments={initialDepartments} />

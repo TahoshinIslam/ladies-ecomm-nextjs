@@ -9,6 +9,7 @@
 // (the API replaces those keys wholesale), merged from the last full
 // load plus just the one field group being edited.
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   Store,
@@ -28,7 +29,11 @@ import Textarea from "../../components/ui/Textarea.jsx";
 import Modal from "../../components/ui/Modal.jsx";
 import Skeleton from "../../components/ui/Skeleton.jsx";
 import ImageDropzone from "../../components/admin/ImageDropzone.jsx";
+import FramedImageInput from "../../components/admin/imageFraming/FramedImageInput.jsx";
+import { homepageFramingKey } from "../../lib/imageFraming.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
+import { usePermission } from "../../hooks/usePermission.js";
+import { PERMISSIONS } from "../../lib/permissions.js";
 import { CSRF_COOKIE_NAME } from "../../lib/cookies.js";
 
 const baseUrl = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/api` : "/api";
@@ -42,7 +47,7 @@ const csrfHeaders = () => {
 
 const CONFIG_ITEMS = [
   { key: "shopName", title: "Shop Name", description: "Change the store's name.", icon: Store },
-  { key: "carousel", title: "Carousel", description: "Set the hero carousel images.", icon: GalleryHorizontal },
+  { key: "carousel", title: "Carousel", description: "Set and frame the hero carousel images.", icon: GalleryHorizontal },
   { key: "departments", title: "Departments", description: "Set each department card's photo.", icon: LayoutGrid },
   { key: "fabrics", title: "Fabric Story", description: "Set each fabric card's photo.", icon: Shirt },
   { key: "occasions", title: "Occasions", description: "Set each occasion card's photo.", icon: CalendarHeart },
@@ -204,6 +209,42 @@ function ImagePickerField({ value, onChange, label, folder = "homepage" }) {
   );
 }
 
+// Homepage crop/fit records live in homepage.imageFraming, keyed
+// "<placement>" or "<placement>:<slug>" with "." written "_" (see
+// homepageFramingKey in lib/imageFraming.js). This is
+// the framed counterpart of ImagePickerField: same drag-and-drop upload
+// (through the shared FramedImageInput), plus guidance, exact-frame previews
+// and the framing editor for every destination the image is shown in.
+const framingKey = homepageFramingKey;
+
+function FramedPickerField({ label, image, onImage, placements, slug, framingMap, onFramingMap, folder = "homepage" }) {
+  const framings = Object.fromEntries(placements.map((k) => [k, framingMap[framingKey(k, slug)] ?? null]));
+  return (
+    <div>
+      <FramedImageInput
+        label={label}
+        placements={placements}
+        folder={folder}
+        url={image || ""}
+        framings={framings}
+        onChange={({ url, framings: next }) => {
+          onImage(url);
+          onFramingMap((prev) => {
+            const map = { ...prev };
+            for (const k of placements) {
+              if (next[k]) map[framingKey(k, slug)] = next[k];
+              else delete map[framingKey(k, slug)];
+            }
+            return map;
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+const DEPARTMENT_PLACEMENTS = ["department.tile", "department.card"];
+
 function ShopNameModal({ store, onClose, onSaved }) {
   const [name, setName] = useState(store?.name || "");
   const [saving, setSaving] = useState(false);
@@ -242,15 +283,31 @@ function ShopNameModal({ store, onClose, onSaved }) {
   );
 }
 
+// One image per department slot, framed for BOTH hero shapes it appears in
+// (desktop wide banner, phone ~square). Slides beyond these four departments
+// — any number, each with its own link, schedule and crops — are created in
+// Promotions → Carousel Banners; while any of those is live it replaces this
+// department rotation on the storefront.
+const CAROUSEL_SLOTS = [
+  { slug: "burqa", label: "Burqa" },
+  { slug: "abaya", label: "Abaya" },
+  { slug: "hijab", label: "Hijab" },
+  { slug: "khimar", label: "Khimar" },
+];
+const HERO_PLACEMENTS = ["hero.desktop", "hero.mobile"];
+
 function CarouselModal({ homepage, onClose, onSaved }) {
+  const can = usePermission();
   const existing = homepage?.carouselImages || {};
-  const [images, setImages] = useState({ burqa: existing.burqa || "", abaya: existing.abaya || "", hijab: existing.hijab || "" });
+  const [images, setImages] = useState(Object.fromEntries(CAROUSEL_SLOTS.map(({ slug }) => [slug, existing[slug] || ""])));
+  const [framing, setFraming] = useState(homepage?.imageFraming || {});
   const [saving, setSaving] = useState(false);
+  const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
 
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveSettings({ homepage: { ...homepage, carouselImages: images } });
+      const saved = await saveSettings({ homepage: { ...homepage, carouselImages: images, imageFraming: framing } });
       toast.warning("Carousel updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
@@ -261,14 +318,42 @@ function CarouselModal({ homepage, onClose, onSaved }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Carousel" size="md">
+    <Modal open onClose={onClose} title="Carousel" size="lg">
       <div className="space-y-4 p-5">
         <p className="text-xs text-muted-foreground">
           Overrides the home page hero image for that department. Leave blank to use the department&apos;s own top-rated product photo.
+          Use &quot;Adjust framing&quot; to choose exactly how each image is cropped on desktop and on phones.
         </p>
-        <ImagePickerField label="Burqa" value={images.burqa} onChange={(v) => setImages((s) => ({ ...s, burqa: v }))} />
-        <ImagePickerField label="Abaya" value={images.abaya} onChange={(v) => setImages((s) => ({ ...s, abaya: v }))} />
-        <ImagePickerField label="Hijab" value={images.hijab} onChange={(v) => setImages((s) => ({ ...s, hijab: v }))} />
+        {CAROUSEL_SLOTS.map(({ slug, label }) => (
+          <FramedPickerField
+            key={slug}
+            label={label}
+            image={images[slug]}
+            onImage={set(slug)}
+            slug={slug}
+            placements={HERO_PLACEMENTS}
+            framingMap={framing}
+            onFramingMap={setFraming}
+          />
+        ))}
+        <div className="rounded-lg border border-border bg-muted/40 p-4">
+          <p className="text-sm font-medium text-ink">Need more than these four slides?</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Carousel Banners in Promotions has no slide limit: each slide gets its own desktop and mobile image, framing, link and schedule.
+            While a banner is live it replaces the department slides above.
+          </p>
+          {can(PERMISSIONS.PROMOTIONS_MANAGE) ? (
+            <Link
+              href="/admin/promotions"
+              onClick={onClose}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium text-ink hover:bg-muted focus-ring"
+            >
+              <GalleryHorizontal className="h-4 w-4" aria-hidden="true" /> Add more slides in Promotions
+            </Link>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">Ask an admin with Promotions access to add extra slides.</p>
+          )}
+        </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
@@ -294,11 +379,12 @@ function DepartmentsModal({ homepage, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
+  const [framing, setFraming] = useState(homepage?.imageFraming || {});
 
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveSettings({ homepage: { ...homepage, departmentImages: images } });
+      const saved = await saveSettings({ homepage: { ...homepage, departmentImages: images, imageFraming: framing } });
       toast.warning("Departments updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
@@ -309,19 +395,19 @@ function DepartmentsModal({ homepage, onClose, onSaved }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Departments" size="md">
+    <Modal open onClose={onClose} title="Departments" size="lg">
       <div className="space-y-4 p-5">
         <p className="text-xs text-muted-foreground">
           The photo shown on each department&apos;s card in &quot;Shop by department.&quot; Burqa/Abaya/Khimar fall back to
           that department&apos;s own top-rated product photo when left blank; Hijab/Niqab/Modest Sets show a plain
           color card until a photo is set here.
         </p>
-        <ImagePickerField label="Burqa" value={images.burqa} onChange={set("burqa")} />
-        <ImagePickerField label="Abaya" value={images.abaya} onChange={set("abaya")} />
-        <ImagePickerField label="Hijab" value={images.hijab} onChange={set("hijab")} />
-        <ImagePickerField label="Niqab" value={images.niqab} onChange={set("niqab")} />
-        <ImagePickerField label="Khimar" value={images.khimar} onChange={set("khimar")} />
-        <ImagePickerField label="Modest Sets" value={images["modest-sets"]} onChange={set("modest-sets")} />
+        <FramedPickerField label="Burqa" image={images["burqa"]} onImage={set("burqa")} slug="burqa" placements={DEPARTMENT_PLACEMENTS} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Abaya" image={images["abaya"]} onImage={set("abaya")} slug="abaya" placements={DEPARTMENT_PLACEMENTS} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Hijab" image={images["hijab"]} onImage={set("hijab")} slug="hijab" placements={DEPARTMENT_PLACEMENTS} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Niqab" image={images["niqab"]} onImage={set("niqab")} slug="niqab" placements={DEPARTMENT_PLACEMENTS} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Khimar" image={images["khimar"]} onImage={set("khimar")} slug="khimar" placements={DEPARTMENT_PLACEMENTS} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Modest Sets" image={images["modest-sets"]} onImage={set("modest-sets")} slug="modest-sets" placements={DEPARTMENT_PLACEMENTS} framingMap={framing} onFramingMap={setFraming} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
@@ -346,11 +432,12 @@ function FabricsModal({ homepage, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
+  const [framing, setFraming] = useState(homepage?.imageFraming || {});
 
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveSettings({ homepage: { ...homepage, fabricImages: images } });
+      const saved = await saveSettings({ homepage: { ...homepage, fabricImages: images, imageFraming: framing } });
       toast.warning("Fabric Story updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
@@ -361,17 +448,17 @@ function FabricsModal({ homepage, onClose, onSaved }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Fabric Story" size="md">
+    <Modal open onClose={onClose} title="Fabric Story" size="lg">
       <div className="space-y-4 p-5">
         <p className="text-xs text-muted-foreground">
           The photo shown on each fabric&apos;s card in &quot;What it&apos;s made of matters.&quot; Left blank keeps
           the existing plain placeholder.
         </p>
-        <ImagePickerField label="Nida" value={images.nida} onChange={set("nida")} />
-        <ImagePickerField label="Crepe" value={images.crepe} onChange={set("crepe")} />
-        <ImagePickerField label="Chiffon" value={images.chiffon} onChange={set("chiffon")} />
-        <ImagePickerField label="Jersey" value={images.jersey} onChange={set("jersey")} />
-        <ImagePickerField label="Georgette" value={images.georgette} onChange={set("georgette")} />
+        <FramedPickerField label="Nida" image={images.nida} onImage={set("nida")} slug="nida" placements={["fabric.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Crepe" image={images.crepe} onImage={set("crepe")} slug="crepe" placements={["fabric.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Chiffon" image={images.chiffon} onImage={set("chiffon")} slug="chiffon" placements={["fabric.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Jersey" image={images.jersey} onImage={set("jersey")} slug="jersey" placements={["fabric.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Georgette" image={images.georgette} onImage={set("georgette")} slug="georgette" placements={["fabric.tile"]} framingMap={framing} onFramingMap={setFraming} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
@@ -395,11 +482,12 @@ function OccasionsModal({ homepage, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const set = (key) => (v) => setImages((s) => ({ ...s, [key]: v }));
+  const [framing, setFraming] = useState(homepage?.imageFraming || {});
 
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveSettings({ homepage: { ...homepage, occasionImages: images } });
+      const saved = await saveSettings({ homepage: { ...homepage, occasionImages: images, imageFraming: framing } });
       toast.warning("Occasions updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
@@ -410,16 +498,16 @@ function OccasionsModal({ homepage, onClose, onSaved }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Occasions" size="md">
+    <Modal open onClose={onClose} title="Occasions" size="lg">
       <div className="space-y-4 p-5">
         <p className="text-xs text-muted-foreground">
           The photo shown on each occasion&apos;s card in &quot;Dressed for the moment.&quot; Left blank keeps the
           existing plain bordered card.
         </p>
-        <ImagePickerField label="Eid" value={images.eid} onChange={set("eid")} />
-        <ImagePickerField label="Daily Wear" value={images.everyday} onChange={set("everyday")} />
-        <ImagePickerField label="Wedding" value={images.bridal} onChange={set("bridal")} />
-        <ImagePickerField label="Prayer" value={images.prayer} onChange={set("prayer")} />
+        <FramedPickerField label="Eid" image={images.eid} onImage={set("eid")} slug="eid" placements={["occasion.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Daily Wear" image={images.everyday} onImage={set("everyday")} slug="everyday" placements={["occasion.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Wedding" image={images.bridal} onImage={set("bridal")} slug="bridal" placements={["occasion.tile"]} framingMap={framing} onFramingMap={setFraming} />
+        <FramedPickerField label="Prayer" image={images.prayer} onImage={set("prayer")} slug="prayer" placements={["occasion.tile"]} framingMap={framing} onFramingMap={setFraming} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
@@ -435,12 +523,13 @@ function OccasionsModal({ homepage, onClose, onSaved }) {
 
 function GuidedFinderModal({ homepage, onClose, onSaved }) {
   const [image, setImage] = useState(homepage?.guidedFinderImage || "");
+  const [framing, setFraming] = useState(homepage?.imageFraming || {});
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await saveSettings({ homepage: { ...homepage, guidedFinderImage: image } });
+      const saved = await saveSettings({ homepage: { ...homepage, guidedFinderImage: image, imageFraming: framing } });
       toast.warning("Guided Discovery updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
@@ -451,13 +540,13 @@ function GuidedFinderModal({ homepage, onClose, onSaved }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Guided Discovery" size="md">
+    <Modal open onClose={onClose} title="Guided Discovery" size="lg">
       <div className="space-y-4 p-5">
         <p className="text-xs text-muted-foreground">
           The photo shown beside &quot;Not sure where to start?&quot; on desktop. Left blank keeps the existing plain
           placeholder.
         </p>
-        <ImagePickerField label="Guided Discovery photo" value={image} onChange={setImage} />
+        <FramedPickerField label="Guided Discovery photo" image={image} onImage={setImage} placements={["guided.panel"]} framingMap={framing} onFramingMap={setFraming} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
@@ -513,6 +602,7 @@ function BannerModal({ homepage, onClose, onSaved }) {
   const existing = homepage?.banner || {};
   const [enabled, setEnabled] = useState(!!existing.enabled);
   const [imageUrl, setImageUrl] = useState(existing.imageUrl || "");
+  const [framing, setFraming] = useState(homepage?.imageFraming || {});
   const [href, setHref] = useState(existing.href || "");
   const [saving, setSaving] = useState(false);
 
@@ -523,7 +613,7 @@ function BannerModal({ homepage, onClose, onSaved }) {
     }
     setSaving(true);
     try {
-      const saved = await saveSettings({ homepage: { ...homepage, banner: { enabled, imageUrl: imageUrl.trim(), href: href.trim() } } });
+      const saved = await saveSettings({ homepage: { ...homepage, banner: { enabled, imageUrl: imageUrl.trim(), href: href.trim() }, imageFraming: framing } });
       toast.warning("Banner updated");
       onSaved({ homepage: saved.homepage });
     } catch (e) {
@@ -534,7 +624,7 @@ function BannerModal({ homepage, onClose, onSaved }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="Banner" size="md">
+    <Modal open onClose={onClose} title="Banner" size="lg">
       <div className="space-y-4 p-5">
         <label className="flex items-start gap-2.5">
           <input
@@ -548,7 +638,7 @@ function BannerModal({ homepage, onClose, onSaved }) {
             <p className="mt-0.5 text-xs text-muted-foreground">Off by default — nothing shows until enabled with an image.</p>
           </div>
         </label>
-        <ImagePickerField label="Banner image" value={imageUrl} onChange={setImageUrl} />
+        <FramedPickerField label="Banner image" image={imageUrl} onImage={setImageUrl} placements={["banner.home"]} framingMap={framing} onFramingMap={setFraming} />
         <Input label="Link (optional)" placeholder="/shop?collection=discount" value={href} onChange={(e) => setHref(e.target.value)} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>

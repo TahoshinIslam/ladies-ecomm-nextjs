@@ -78,6 +78,10 @@ export default function AdminProductsPage() {
     filterKeys: ["department", "status"],
   });
 
+  // Status defaults to Active (no `status` in the URL); "all" is the explicit
+  // choice to include inactive products.
+  const status = filters.status || "true";
+
   const { data: catsData } = useGetCategoriesQuery();
   const allCategories = catsData?.categories ?? [];
   const departments = allCategories.filter((c) => isDepartmentCategory(c, allCategories));
@@ -89,7 +93,7 @@ export default function AdminProductsPage() {
     search: search || undefined,
     sort: sortBy ? `${sortOrder === "desc" ? "-" : ""}${sortBy}` : undefined,
     topCategory: filters.department || undefined,
-    isActive: filters.status || undefined,
+    isActive: status === "all" ? undefined : status,
   });
   const products = data?.products ?? [];
 
@@ -102,7 +106,7 @@ export default function AdminProductsPage() {
   const handleDelete = async () => {
     try {
       await deleteProduct(confirmDelete._id).unwrap();
-      toast.success("Product deactivated");
+      toast.success("Product deleted");
       returnToValidPageIfEmptied(1);
       setConfirmDelete(null);
     } catch (e) {
@@ -110,11 +114,11 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleBulkDeactivate = async () => {
+  const handleBulkDelete = async () => {
     const ids = [...selected];
     try {
       await Promise.all(ids.map((id) => deleteProduct(id).unwrap()));
-      toast.success(`${ids.length} product${ids.length === 1 ? "" : "s"} deactivated`);
+      toast.success(`${ids.length} product${ids.length === 1 ? "" : "s"} deleted`);
       returnToValidPageIfEmptied(ids.length);
       setSelected(new Set());
       setBulkConfirm(false);
@@ -230,8 +234,8 @@ export default function AdminProductsPage() {
             <button
               type="button"
               onClick={() => setConfirmDelete(p)}
-              title="Deactivate"
-              aria-label={`Deactivate ${p.name}`}
+              title="Delete"
+              aria-label={`Delete ${p.name}`}
               className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger focus-ring"
             >
               <Trash2 className="h-4 w-4" />
@@ -276,14 +280,14 @@ export default function AdminProductsPage() {
               ))}
             </Select>
             <Select
-              value={filters.status || ""}
+              value={status}
               onChange={(e) => setFilter("status", e.target.value)}
               className="max-w-[150px]"
               aria-label="Filter by status"
             >
-              <option value="">All statuses</option>
               <option value="true">Active</option>
               <option value="false">Inactive</option>
+              <option value="all">All statuses</option>
             </Select>
           </>
         }
@@ -294,7 +298,7 @@ export default function AdminProductsPage() {
               <span className="text-sm text-muted-foreground">{selected.size} selected</span>
               <Button size="sm" variant="outline" onClick={() => setBulkConfirm(true)}>
                 <Trash2 className="h-3.5 w-3.5" />
-                Deactivate selected
+                Delete selected
               </Button>
             </>
           )
@@ -345,17 +349,15 @@ export default function AdminProductsPage() {
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
         onConfirm={handleDelete}
-        title={`Deactivate "${confirmDelete?.name}"?`}
-        description="The product will be hidden from the store. You can reactivate it later by editing."
+        title={`Delete "${confirmDelete?.name}"?`}
         loading={deleting}
       />
 
       <ConfirmDialog
         open={bulkConfirm}
         onClose={() => setBulkConfirm(false)}
-        onConfirm={handleBulkDeactivate}
-        title={`Deactivate ${selected.size} product${selected.size === 1 ? "" : "s"}?`}
-        description="They'll be hidden from the store. You can reactivate each one later by editing it."
+        onConfirm={handleBulkDelete}
+        title={`Delete ${selected.size} product${selected.size === 1 ? "" : "s"}?`}
         loading={deleting}
       />
     </div>

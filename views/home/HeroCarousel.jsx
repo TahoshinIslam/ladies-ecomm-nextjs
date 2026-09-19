@@ -23,12 +23,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Pause, Play, ShoppingBag } from "lucide-react";
 
 import { useLocale } from "../../context/LocaleProvider.jsx";
+import FramedHeroSlide from "./FramedHeroSlide.jsx";
 import { resolveImage, isPlaceholderStub } from "../../lib/utils.js";
+import { resolveSlotFraming, sanitizeFraming } from "../../lib/imageFraming.js";
 
 const ROTATION_SLUGS = ["burqa", "abaya", "hijab", "khimar"];
 const AUTO_ADVANCE_MS = 6000;
 
-function buildFallbackSlides(departments, heroImageBySlug) {
+function buildFallbackSlides(departments, heroImageBySlug, heroFramingBySlug) {
   return ROTATION_SLUGS.map((slug) => {
     const dept = departments.find((d) => d.slug === slug);
     if (!dept) return null;
@@ -39,10 +41,15 @@ function buildFallbackSlides(departments, heroImageBySlug) {
     // back to the app's own hatch pattern instead of rendering that stub
     // at hero scale.
     const image = raw && !isPlaceholderStub(raw) ? raw : null;
+    // Crops saved in Shop Config → Carousel (only present for an admin-set
+    // image); none saved = unframed = the original object-contain render.
+    const framing = heroFramingBySlug?.[slug];
     return {
       key: slug,
       desktopImage: image,
       mobileImage: image,
+      desktopFraming: image ? sanitizeFraming(framing?.desktop) : null,
+      mobileFraming: image ? sanitizeFraming(framing?.mobile) : null,
       href: `/shop?category=${dept._id}`,
       alt: "",
       clickable: true,
@@ -55,13 +62,16 @@ function buildPromotionSlides(promotions, locale) {
     key: p.id,
     desktopImage: p.desktopImage,
     mobileImage: p.mobileImage || p.desktopImage,
+    // Saved crops (lib/imageFraming.js); null = unframed = render as before.
+    desktopFraming: sanitizeFraming(p.desktopFraming),
+    mobileFraming: sanitizeFraming(p.mobileFraming),
     href: p.href,
     alt: (locale === "bn" ? p.imageAltBn : p.imageAlt) || (locale === "bn" ? p.titleBn : p.title) || "",
     clickable: p.clickable,
   }));
 }
 
-export default function HeroCarousel({ departments, heroImageBySlug, promotions }) {
+export default function HeroCarousel({ departments, heroImageBySlug, heroFramingBySlug, promotions }) {
   const { t, locale } = useLocale();
   const [index, setIndex] = useState(0);
   const [userPaused, setUserPaused] = useState(false);
@@ -74,7 +84,7 @@ export default function HeroCarousel({ departments, heroImageBySlug, promotions 
   const slides =
     promotions && promotions.length > 0
       ? buildPromotionSlides(promotions, locale)
-      : buildFallbackSlides(departments, heroImageBySlug);
+      : buildFallbackSlides(departments, heroImageBySlug, heroFramingBySlug);
 
   const active = slides[index] ?? slides[0];
 
@@ -97,6 +107,16 @@ export default function HeroCarousel({ departments, heroImageBySlug, promotions 
   const go = (delta) => setIndex((i) => (i + delta + slides.length) % slides.length);
 
   if (!active) return null;
+
+  // Saved crops. Desktop uses only its own crop; mobile uses its own, or —
+  // when just a desktop crop was saved — carries that one over (Fill
+  // re-covers the 4:3 frame). No crop at all = the untouched legacy render.
+  // (Carried over only when both slots show the SAME image — a crop stores
+  // that image's proportions, so it can't be applied to a different file.)
+  const desktopFraming = active.desktopFraming;
+  const mobileSrc = active.mobileImage || active.desktopImage;
+  const mobileFraming = resolveSlotFraming({ own: active.mobileFraming, ownSrc: mobileSrc, other: desktopFraming, otherSrc: active.desktopImage });
+  const isFramed = Boolean(active.desktopImage && (desktopFraming || mobileFraming));
 
   const Wrapper = active.clickable ? Link : "div";
   const wrapperProps = active.clickable
@@ -128,7 +148,17 @@ export default function HeroCarousel({ departments, heroImageBySlug, promotions 
               stale target the server already omitted upstream) so the
               whole banner is never a dead or invalid link. */}
           <Wrapper className="absolute inset-0 block focus-ring" {...wrapperProps}>
-            {active.desktopImage ? (
+            {isFramed ? (
+              // A saved framing exists (Admin → Promotions → Adjust framing):
+              // rendered through the SAME FramedImage the admin editor
+              // previews with, so the crop matches exactly.
+              <FramedHeroSlide
+                desktopImage={active.desktopImage}
+                mobileImage={mobileSrc}
+                desktopFraming={desktopFraming}
+                mobileFraming={mobileFraming}
+              />
+            ) : active.desktopImage ? (
               <>
                 {/* Two breakpoint-scoped <Image> elements (desktop/mobile
                     creative can differ — an admin may upload a distinct

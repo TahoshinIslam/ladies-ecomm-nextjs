@@ -18,6 +18,8 @@ import { addToCompare, removeFromCompare, openQuickAdd } from "../../store/uiSli
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
+import FramedImage from "../ui/FramedImage.jsx";
+import { framingForUrl } from "../../lib/imageFraming.js";
 import { cn, resolveImage, effectivePrice, isRealDiscount } from "../../lib/utils.js";
 
 /**
@@ -189,6 +191,21 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               // instead, leaving visible gaps. Taking the img out of grid
               // flow with `absolute inset-0` sizes it from the box's own
               // edges, independent of its natural ratio.
+              framingForUrl(product.imageFraming, product.images[0]) ? (
+                // Saved crop/fit for this photo (Admin → Products → Adjust framing):
+                // same FramedImage the editor previews with. Unframed photos
+                // keep the object-contain render below, unchanged.
+                <FramedImage
+                  src={product.images[0]}
+                  framing={framingForUrl(product.imageFraming, product.images[0])}
+                  placement="product.gallery"
+                  alt={product.name}
+                  sizes="(max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 25vw"
+                  loading={priority && index < 6 ? "eager" : "lazy"}
+                  fetchPriority={priority && index === 0 ? "high" : "auto"}
+                  onError={() => setImageFailed(true)}
+                />
+              ) : (
               <Image
                 src={resolveImage(product.images[0], 640)}
                 alt={product.name}
@@ -212,6 +229,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
                 className="object-contain"
                 onError={() => setImageFailed(true)}
               />
+              )
             ) : imageFailed ? (
               <span className="relative flex flex-col items-center gap-2 px-4 text-center text-stone">
                 <ImageOff className="h-5 w-5" strokeWidth={1.6} />

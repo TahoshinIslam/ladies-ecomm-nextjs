@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Check } from "lucide-react";
 
+import FramedImage from "../ui/FramedImage.jsx";
 import { cn, resolveImage } from "../../lib/utils.js";
 
 // Shared category tile — the ONE presentation both the homepage's "Shop
@@ -20,7 +21,7 @@ const IMAGE_CLASSES =
   "object-cover object-top transition-transform duration-300 group-hover:scale-[1.04]";
 const LABEL_CLASSES = "text-[13px] font-medium leading-tight text-ink";
 
-function CategoryTileVisual({ image, icon: Icon, label, active, sizes }) {
+function CategoryTileVisual({ image, framing, icon: Icon, label, active, sizes }) {
   return (
     <>
       <div
@@ -32,7 +33,17 @@ function CategoryTileVisual({ image, icon: Icon, label, active, sizes }) {
           active && "ring-2 ring-verm ring-offset-2 ring-offset-canvas",
         )}
       >
-        {image ? (
+        {image && framing ? (
+          // Saved crop (Admin → Shop Config → Departments → Adjust framing);
+          // unframed images keep the object-cover object-top render below.
+          <FramedImage
+            src={image}
+            framing={framing}
+            placement="department.tile"
+            sizes={sizes}
+            className="transition-transform duration-300 group-hover:scale-[1.04]"
+          />
+        ) : image ? (
           <Image src={resolveImage(image, 300)} alt="" fill sizes={sizes} className={IMAGE_CLASSES} />
         ) : Icon ? (
           <div aria-hidden="true" className="absolute inset-0 grid place-items-center">
@@ -61,6 +72,7 @@ export default function CategoryCard({
   onClick,
   label,
   image,
+  framing = null,
   icon,
   active = false,
   disabled = false,
@@ -75,14 +87,14 @@ export default function CategoryCard({
         aria-pressed={active}
         className={cn(TILE_CLASSES, "disabled:cursor-not-allowed disabled:opacity-60")}
       >
-        <CategoryTileVisual image={image} icon={icon} label={label} active={active} sizes={sizes} />
+        <CategoryTileVisual image={image} framing={framing} icon={icon} label={label} active={active} sizes={sizes} />
       </button>
     );
   }
 
   return (
     <Link href={href} className={TILE_CLASSES}>
-      <CategoryTileVisual image={image} icon={icon} label={label} active={active} sizes={sizes} />
+      <CategoryTileVisual image={image} framing={framing} icon={icon} label={label} active={active} sizes={sizes} />
     </Link>
   );
 }

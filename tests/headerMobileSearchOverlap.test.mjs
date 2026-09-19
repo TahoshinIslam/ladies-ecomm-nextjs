@@ -7,8 +7,8 @@
 // small screens (not merely hidden while the overlay happens to be open),
 // leaving the bottom-nav "Search" tab as the one mobile search entry
 // point. Desktop is unaffected: it keeps its own `<HeaderSearchField />`
-// in the `hidden md:block` row further down, since the bottom nav itself
-// is mobile-only.
+// in the `hidden md:block` row further down (tablets, where the bottom nav
+// also shows since it moved to `lg`, keep that inline field too).
 //
 // Static source-text check, same convention as
 // tests/headerCategoryMenu.test.mjs (this repo has no jsdom/RTL).

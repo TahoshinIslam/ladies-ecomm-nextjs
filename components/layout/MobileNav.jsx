@@ -17,6 +17,12 @@ import { cn } from "../../lib/utils.js";
  * piece of chrome across the whole mobile experience. Discovery (gender,
  * brands, journal) still lives in the header's hamburger drawer; this bar is
  * for the five destinations someone reaches for with a thumb, one-handed.
+ *
+ * Shown below the `lg` breakpoint (phones AND tablets) — the same breakpoint
+ * where the header switches to its hamburger drawer and where the product
+ * page's sticky purchase bar appears, so all the touch-first chrome turns on
+ * and off together. The space it covers is reserved by StorefrontShell.jsx
+ * (page bottom padding) and CompareTray.jsx (lifts above it).
  */
 export default function MobileNav() {
   const pathname = usePathname();
@@ -33,7 +39,7 @@ export default function MobileNav() {
   return (
     <nav
       aria-label={t("navigation.home")}
-      className="fixed inset-x-0 bottom-0 z-[80] flex border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] shadow-sheet md:hidden"
+      className="fixed inset-x-0 bottom-0 z-[80] flex border-t border-line bg-surface pb-[max(10px,env(safe-area-inset-bottom))] shadow-sheet lg:hidden"
     >
       <NavTab href="/" label={t("navigation.home")} icon={Home} active={isActive("/")} />
       <NavTab href="/shop" label={t("navigation.shop")} icon={ShoppingBag} active={isActive("/shop")} />

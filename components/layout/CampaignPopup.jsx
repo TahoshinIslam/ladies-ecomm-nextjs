@@ -20,7 +20,9 @@ import { X } from "lucide-react";
 import Modal from "../ui/Modal.jsx";
 import Button from "../ui/Button.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
+import FramedImage from "../ui/FramedImage.jsx";
 import { resolveImage } from "../../lib/utils.js";
+import { resolveSlotFraming, sanitizeFraming } from "../../lib/imageFraming.js";
 import { shouldShowPopup, recordPopupShown, recordPopupDismissed } from "../../lib/promotionFrequency.js";
 
 const EXCLUDED_PREFIXES = [
@@ -108,6 +110,35 @@ export default function CampaignPopup() {
   const alt = (locale === "bn" ? promotion.imageAltBn : promotion.imageAlt) || title;
   const image = promotion.mobileImage || promotion.desktopImage;
 
+  // Saved crops (Admin → Promotions → Adjust framing). Same rules as the hero:
+  // desktop uses its own crop, mobile its own or the desktop one carried over
+  // when both show the same image; no crop at all = the untouched legacy
+  // render (one <Image>, object-cover, mobile-preferred file).
+  const desktopFraming = sanitizeFraming(promotion.desktopFraming);
+  const mobileSrc = promotion.mobileImage || promotion.desktopImage;
+  const mobileFraming = resolveSlotFraming({ own: promotion.mobileFraming, ownSrc: mobileSrc, other: desktopFraming, otherSrc: promotion.desktopImage });
+  const isFramed = Boolean(desktopFraming || mobileFraming);
+  const imageContent = isFramed ? (
+    <>
+      <div className="absolute inset-0 hidden sm:block">
+        {desktopFraming ? (
+          <FramedImage src={promotion.desktopImage} framing={desktopFraming} placement="popup.desktop" sizes="896px" priority />
+        ) : (
+          <Image src={resolveImage(image, 1200)} alt={alt} fill sizes="896px" className="object-cover" priority />
+        )}
+      </div>
+      <div className="absolute inset-0 sm:hidden">
+        {mobileFraming ? (
+          <FramedImage src={mobileSrc} framing={mobileFraming} placement="popup.mobile" sizes="100vw" priority />
+        ) : (
+          <Image src={resolveImage(mobileSrc, 900)} alt={alt} fill sizes="100vw" className="object-cover" priority />
+        )}
+      </div>
+    </>
+  ) : (
+    <Image src={resolveImage(image, 1200)} alt={alt} fill sizes="(max-width: 768px) 100vw, 900px" className="object-cover" priority />
+  );
+
   // Large, edge-to-edge creative with a floating close control overlaid on
   // the image itself (no separate title header bar eating into it) — this
   // is deliberately a much bigger, image-first presentation than a typical
@@ -133,11 +164,11 @@ export default function CampaignPopup() {
         {image &&
           (promotion.clickable ? (
             <Link href={promotion.href} onClick={close} className="relative block h-[32vh] max-h-[340px] min-h-[180px] w-full overflow-hidden focus-ring">
-              <Image src={resolveImage(image, 1200)} alt={alt} fill sizes="(max-width: 768px) 100vw, 900px" className="object-cover" priority />
+              {imageContent}
             </Link>
           ) : (
             <div className="relative h-[32vh] max-h-[340px] min-h-[180px] w-full overflow-hidden">
-              <Image src={resolveImage(image, 1200)} alt={alt} fill sizes="(max-width: 768px) 100vw, 900px" className="object-cover" priority />
+              {imageContent}
             </div>
           ))}
         {(title || subtitle || promotion.clickable) && (

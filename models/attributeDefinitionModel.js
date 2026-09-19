@@ -185,6 +185,19 @@ async function create(data) {
   return findById(id);
 }
 
-const AttributeDefinition = { findById, findByKeys, findAll, findByCategoryOrGlobal, findDerivedFromVariant, create };
+/**
+ * Removes every reference to a category from attribute assignments and
+ * per-category label overrides. These tables deliberately have no foreign
+ * key to `categories` (see sql/schema.sql), so deleting a category would
+ * otherwise leave rows pointing at nothing — and a definition whose every
+ * assignment points at nothing applies to NO category, which is exactly how
+ * Color/Size vanished from the product form.
+ */
+async function removeCategoryReferences(categoryId) {
+  await query("DELETE FROM attribute_definition_categories WHERE category_id = ?", [categoryId]);
+  await query("DELETE FROM attribute_definition_label_overrides WHERE category_id = ?", [categoryId]);
+}
+
+const AttributeDefinition = { findById, findByKeys, findAll, findByCategoryOrGlobal, findDerivedFromVariant, create, removeCategoryReferences };
 
 export default AttributeDefinition;

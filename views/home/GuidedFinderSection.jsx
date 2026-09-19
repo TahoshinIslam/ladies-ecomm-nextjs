@@ -11,12 +11,13 @@ import { ArrowRight } from "lucide-react";
 import Button from "../../components/ui/Button.jsx";
 import { setFinderOpen } from "../../store/uiSlice.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
+import FramedImage from "../../components/ui/FramedImage.jsx";
 import { resolveImage } from "../../lib/utils.js";
 
 // `image` is an admin-set URL (Shop Config → Guided Discovery) — plain,
 // already-resolved data from the Server Component parent, not a fetch.
 // Unset (the default) keeps the existing hatch-pattern placeholder.
-export default function GuidedFinderSection({ image }) {
+export default function GuidedFinderSection({ image, framing = null }) {
   const { t } = useLocale();
   const dispatch = useDispatch();
 
@@ -56,7 +57,10 @@ export default function GuidedFinderSection({ image }) {
             the stacked panels below lg:), since its job is separating
             this panel from the text above/beside it either way. */}
         <div className="relative grid min-h-[340px] place-items-center overflow-hidden border-t border-line bg-media lg:border-l lg:border-t-0">
-          {image ? (
+          {image && framing ? (
+            // Saved crop (Admin → Shop Config → Guided Discovery → Adjust framing).
+            <FramedImage src={image} framing={framing} placement="guided.panel" sizes="(max-width: 1024px) 100vw, 50vw" />
+          ) : image ? (
             // object-top: this box's height is fixed independent of
             // whatever aspect ratio gets uploaded (Shop Config → Guided
             // Discovery photo) — same reasoning as the department/fabric/

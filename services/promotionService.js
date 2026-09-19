@@ -4,6 +4,7 @@ import Category from "../models/categoryModel.js";
 import { HttpError } from "../lib/http.js";
 import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
 import { isSafeInternalPath } from "../schemas/promotionSchemas.js";
+import { sanitizeFraming } from "../lib/imageFraming.js";
 
 // One shared model backs two storefront surfaces (the homepage hero
 // carousel and visitor campaign popups) rather than two competing schemas.
@@ -14,7 +15,7 @@ import { isSafeInternalPath } from "../schemas/promotionSchemas.js";
 // (CampaignPopup.jsx compares its stored version against the live one).
 const CREATIVE_FIELDS = [
   "title", "titleBn", "subtitle", "subtitleBn", "ctaLabel", "ctaLabelBn",
-  "desktopImage", "mobileImage", "imageAlt", "imageAltBn",
+  "desktopImage", "mobileImage", "desktopFraming", "mobileFraming", "imageAlt", "imageAltBn",
   "targetType", "targetProduct", "targetCategory", "targetCollection", "targetShopFilter", "targetUrl",
 ];
 
@@ -28,13 +29,30 @@ export async function listPromotionsAdmin({ type, status } = {}) {
 // it directly, so it's computed here rather than required as its own input.
 const PLACEMENT_BY_TYPE = { carousel: "home_hero", popup: "storefront_popup" };
 
+// Framing is stored via its own statement (models/promotionModel.js), and on
+// a database without migration 0006 there is nowhere to put it — refuse
+// loudly BEFORE writing anything rather than silently dropping the crop.
+async function assertFramingStorage(...framings) {
+  if (framings.some(Boolean) && !(await Promotion.framingInstalled())) {
+    throw new HttpError(409, "Image framing storage is not installed on this database — run scripts/runMigrations.mjs (migration 0006_image_framing) first.");
+  }
+}
+
+async function persistFraming(id, desktopFraming, mobileFraming) {
+  if (!(await Promotion.framingInstalled())) return;
+  await Promotion.writeFraming(id, sanitizeFraming(desktopFraming), sanitizeFraming(mobileFraming));
+}
+
 export async function createPromotion(body, userId) {
-  return Promotion.create({
+  await assertFramingStorage(body.desktopFraming, body.mobileFraming);
+  const created = await Promotion.create({
     ...body,
     placement: PLACEMENT_BY_TYPE[body.type],
     createdBy: userId || null,
     updatedBy: userId || null,
   });
+  await persistFraming(created._id, body.desktopFraming, body.mobileFraming);
+  return Promotion.findById(created._id);
 }
 
 export async function updatePromotion(id, body, userId) {
@@ -46,7 +64,14 @@ export async function updatePromotion(id, body, userId) {
     (field) => field in body && JSON.stringify(body[field] ?? null) !== JSON.stringify(existing[field] ?? null),
   );
 
-  Object.assign(existing, body, { updatedBy: userId || null });
+  // A crop describes one specific image: replacing the image without also
+  // sending a new crop must not leave the old crop applied to the new picture.
+  const staleFraming = {};
+  if ("desktopImage" in body && body.desktopImage !== existing.desktopImage && !("desktopFraming" in body)) staleFraming.desktopFraming = null;
+  if ("mobileImage" in body && body.mobileImage !== existing.mobileImage && !("mobileFraming" in body)) staleFraming.mobileFraming = null;
+  await assertFramingStorage(body.desktopFraming, body.mobileFraming);
+
+  Object.assign(existing, body, staleFraming, { updatedBy: userId || null });
   // Defense in depth to match createPromotion() above — the admin form
   // never changes `type` on an existing promotion (disabled in the editor
   // once created), but a direct API call that did must not leave
@@ -54,6 +79,7 @@ export async function updatePromotion(id, body, userId) {
   if (body.type) existing.placement = PLACEMENT_BY_TYPE[body.type];
   if (creativeChanged) existing.version += 1;
   await existing.save();
+  await persistFraming(existing._id, existing.desktopFraming, existing.mobileFraming);
   return existing;
 }
 
@@ -66,7 +92,7 @@ export async function duplicatePromotion(id, userId) {
   void createdAt;
   void updatedAt;
   void save;
-  return Promotion.create({
+  const copy = await Promotion.create({
     ...rest,
     name: `${source.name} (copy)`,
     status: "draft",
@@ -74,6 +100,9 @@ export async function duplicatePromotion(id, userId) {
     createdBy: userId || null,
     updatedBy: userId || null,
   });
+  // create() doesn't write framing (see persistFraming) — carry the crops over.
+  await persistFraming(copy._id, source.desktopFraming, source.mobileFraming);
+  return Promotion.findById(copy._id);
 }
 
 export async function deletePromotion(id) {
@@ -182,6 +211,8 @@ function toPublicDto(promotion, target) {
     ctaLabelBn: promotion.ctaLabelBn || "",
     desktopImage: promotion.desktopImage,
     mobileImage: promotion.mobileImage || "",
+    desktopFraming: promotion.desktopFraming || null,
+    mobileFraming: promotion.mobileFraming || null,
     imageAlt: promotion.imageAlt || "",
     imageAltBn: promotion.imageAltBn || "",
     href: target.href,

@@ -22,6 +22,7 @@ export const DELETE = withRoute(async (request, { params }) => {
   await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
   const { id } = await params;
   await deleteCategory(id);
-  invalidateCacheTags([CACHE_TAGS.CATEGORIES, CACHE_TAGS.CATALOG]);
+  // ATTRIBUTES too: deleting a category also removes its attribute assignments.
+  invalidateCacheTags([CACHE_TAGS.CATEGORIES, CACHE_TAGS.CATALOG, CACHE_TAGS.ATTRIBUTES]);
   return NextResponse.json({ success: true, message: "Category deleted" });
 });

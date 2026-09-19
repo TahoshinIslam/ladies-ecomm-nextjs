@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { objectIdSchema, nonNegativeFiniteNumber, requiredString, urlSchema, paginationSchema, sortFieldSchema, sortOrderSchema, boundedIntParam } from "./commonSchemas.js";
+import { productFramingListSchema } from "./framingSchema.js";
 
 // ====== Products ======
 
@@ -12,18 +13,31 @@ import { objectIdSchema, nonNegativeFiniteNumber, requiredString, urlSchema, pag
 export const AGE_GROUP_VALUES_LIST = ["adult", "kids", "girls"];
 export const AVAILABILITY_VALUES = ["readyStock", "preOrder", "madeToOrder"];
 
+// Variant identity attributes are DATA-DRIVEN: which keys exist (color/size/
+// fabric for clothing, shade/volumeMl for cosmetics, ...) is decided by the
+// AttributeDefinition rows that apply to the product's department — not by
+// this schema. It used to be a hard-coded, strict {color,size,fabric} object
+// that also defaulted every missing key to "": a product saved without those
+// fields (the department had none configured) was stored with
+// {"color":"","size":"","fabric":""} and any other department's attribute was
+// rejected outright. Now: any well-formed key, values trimmed, blanks dropped
+// (a blank isn't a value); the service (productService.js) validates the keys
+// and required-ness against the department's real definitions.
+export const VARIANT_ATTRIBUTE_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+export const MAX_VARIANT_ATTRIBUTES = 20;
+
 const variantAttributesSchema = z
-  .object({
-    color: z.string().trim().max(50).optional().default(""),
-    size: z.string().trim().max(50).optional().default(""),
-    fabric: z.string().trim().max(50).optional().default(""),
-  })
-  .strict()
+  .record(z.string().regex(VARIANT_ATTRIBUTE_KEY_RE, "Invalid attribute key"), z.string().trim().max(100))
+  .refine((attrs) => Object.keys(attrs).length <= MAX_VARIANT_ATTRIBUTES, `At most ${MAX_VARIANT_ATTRIBUTES} variant attributes`)
+  .transform((attrs) => Object.fromEntries(Object.entries(attrs).filter(([, value]) => value !== "")))
   .optional()
   .default({});
 
 const variantSchema = z
   .object({
+    // Present when editing an existing variant: its identity (carts,
+    // wishlists and orders reference it) must survive the edit.
+    _id: objectIdSchema.optional(),
     variantName: requiredString({ min: 1, max: 150 }),
     sku: requiredString({ min: 1, max: 60 }),
     attributes: variantAttributesSchema,
@@ -62,6 +76,8 @@ const productBaseFields = {
   basePrice: nonNegativeFiniteNumber,
   discountPrice: z.union([z.null(), nonNegativeFiniteNumber]).optional(),
   images: z.array(urlSchema).min(1, "at least one image is required").max(20),
+  // [{ url, framing }] — per-photo Fit/Fill/zoom/focal point (lib/imageFraming.js).
+  imageFraming: productFramingListSchema.optional(),
   variants: z.array(variantSchema).min(1, "at least one variant is required").max(100),
   attributes: z.array(attributeValueSchema).max(100).optional().default([]),
   measurements: measurementsSchema,
@@ -139,11 +155,19 @@ export const createAttributeSchema = z
   .object({
     key: requiredString({ min: 1, max: 100 }),
     label: requiredString({ min: 1, max: 150 }),
+    // The admin Attributes form has always sent labelBn; this strict schema
+    // didn't list it, so EVERY create/edit from that form was rejected with
+    // "Unrecognized key(s): labelBn" — admins couldn't assign Color/Size to a
+    // new department (e.g. Shoes) at all.
+    labelBn: z.string().trim().max(150).optional(),
     labelOverrides: z.array(labelOverrideSchema).max(50).optional().default([]),
     type: z.enum(["select", "swatch", "boolean", "text"]).optional().default("select"),
     options: z.array(attributeOptionSchema).max(200).optional().default([]),
     appliesToCategories: z.array(objectIdSchema).max(200).optional().default([]),
-    derivedFromVariant: z.string().trim().max(50).optional(),
+    // A flag, not text: true = a shopper-facing variant axis (Color, Size...)
+    // that the product form renders per variant row. Typed as a string before,
+    // which rejected the boolean every caller sends.
+    derivedFromVariant: z.boolean().optional(),
     filterable: z.boolean().optional(),
     required: z.boolean().optional().default(false),
     sortOrder: z.number().int().min(0).max(100000).optional(),
@@ -240,7 +264,7 @@ export const PRODUCT_SELECT_FIELDS = [
   "_id", "name", "nameBn", "slug", "description", "descriptionBn", "images", "basePrice",
   "discountPrice", "availability", "variants", "category", "brand", "attributes", "topCategory",
   "isActive", "isFeatured", "rating", "createdAt", "updatedAt", "measurements", "includedItems",
-  "tags", "ageGroup", "__v",
+  "tags", "ageGroup", "imageFraming", "__v",
 ];
 
 export const MAX_PRODUCT_QUERY_LENGTH = 2000;

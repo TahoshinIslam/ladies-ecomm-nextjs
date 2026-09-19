@@ -136,7 +136,7 @@ describe("HeroCarousel.jsx — priority fetching is scoped to the one currently-
   });
 
   test("falls back to the department rotation when no promotions are eligible — never renders a broken/empty hero", () => {
-    assert.match(content, /buildFallbackSlides\(departments, heroImageBySlug\)/);
+    assert.match(content, /buildFallbackSlides\(departments, heroImageBySlug, heroFramingBySlug\)/);
   });
 });
 

@@ -77,6 +77,19 @@ async function findAll() {
   return rows.map(rowToCategory);
 }
 
+/**
+ * A cheap fingerprint of the whole category table (row count, newest change,
+ * how many are active). Any insert, delete, (de)activation or move changes it
+ * (updated_at is ON UPDATE CURRENT_TIMESTAMP), so a cache built from the
+ * table can be validated against it in one tiny aggregate instead of trusting
+ * a timer or an in-process reset call.
+ */
+async function stamp() {
+  const rows = await query("SELECT COUNT(*) AS n, MAX(updated_at) AS newest, COALESCE(SUM(is_active), 0) AS active FROM categories");
+  const { n, newest, active } = rows[0];
+  return `${n}|${newest ? new Date(newest).getTime() : 0}|${active}`;
+}
+
 async function findByIds(ids) {
   if (!ids.length) return [];
   const rows = await query(`SELECT * FROM categories WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
@@ -145,6 +158,7 @@ const Category = {
   findById,
   findBySlug,
   findAll,
+  stamp,
   findByIds,
   findByParent,
   findChildIdsByParents,

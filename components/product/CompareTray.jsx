@@ -37,7 +37,9 @@ export default function CompareTray() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 100, opacity: 0 }}
           transition={{ type: "spring", damping: 25, stiffness: 280 }}
-          className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/95 backdrop-blur shadow-hover"
+          // Sits above MobileNav (66px tab row + 1px border + its safe-area padding) while
+          // that bar is shown (below `lg`); flush with the bottom on desktop.
+          className="fixed inset-x-0 bottom-[calc(67px+max(10px,env(safe-area-inset-bottom)))] z-30 border-t border-border bg-background/95 backdrop-blur shadow-hover lg:bottom-0"
           role="region"
           aria-label={t("compare.trayRegionLabel")}
         >

@@ -4,10 +4,17 @@ import AttributeDefinition from "../models/attributeDefinitionModel.js";
 import Brand from "../models/brandModel.js";
 import { HttpError } from "../lib/http.js";
 import { isDuplicateKeyError } from "../lib/idempotency.js";
+import { pruneFramingList as pruneFramingListToUrls } from "../lib/imageFraming.js";
 import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
 import { FASHION_DEPARTMENT_SLUGS, STOREFRONT_DEPARTMENT_SLUGS } from "../lib/storefrontDepartments.js";
 import { isLeafCategory } from "./categoryService.js";
+import {
+  getStorefrontDepartmentIds,
+  resetStorefrontScopeCache,
+  computeVisibleCategoryIds,
+  resolveStorefrontVisibleCategoryIds,
+} from "./storefrontScopeService.js";
 import { resolveAttributesForCategory } from "./attributeService.js";
 import {
   PRODUCT_SORT_FIELDS,
@@ -71,36 +78,31 @@ export { FASHION_DEPARTMENT_SLUGS, STOREFRONT_DEPARTMENT_SLUGS };
 // level, not a walk-to-root). See the original Mongoose version of this
 // file (git history) for the full department/division reasoning — unchanged
 // here, only the query engine underneath it.
+//
+// `slugs` -> those categories plus EVERY descendant (division -> department
+// -> style), however deep the tree goes.
 export async function resolveScopeIdsForSlugs(slugs) {
   const departments = await Category.findAll();
-  const matched = departments.filter((d) => slugs.includes(d.slug));
-  const divisionIds = matched.map((d) => d._id);
-  const children = departments.filter((c) => divisionIds.includes(c.parent));
-  return [...divisionIds, ...children.map((c) => c._id)];
+  const childrenOf = new Map();
+  for (const c of departments) {
+    if (!c.parent) continue;
+    const list = childrenOf.get(c.parent) || [];
+    list.push(c._id);
+    childrenOf.set(c.parent, list);
+  }
+  const ids = new Set();
+  const queue = departments.filter((d) => slugs.includes(d.slug)).map((d) => d._id);
+  while (queue.length) {
+    const id = queue.shift();
+    if (ids.has(id)) continue;
+    ids.add(id);
+    queue.push(...(childrenOf.get(id) || []));
+  }
+  return [...ids];
 }
 
-const STOREFRONT_DEPT_IDS_TTL_MS = 60_000;
-let storefrontDeptIdsCache = { ids: null, expiresAt: 0, inFlight: null };
-
-export async function getStorefrontDepartmentIds() {
-  const now = Date.now();
-  if (storefrontDeptIdsCache.ids && storefrontDeptIdsCache.expiresAt > now) {
-    return storefrontDeptIdsCache.ids;
-  }
-  if (storefrontDeptIdsCache.inFlight) {
-    return storefrontDeptIdsCache.inFlight;
-  }
-  storefrontDeptIdsCache.inFlight = resolveScopeIdsForSlugs(STOREFRONT_DEPARTMENT_SLUGS)
-    .then((ids) => {
-      storefrontDeptIdsCache = { ids, expiresAt: Date.now() + STOREFRONT_DEPT_IDS_TTL_MS, inFlight: null };
-      return ids;
-    })
-    .catch((err) => {
-      storefrontDeptIdsCache.inFlight = null;
-      throw err;
-    });
-  return storefrontDeptIdsCache.inFlight;
-}
+// Storefront visibility (data-driven, see services/storefrontScopeService.js).
+export { getStorefrontDepartmentIds, resetStorefrontScopeCache, computeVisibleCategoryIds, resolveStorefrontVisibleCategoryIds };
 
 const isTruthyParam = (v) => v === "true" || v === "1";
 
@@ -266,6 +268,13 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
   if (scopeIds && !topCategoryHandled) {
     clauses.push(scopeIds.length ? `top_category_id IN (${scopeIds.map(() => "?").join(",")})` : "1=0");
     if (scopeIds.length) params.push(...scopeIds);
+  }
+  // The product's own category must be visible too: with only the
+  // department checked, a product filed under a DEACTIVATED style would keep
+  // showing while its department stayed active.
+  if (scopeIds && scopeIds.length) {
+    clauses.push(`category_id IN (${scopeIds.map(() => "?").join(",")})`);
+    params.push(...scopeIds);
   }
 
   // Applied last so a query param can never override the caller's base
@@ -785,6 +794,7 @@ const WRITABLE_FIELDS = [
   "basePrice",
   "discountPrice",
   "images",
+  "imageFraming",
   "variants",
   "attributes",
   "measurements",
@@ -817,12 +827,64 @@ async function resolveLeafCategory(categoryId) {
   return category;
 }
 
+// SKUs are unique store-wide (uq_product_variants_sku is case-insensitive
+// under utf8mb4_unicode_ci, so "NIKE-1" and "nike-1" clash). Checked here so
+// the admin gets a message naming the SKU; the DB constraint remains the
+// real guarantee against concurrent writers.
 async function assertSkusUnique(variants, excludeProductId) {
+  const seen = new Map();
+  for (const v of variants || []) {
+    const key = String(v.sku ?? "").trim().toLowerCase();
+    if (!key) throw new HttpError(400, `Variant "${v.variantName}" needs a SKU`);
+    if (seen.has(key)) {
+      throw new HttpError(400, `SKU "${v.sku}" is used by more than one variant of this product — every variant needs its own SKU`);
+    }
+    seen.set(key, true);
+  }
   const skus = (variants || []).map((v) => v.sku).filter(Boolean);
   if (!skus.length) return;
   const taken = await Product.findVariantClash(skus, excludeProductId);
   if (taken) {
     throw new HttpError(400, `SKU "${taken}" is already used by another product`);
+  }
+}
+
+// Variant identity attributes (color, size, ...) are DATA-driven: the ones a
+// variant may carry are the derivedFromVariant definitions that apply to the
+// product's department. Validates the submitted values against them, so the
+// server never depends on the form having done it.
+async function assertVariantsValid(variants, departmentId, existingVariants = []) {
+  const defs = (await resolveAttributesForCategory(departmentId)).filter((d) => d.derivedFromVariant);
+  const byKey = new Map(defs.map((d) => [d.key, d]));
+  const ownIds = new Set(existingVariants.map((v) => String(v._id)));
+  const signatures = new Map();
+
+  for (const v of variants || []) {
+    const name = v.variantName || v.sku;
+    if (v._id && !ownIds.has(String(v._id))) {
+      throw new HttpError(400, `Variant "${name}" refers to a variant that doesn't belong to this product`);
+    }
+    for (const key of Object.keys(v.attributes || {})) {
+      if (!byKey.has(key)) {
+        throw new HttpError(400, `Variant "${name}": "${key}" isn't an attribute of this department`);
+      }
+    }
+    for (const def of defs) {
+      if (def.required && !v.attributes?.[def.key]) {
+        throw new HttpError(400, `Variant "${name}": ${def.label} is required`);
+      }
+    }
+    // Two rows with the same identity (Black / 40 twice) are one variant
+    // entered twice — a shopper couldn't tell them apart.
+    const entries = Object.entries(v.attributes || {}).sort(([a], [b]) => a.localeCompare(b));
+    if (entries.length) {
+      const sig = JSON.stringify(entries.map(([k, val]) => [k, String(val).toLowerCase()]));
+      if (signatures.has(sig)) {
+        const label = entries.map(([, val]) => val).join(" / ");
+        throw new HttpError(400, `Two variants are both "${label}" — merge them or change one`);
+      }
+      signatures.set(sig, true);
+    }
   }
 }
 
@@ -855,13 +917,36 @@ async function assertRequiredAttributes(data, topCategoryId) {
   }
 }
 
+// Every image URL a product actually uses — a saved crop only makes sense
+// for one of these, so anything else in a framing map is stale and dropped.
+function usedImageUrls(images, variants) {
+  const urls = new Set(images || []);
+  for (const v of variants || []) for (const u of v.images || []) urls.add(u);
+  return urls;
+}
+
+function pruneFramingList(list, images, variants) {
+  return pruneFramingListToUrls(list, usedImageUrls(images, variants));
+}
+
+// Framing is stored via its own statement (models/productModel.js); on a
+// database without migration 0006 there is nowhere to put it, so refuse
+// loudly BEFORE any write rather than silently dropping the admin's crop.
+async function assertImageFramingStorage(list) {
+  if (Array.isArray(list) && list.length > 0 && !(await Product.imageFramingInstalled())) {
+    throw new HttpError(409, "Image framing storage is not installed on this database — run scripts/runMigrations.mjs (migration 0006_image_framing) first.");
+  }
+}
+
 export async function createProduct(body, actorId) {
   const data = pickWritable(body);
+  await assertImageFramingStorage(data.imageFraming);
   if (!data.category) throw new HttpError(400, "Category is required");
   if (!data.variants?.length) throw new HttpError(400, "At least one variant is required");
 
   const category = await resolveLeafCategory(data.category);
   await assertSkusUnique(data.variants);
+  await assertVariantsValid(data.variants, category.parent ?? category._id);
   assertDiscountsValid(data);
   await assertRequiredAttributes(data, category.parent);
 
@@ -874,7 +959,10 @@ export async function createProduct(body, actorId) {
   // itself would have given if it had won the race instead.
   let product;
   try {
-    product = await Product.create(data);
+    // Product + variants + attributes + framing: one transaction (models/productModel.js).
+    product = await Product.create(data, {
+      framingList: pruneFramingList(data.imageFraming, data.images, data.variants),
+    });
   } catch (err) {
     if (isDuplicateKeyError(err, "uq_product_variants_sku")) {
       throw new HttpError(400, "That SKU is already used by another product");
@@ -893,17 +981,26 @@ export async function updateProduct(id, body, actorId) {
   if (!product) throw new HttpError(404, "Product not found");
 
   const data = pickWritable(body);
+  await assertImageFramingStorage(data.imageFraming);
   const categoryId = data.category ?? String(product.category?._id ?? product.category);
   const category = await resolveLeafCategory(categoryId);
 
   const variants = data.variants ?? product.variants;
   await assertSkusUnique(variants, product._id);
+  if (data.variants) await assertVariantsValid(data.variants, category.parent ?? category._id, product.variants);
   assertDiscountsValid({ ...product, ...data, variants });
   await assertRequiredAttributes({ ...product, ...data }, category.parent);
 
+  // A crop belongs to one specific photo: whenever the framing map, the
+  // gallery or a variant's photos changed, rewrite the map limited to the
+  // photos still in use (so removed/replaced photos never leave stale crops).
+  const framingChanged =
+    data.imageFraming !== undefined || data.images !== undefined || data.variants !== undefined;
   Object.assign(product, data);
   try {
-    await product.save();
+    await product.save({
+      framingList: framingChanged ? pruneFramingList(product.imageFraming, product.images, product.variants) : undefined,
+    });
   } catch (err) {
     if (isDuplicateKeyError(err, "uq_product_variants_sku")) {
       throw new HttpError(400, "That SKU is already used by another product");
@@ -924,10 +1021,15 @@ export async function updateProduct(id, body, actorId) {
   return product;
 }
 
-export async function deleteProduct(id) {
+// Deleting removes the product from every list (admin and storefront); a full
+// snapshot is kept in the deleted_products table. To merely hide a product,
+// untick "Active" in its edit form instead.
+export async function deleteProduct(id, actorId) {
   requireObjectIdFormat(id, "id");
   const product = await Product.findById(id);
   if (!product) throw new HttpError(404, "Product not found");
-  product.isActive = false;
-  await product.save();
+  await Product.deleteWithLog(id, { deletedBy: actorId ?? null });
+  await emitBestEffort(
+    emitAdminEvent({ type: "PRODUCT_DELETED", productId: String(product._id), name: product.name, actorId }),
+  );
 }

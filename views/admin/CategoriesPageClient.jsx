@@ -615,6 +615,7 @@ function AttributeFormModal({ attribute, departments, onClose }) {
   const [appliesTo, setAppliesTo] = useState(new Set(attribute?.appliesToCategories || []));
   const [filterable, setFilterable] = useState(attribute?.filterable ?? true);
   const [required, setRequired] = useState(attribute?.required ?? false);
+  const [derivedFromVariant, setDerivedFromVariant] = useState(attribute?.derivedFromVariant ?? false);
   const [sortOrder, setSortOrder] = useState(attribute?.sortOrder ?? 0);
 
   const [createAttribute, { isLoading: creating }] = useCreateAttributeMutation();
@@ -656,6 +657,7 @@ function AttributeFormModal({ attribute, departments, onClose }) {
       appliesToCategories: [...appliesTo],
       filterable,
       required,
+      derivedFromVariant,
       sortOrder: Number(sortOrder) || 0,
     };
     if (!isEdit) body.key = key.trim();
@@ -761,10 +763,17 @@ function AttributeFormModal({ attribute, departments, onClose }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="h-4 w-4 accent-accent" checked={filterable} onChange={(e) => setFilterable(e.target.checked)} />
             Filterable
+          </label>
+          <label
+            className="flex items-center gap-2 text-sm"
+            title="Shoppers pick it per variant, like Color or Size — shown on every variant row in the product form"
+          >
+            <input type="checkbox" className="h-4 w-4 accent-accent" checked={derivedFromVariant} onChange={(e) => setDerivedFromVariant(e.target.checked)} />
+            Variant field
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="h-4 w-4 accent-accent" checked={required} onChange={(e) => setRequired(e.target.checked)} />

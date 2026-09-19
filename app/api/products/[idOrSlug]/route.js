@@ -36,11 +36,10 @@ export const PUT = withRoute(async (request, { params }) => {
 });
 
 export const DELETE = withRoute(async (request, { params }) => {
-  await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
+  const actor = await requirePermission(request, PERMISSIONS.PRODUCTS_MANAGE);
   const { idOrSlug } = await params;
-  await deleteProduct(idOrSlug);
-  // Deactivation must not leave a stale, still-"active" cached copy
-  // publicly visible.
+  await deleteProduct(idOrSlug, actor._id.toString());
+  // A deleted product must not stay visible in any cached copy.
   invalidateCacheTags([CACHE_TAGS.CATALOG, productTag(idOrSlug)]);
-  return NextResponse.json({ success: true, message: "Product deactivated" });
+  return NextResponse.json({ success: true, message: "Product deleted" });
 });

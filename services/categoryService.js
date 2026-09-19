@@ -1,5 +1,7 @@
 import Category from "../models/categoryModel.js";
 import Product from "../models/productModel.js";
+import AttributeDefinition from "../models/attributeDefinitionModel.js";
+import { resetStorefrontScopeCache } from "./storefrontScopeService.js";
 import { HttpError } from "../lib/http.js";
 import { isObjectIdFormat, requireObjectIdFormat } from "../lib/validation.js";
 
@@ -49,7 +51,11 @@ export async function listCategories() {
 export async function createCategory(body) {
   const data = pickWritable(body);
   data.parent = await validateParent(data.parent);
-  return Category.create(data);
+  const category = await Category.create(data);
+  // A new department is storefront-visible immediately: drop the (short-lived)
+  // cached visibility set so the very next listing includes it.
+  resetStorefrontScopeCache();
+  return category;
 }
 
 export async function updateCategory(id, body) {
@@ -66,6 +72,8 @@ export async function updateCategory(id, body) {
   }
   Object.assign(category, data);
   await category.save();
+  // Activating/deactivating/moving a category changes what is visible.
+  resetStorefrontScopeCache();
   return category;
 }
 
@@ -94,4 +102,8 @@ export async function deleteCategory(id) {
     throw new HttpError(400, `Cannot delete: ${productCount} product${productCount > 1 ? "s" : ""} use this category. Reassign or deactivate them first.`);
   }
   await category.deleteOne();
+  // Attribute assignments/label overrides keyed by this category have no FK
+  // — remove them so they can't dangle (see AttributeDefinition.removeCategoryReferences).
+  await AttributeDefinition.removeCategoryReferences(category._id);
+  resetStorefrontScopeCache();
 }

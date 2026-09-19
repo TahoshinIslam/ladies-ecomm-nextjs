@@ -1,7 +1,7 @@
 import { query } from "../config/db.js";
 
 const DEFAULT_HOMEPAGE = {
-  carouselImages: { burqa: "", abaya: "", hijab: "" },
+  carouselImages: { burqa: "", abaya: "", hijab: "", khimar: "" },
   departmentImages: { burqa: "", abaya: "", hijab: "", niqab: "", khimar: "", "modest-sets": "" },
   fabricImages: { nida: "", crepe: "", chiffon: "", jersey: "", georgette: "" },
   occasionImages: { eid: "", everyday: "", bridal: "", prayer: "" },

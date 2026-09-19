@@ -1,5 +1,7 @@
 import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { columnExists } from "../lib/columnExists.js";
+import { parseFramingColumn } from "../lib/imageFraming.js";
 
 function rowToPromotion(row) {
   if (!row) return null;
@@ -17,6 +19,10 @@ function rowToPromotion(row) {
     ctaLabelBn: row.cta_label_bn,
     desktopImage: row.desktop_image,
     mobileImage: row.mobile_image,
+    // null = unframed (the image renders exactly as it did before framing existed).
+    // Undefined columns (migration 0006 not applied yet) read as null too.
+    desktopFraming: parseFramingColumn(row.desktop_framing),
+    mobileFraming: parseFramingColumn(row.mobile_framing),
     imageAlt: row.image_alt,
     imageAltBn: row.image_alt_bn,
     targetType: row.target_type,
@@ -199,6 +205,19 @@ async function findEligible({ type, placement, pageScope, now }) {
   return rows.map(rowToPromotion);
 }
 
-const Promotion = { findById, findAll, findIdsByType, create, deleteById, updateSortOrder, findEligible };
+// Framing lives in its own statement (not in create()/savePromotion()'s big
+// column lists) so those keep working unchanged on a database where
+// migration 0006_image_framing hasn't been applied yet.
+const framingInstalled = () => columnExists("promotions", "desktop_framing");
+
+async function writeFraming(id, desktopFraming, mobileFraming) {
+  await query("UPDATE promotions SET desktop_framing = ?, mobile_framing = ? WHERE id = ?", [
+    desktopFraming ? JSON.stringify(desktopFraming) : null,
+    mobileFraming ? JSON.stringify(mobileFraming) : null,
+    id,
+  ]);
+}
+
+const Promotion = { findById, findAll, findIdsByType, create, deleteById, updateSortOrder, findEligible, framingInstalled, writeFraming };
 
 export default Promotion;

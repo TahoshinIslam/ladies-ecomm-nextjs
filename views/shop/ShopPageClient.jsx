@@ -32,6 +32,7 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel, attrValue, departmentName } from "../../lib/i18n/catalog.js";
 import { sortDepartmentsForFavourites, FAVOURITE_DEPARTMENTS_COUNT } from "../../lib/storefrontDepartments.js";
+import { homepageFramingFor } from "../../lib/imageFraming.js";
 
 // `value` is the stable filter/query value (see section 7 of the
 // localization audit — never translated); `labelKey` is resolved via t()
@@ -102,7 +103,7 @@ const computeTitle = (sp, allCategories, t, locale) => {
   return t("shop.shopAll");
 };
 
-export default function ShopPageClient({ initialProducts, total, facets, initialCategories = [], initialDepartmentImages = {} }) {
+export default function ShopPageClient({ initialProducts, total, facets, initialCategories = [], initialDepartmentImages = {}, initialImageFraming = {} }) {
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -472,6 +473,7 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
       <CategoryTileFilter
         departments={favouriteDepartments}
         departmentImages={initialDepartmentImages}
+        imageFraming={initialImageFraming}
         loading={catsLoading && !favouriteDepartments.length}
         selected={selectedDept}
         onSelect={selectDepartment}
@@ -640,7 +642,7 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
 // always has exactly 9 tiles (1 "All" + FAVOURITE_DEPARTMENTS_COUNT), and
 // both 3 and 9 divide it evenly (3 full rows / 1 full row) with no
 // orphaned tile stranded alone on a trailing row, unlike 4 or 8 would.
-function CategoryTileFilter({ departments, departmentImages, loading, selected, onSelect, disabled }) {
+function CategoryTileFilter({ departments, departmentImages, imageFraming = {}, loading, selected, onSelect, disabled }) {
   const { t, locale } = useLocale();
   const rowClasses =
     "-mx-5 mt-2 mb-6 flex gap-4 overflow-x-auto px-5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-9";
@@ -677,6 +679,7 @@ function CategoryTileFilter({ departments, departmentImages, loading, selected, 
           as="button"
           label={departmentName(locale, d.slug, d.name)}
           image={departmentImages[d.slug] || null}
+          framing={departmentImages[d.slug] ? homepageFramingFor(imageFraming, "department.tile", d.slug) : null}
           active={selected === d._id}
           disabled={disabled}
           onClick={() => onSelect(d._id)}
