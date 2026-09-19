@@ -383,7 +383,11 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
     const priceMin = sp.get("priceMin");
     const priceMax = sp.get("priceMax");
     if (priceMin || priceMax) {
-      const label = `${priceMin ? settings.formatPrice(Number(priceMin)) : t("filters.min")} – ${priceMax ? settings.formatPrice(Number(priceMax)) : t("filters.max")}`;
+      // Confirmed audit fix: these are the same raw, already-BDT
+      // basePrice/discountPrice-scale numbers PriceHistogramSlider.jsx
+      // produces (every product is price_currency='BDT' now) — formatBdt(),
+      // not formatPrice(), which defaults to treating its input as USD.
+      const label = `${priceMin ? settings.formatBdt(Number(priceMin)) : t("filters.min")} – ${priceMax ? settings.formatBdt(Number(priceMax)) : t("filters.max")}`;
       chips.push({
         id: "price",
         label,

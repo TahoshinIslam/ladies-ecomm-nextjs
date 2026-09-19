@@ -87,8 +87,26 @@ export default function CategoryDrillMenu({ categories, onNavigate, className })
     <div onMouseLeave={clearHover} className={cn("relative flex", className)}>
       {/* This list runs to 20 real departments and counting — it scrolls
           within its own height rather than forcing the whole panel taller
-          or spilling past its caller's rounded border. */}
-      <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto py-1.5">
+          or spilling past its caller's rounded border.
+          `rounded-[22px]`: matches BOTH real callers' own outer chrome
+          exactly (HeaderCategoryMenu.jsx and CategorySidebar.jsx each wrap
+          this in a `rounded-[22px] border` box with no padding of its
+          own — this `<ul>` fills that box entirely) — without it, an
+          active row's flush `bg-verm` is a plain rectangle that visibly
+          overlaps the parent's rounded corners, since the parent itself
+          must stay `overflow-visible` for the flyout columns below to
+          escape horizontally. `overflow-y-auto` already computes to
+          'auto' on the x-axis too per spec when only one axis is set, and
+          'auto' clips to border-radius the same as 'hidden' — no separate
+          `overflow-hidden` needed, and this `<ul>` is a SIBLING of the
+          flyout (never an ancestor), so this clip can never touch it.
+          `py-1`: matches the mid/right flyout columns' own wrapper
+          `py-1` below exactly — this used to be a taller top/bottom
+          inset (six Tailwind spacing units vs. their four), a 2px
+          top-edge mismatch across all three columns since every column's
+          box top is otherwise the same reference point (each has its own
+          1px border, canceling out identically). */}
+      <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto rounded-[22px] py-1">
         {topLevel.map((d) => {
           const Icon = effectiveIconFor(d, categories);
           const kids = childrenOf(d._id);
@@ -107,7 +125,10 @@ export default function CategoryDrillMenu({ categories, onNavigate, className })
                     focusItem(kids[0]._id);
                   }
                 }}
-                className={`flex items-center gap-3 px-4 py-[11px] text-[13.5px] font-medium transition-colors focus-ring ${
+                // `py-2.5`: matches the mid/right columns' own row padding
+                // exactly (was `py-[11px]`, a 1px-per-row mismatch that
+                // compounded down the list).
+                className={`flex items-center gap-3 px-4 py-2.5 text-[13.5px] font-medium transition-colors focus-ring ${
                   active ? "bg-verm text-accent-foreground" : "text-ink hover:bg-verm hover:text-accent-foreground"
                 }`}
               >

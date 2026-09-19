@@ -184,6 +184,14 @@ export default async function HomePage() {
 
   return (
     <>
+      {/* Confirmed audit fix: the page had zero <h1> elements — every
+          section heading here is intentionally h2/h3 to match the visual
+          hierarchy, so a visually-hidden h1 (reusing the same string
+          already used for <title>/meta description) gives screen readers
+          and search engines the one page-level heading WCAG/SEO expect,
+          without changing anything visible. */}
+      <h1 className="sr-only">{t("seo.defaultTitle")}</h1>
+
       {/* Hero — the always-expanded category sidebar that used to sit
           beside this panel is gone (the header's "All Categories" trigger
           now covers that everywhere), so the carousel spans the full

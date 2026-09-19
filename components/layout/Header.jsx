@@ -207,9 +207,14 @@ export default function Header({ initialDepartments = [] }) {
             {cartCount > 0 && <Badge count={cartCount} />}
           </button>
         </div>
-        <div className="container-x bg-verm pb-3 md:hidden">
-          <HeaderSearchField />
-        </div>
+        {/* Confirmed bug, fixed: this inline field and the mobile bottom
+            nav's own "Search" tab (which opens SearchModal.jsx, a
+            full-screen overlay with the same search) were two separate
+            search entry points stacked on small screens — this one has
+            been removed here entirely on mobile, not just hidden while
+            the overlay is open. Desktop keeps its own HeaderSearchField
+            row further down (the `hidden md:block` section) — that one
+            is unaffected, since the bottom nav is mobile-only. */}
 
         {/* Main row — EShopper's logo / search / action-buttons row. The
             ONE brand-green section of the header (matching Footer.jsx's own
@@ -422,6 +427,18 @@ export default function Header({ initialDepartments = [] }) {
               />
 
               <div className="mt-auto border-t border-line p-4">
+                {/* Confirmed bug, fixed: LanguageSwitcher only ever
+                    rendered in the desktop-only utility topbar (`hidden
+                    md:block`, see the header's own top strip above) — on
+                    every screen below md there was no way at all to
+                    switch languages. `showLabel="always"`: this drawer's
+                    own width is well under the component's default
+                    `sm:inline` viewport breakpoint, which would otherwise
+                    hide the "English"/"বাংলা" label on every real phone. */}
+                <LanguageSwitcher
+                  showLabel="always"
+                  className="mb-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-normal text-ink hover:bg-wash focus-ring"
+                />
                 {user ? (
                   <button
                     onClick={handleLogout}

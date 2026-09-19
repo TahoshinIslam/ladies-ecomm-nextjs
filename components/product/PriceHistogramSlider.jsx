@@ -26,6 +26,13 @@ export default function PriceHistogramSlider({
   // Catalog bounds come from products; bar heights are purely decorative —
   // a fixed mix of short / medium / long bars so the visual is always full
   // regardless of how prices are actually distributed.
+  // Confirmed audit fix: `prices` is the raw discountPrice/basePrice column
+  // values directly — every product in the catalog is price_currency='BDT'
+  // now (see docs/CURRENCY_MIGRATION_PLAN.md), so these numbers ARE already
+  // Taka. formatBdt() (no conversion) below, not formatPrice() (which
+  // defaults to treating its input as USD and would multiply by the
+  // exchange rate), matches the same fix already applied to
+  // ProductFinder.jsx's identical budget-threshold display.
   const { min, max, heights } = useMemo(() => {
     const prices = products
       .map((p) => Number(p.discountPrice ?? p.basePrice))
@@ -181,7 +188,7 @@ export default function PriceHistogramSlider({
                   number itself never differs, only its script, and it's
                   correct again the instant React patches it in. */}
               <span className="font-bold text-foreground" suppressHydrationWarning>
-                {settings.formatPrice(lo)}
+                {settings.formatBdt(lo)}
               </span>{" "}
               <span className="text-xs font-medium text-muted-foreground">
                 {t("filters.min")}
@@ -189,7 +196,7 @@ export default function PriceHistogramSlider({
             </span>
             <span className="text-sm">
               <span className="font-bold text-foreground" suppressHydrationWarning>
-                {settings.formatPrice(hi)}
+                {settings.formatBdt(hi)}
               </span>{" "}
               <span className="text-xs font-medium text-muted-foreground">
                 {t("filters.max")}

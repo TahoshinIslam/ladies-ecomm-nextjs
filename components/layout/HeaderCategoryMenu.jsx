@@ -201,8 +201,14 @@ export default function HeaderCategoryMenu({ categories, className }) {
               box horizontally via `left-full` and depend on this wrapper
               staying `overflow-visible`. Shrinks on short viewports so the
               panel never runs off the bottom of the screen; the internal
-              list scrolls to compensate. */}
-          <div className="h-[min(420px,calc(100vh-220px))] w-[272px] overflow-visible rounded-[22px] border border-line bg-surface shadow-hover">
+              list scrolls to compensate.
+              Confirmed feedback, reverted: this used to measure the
+              homepage hero carousel at runtime and match this height to
+              it, which made the panel visibly taller on the homepage
+              (up to 560px) than on every other page (a flat 420px) — one
+              fixed height everywhere now, matching the hero's own former
+              max height, so the panel is identical regardless of page. */}
+          <div className="h-[min(560px,calc(100vh-220px))] w-[272px] overflow-visible rounded-[22px] border border-line bg-surface shadow-hover">
             <CategoryDrillMenu categories={categories} onNavigate={close} className="h-full w-full flex-col" />
           </div>
         </div>
