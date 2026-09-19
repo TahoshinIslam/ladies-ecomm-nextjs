@@ -84,7 +84,23 @@ async function cleanupFixtures() {
   await deleteRows("product_variants", "id", VARIANT_IDS);
   await deleteRows("products", "id", PRODUCT_IDS);
   await rawQuery("DELETE FROM settings WHERE id = 'main'");
+  await ensureMigrationsTable();
   await rawQuery("DELETE FROM schema_migrations WHERE id = ?", ["0003_bdt_price_currency"]);
+}
+
+// schema_migrations is created on demand by scripts/runMigrations.mjs, not by
+// sql/schema.sql — so a database freshly built from schema.sql (exactly how
+// CI builds its database) doesn't have it. Same DDL as the runner's own
+// ensureMigrationsTable(); kept in sync by hand because that script runs
+// main() at import time and can't be imported here.
+async function ensureMigrationsTable() {
+  await rawQuery(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id VARCHAR(64) PRIMARY KEY,
+      description VARCHAR(255) NOT NULL,
+      applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
 
 describe("scripts/migrations/0003_bdt_price_currency.mjs — real up() against real fixtures", { skip: !canRun && reason }, () => {
@@ -99,9 +115,15 @@ describe("scripts/migrations/0003_bdt_price_currency.mjs — real up() against r
     await seedFixtures();
   });
 
+  // finally: an open pool keeps the whole test-runner process alive, so a
+  // cleanup failure must never skip the disconnect (that is exactly how one
+  // failing hook turned into a 19-minute CI hang and a timeout).
   after(async () => {
-    await cleanupFixtures();
-    await disconnectTestDb();
+    try {
+      await cleanupFixtures();
+    } finally {
+      await disconnectTestDb();
+    }
   });
 
   test("first run: converts every fixture product/variant to BDT at the exact audited rate, and the INTL zone", async () => {
