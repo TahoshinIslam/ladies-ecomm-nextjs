@@ -98,7 +98,13 @@ const migration = {
     // history to reconcile here — only the live settings row.
     const [settingsRows] = await conn.query("SELECT shipping_zones FROM settings WHERE id = 'main'");
     if (settingsRows.length) {
-      const zones = JSON.parse(settingsRows[0].shipping_zones);
+      // mysql2 returns a JSON column as a string on some servers/versions
+      // and as an already-parsed value on others (CI's MariaDB 10.11 does
+      // the latter) — models/settingsModel.js's jsonOrDefault() accepts
+      // both for the same reason. Identical behavior on a string, so this
+      // cannot change anything a prior run of this migration already did.
+      const rawZones = settingsRows[0].shipping_zones;
+      const zones = typeof rawZones === "string" ? JSON.parse(rawZones) : rawZones;
       let changed = false;
       for (const zone of zones) {
         if (zone.region !== "INTL") continue;

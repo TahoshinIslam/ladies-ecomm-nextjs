@@ -80,6 +80,10 @@ async function seedFixtures() {
   );
 }
 
+// Same string-or-already-parsed tolerance as models/settingsModel.js's
+// jsonOrDefault(): which one mysql2 returns depends on the server version.
+const asJson = (v) => (typeof v === "string" ? JSON.parse(v) : v);
+
 async function cleanupFixtures() {
   await deleteRows("product_variants", "id", VARIANT_IDS);
   await deleteRows("products", "id", PRODUCT_IDS);
@@ -139,7 +143,7 @@ describe("scripts/migrations/0003_bdt_price_currency.mjs — real up() against r
       assert.equal(Number(rows[0].price), priceUsd * RATE);
     }
     const [settingsRows] = await withConnection((conn) => conn.query("SELECT shipping_zones FROM settings WHERE id = 'main'"));
-    const zones = JSON.parse(settingsRows[0].shipping_zones);
+    const zones = asJson(settingsRows[0].shipping_zones);
     const intl = zones.find((z) => z.region === "INTL");
     assert.equal(intl.currency, "BDT");
     assert.equal(intl.tiers[0].baseCost, 25 * RATE);
@@ -174,7 +178,7 @@ describe("scripts/migrations/0003_bdt_price_currency.mjs — real up() against r
       assert.equal(Number(rows[0].price), priceUsd * RATE, "variant price must not double-convert on a second run");
     }
     const [settingsRows] = await withConnection((conn) => conn.query("SELECT shipping_zones FROM settings WHERE id = 'main'"));
-    const zones = JSON.parse(settingsRows[0].shipping_zones);
+    const zones = asJson(settingsRows[0].shipping_zones);
     const intl = zones.find((z) => z.region === "INTL");
     assert.equal(intl.currency, "BDT", "INTL zone must still read BDT, not re-flagged/re-converted");
     assert.equal(intl.tiers[0].baseCost, 25 * RATE, "INTL baseCost must not be multiplied by RATE twice");
