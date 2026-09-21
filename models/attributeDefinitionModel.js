@@ -1,21 +1,25 @@
 import { query, withConnection } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 async function loadChildren(defIds) {
   if (!defIds.length) return { options: new Map(), overrides: new Map(), categories: new Map() };
   const ph = defIds.map(() => "?").join(",");
   const [optionRows, overrideRows, categoryRows] = await Promise.all([
     query(
-      `SELECT * FROM attribute_definition_options WHERE attribute_definition_id IN (${ph}) ORDER BY position ASC`,
-      defIds,
+      `SELECT * FROM attribute_definition_options
+        WHERE organization_id = ? AND attribute_definition_id IN (${ph}) ORDER BY position ASC`,
+      [getOrganizationId(), ...defIds],
     ),
     query(
-      `SELECT * FROM attribute_definition_label_overrides WHERE attribute_definition_id IN (${ph})`,
-      defIds,
+      `SELECT * FROM attribute_definition_label_overrides
+        WHERE organization_id = ? AND attribute_definition_id IN (${ph})`,
+      [getOrganizationId(), ...defIds],
     ),
     query(
-      `SELECT * FROM attribute_definition_categories WHERE attribute_definition_id IN (${ph})`,
-      defIds,
+      `SELECT * FROM attribute_definition_categories
+        WHERE organization_id = ? AND attribute_definition_id IN (${ph})`,
+      [getOrganizationId(), ...defIds],
     ),
   ]);
   const options = new Map();
@@ -61,14 +65,20 @@ function rowToDefinition(row, children) {
     return saveDefinition(this);
   };
   def.deleteOne = async function deleteOne() {
-    await query("DELETE FROM attribute_definitions WHERE id = ?", [this._id]);
+    await query(
+      "UPDATE attribute_definitions SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+      [getOrganizationId(), this._id],
+    );
   };
   return def;
 }
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM attribute_definitions WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM attribute_definitions WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   if (!rows.length) return null;
   const children = await loadChildren([id]);
   return rowToDefinition(rows[0], children);
@@ -77,8 +87,9 @@ async function findById(id) {
 async function findByKeys(keys) {
   if (!keys.length) return [];
   const rows = await query(
-    `SELECT * FROM attribute_definitions WHERE attr_key IN (${keys.map(() => "?").join(",")})`,
-    keys,
+    `SELECT * FROM attribute_definitions
+      WHERE organization_id = ? AND deleted_at IS NULL AND attr_key IN (${keys.map(() => "?").join(",")})`,
+    [getOrganizationId(), ...keys],
   );
   const children = await loadChildren(rows.map((r) => r.id));
   return rows.map((r) => rowToDefinition(r, children));
@@ -86,7 +97,11 @@ async function findByKeys(keys) {
 
 /** Every definition, sorted sort_order then key. */
 async function findAll() {
-  const rows = await query("SELECT * FROM attribute_definitions ORDER BY sort_order ASC, attr_key ASC");
+  const rows = await query(
+    `SELECT * FROM attribute_definitions WHERE organization_id = ? AND deleted_at IS NULL
+      ORDER BY sort_order ASC, attr_key ASC`,
+    [getOrganizationId()],
+  );
   const children = await loadChildren(rows.map((r) => r.id));
   return rows.map((r) => rowToDefinition(r, children));
 }
@@ -95,13 +110,18 @@ async function findAll() {
 async function findByCategoryOrGlobal(topCategoryId) {
   const rows = await query(
     `SELECT ad.* FROM attribute_definitions ad
-     WHERE NOT EXISTS (SELECT 1 FROM attribute_definition_categories c WHERE c.attribute_definition_id = ad.id)
-        OR EXISTS (
-             SELECT 1 FROM attribute_definition_categories c
-             WHERE c.attribute_definition_id = ad.id AND c.category_id = ?
-           )
+     WHERE ad.organization_id = ? AND ad.deleted_at IS NULL
+       AND (NOT EXISTS (
+              SELECT 1 FROM attribute_definition_categories c
+               WHERE c.organization_id = ad.organization_id AND c.attribute_definition_id = ad.id
+            )
+         OR EXISTS (
+              SELECT 1 FROM attribute_definition_categories c
+               WHERE c.organization_id = ad.organization_id
+                 AND c.attribute_definition_id = ad.id AND c.category_id = ?
+            ))
      ORDER BY ad.sort_order ASC, ad.attr_key ASC`,
-    [topCategoryId],
+    [getOrganizationId(), topCategoryId],
   );
   const children = await loadChildren(rows.map((r) => r.id));
   return rows.map((r) => rowToDefinition(r, children));
@@ -109,34 +129,51 @@ async function findByCategoryOrGlobal(topCategoryId) {
 
 /** Definitions flagged derivedFromVariant, optionally narrowed to ones applying to a given top category (or universal). */
 async function findDerivedFromVariant() {
-  const rows = await query("SELECT * FROM attribute_definitions WHERE derived_from_variant = 1");
+  const rows = await query(
+    "SELECT * FROM attribute_definitions WHERE organization_id = ? AND deleted_at IS NULL AND derived_from_variant = 1",
+    [getOrganizationId()],
+  );
   const children = await loadChildren(rows.map((r) => r.id));
   return rows.map((r) => rowToDefinition(r, children));
 }
 
 async function writeChildren(conn, defId, def) {
-  await conn.query("DELETE FROM attribute_definition_options WHERE attribute_definition_id = ?", [defId]);
-  await conn.query("DELETE FROM attribute_definition_label_overrides WHERE attribute_definition_id = ?", [defId]);
-  await conn.query("DELETE FROM attribute_definition_categories WHERE attribute_definition_id = ?", [defId]);
+  const organizationId = getOrganizationId();
+  await conn.query(
+    "DELETE FROM attribute_definition_options WHERE organization_id = ? AND attribute_definition_id = ?",
+    [organizationId, defId],
+  );
+  await conn.query(
+    "DELETE FROM attribute_definition_label_overrides WHERE organization_id = ? AND attribute_definition_id = ?",
+    [organizationId, defId],
+  );
+  await conn.query(
+    "DELETE FROM attribute_definition_categories WHERE organization_id = ? AND attribute_definition_id = ?",
+    [organizationId, defId],
+  );
 
   const options = def.options || [];
   for (let i = 0; i < options.length; i++) {
     const o = options[i];
     await conn.query(
-      "INSERT INTO attribute_definition_options (attribute_definition_id, value, label, label_bn, swatch_hex, position) VALUES (?, ?, ?, ?, ?, ?)",
-      [defId, o.value, o.label, o.labelBn || "", o.swatchHex || "", i],
+      `INSERT INTO attribute_definition_options
+         (organization_id, attribute_definition_id, value, label, label_bn, swatch_hex, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [organizationId, defId, o.value, o.label, o.labelBn || "", o.swatchHex || "", i],
     );
   }
   for (const o of def.labelOverrides || []) {
     await conn.query(
-      "INSERT INTO attribute_definition_label_overrides (attribute_definition_id, category_id, label, label_bn) VALUES (?, ?, ?, ?)",
-      [defId, o.category, o.label, o.labelBn || ""],
+      `INSERT INTO attribute_definition_label_overrides
+         (organization_id, attribute_definition_id, category_id, label, label_bn)
+       VALUES (?, ?, ?, ?, ?)`,
+      [organizationId, defId, o.category, o.label, o.labelBn || ""],
     );
   }
   for (const categoryId of def.appliesToCategories || []) {
     await conn.query(
-      "INSERT INTO attribute_definition_categories (attribute_definition_id, category_id) VALUES (?, ?)",
-      [defId, categoryId],
+      "INSERT INTO attribute_definition_categories (organization_id, attribute_definition_id, category_id) VALUES (?, ?, ?)",
+      [organizationId, defId, categoryId],
     );
   }
 }
@@ -145,7 +182,7 @@ async function saveDefinition(def) {
   await withConnection(async (conn) => {
     await conn.query(
       `UPDATE attribute_definitions SET label=?, label_bn=?, type=?, derived_from_variant=?,
-         filterable=?, required=?, sort_order=? WHERE id=?`,
+         filterable=?, required=?, sort_order=? WHERE organization_id=? AND id=?`,
       [
         def.label,
         def.labelBn || "",
@@ -154,6 +191,7 @@ async function saveDefinition(def) {
         def.filterable === false ? 0 : 1,
         def.required ? 1 : 0,
         def.sortOrder || 0,
+        getOrganizationId(),
         def._id,
       ],
     );
@@ -166,10 +204,12 @@ async function create(data) {
   const id = generateObjectId();
   await withConnection(async (conn) => {
     await conn.query(
-      `INSERT INTO attribute_definitions (id, attr_key, label, label_bn, type, derived_from_variant, filterable, required, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO attribute_definitions (id, organization_id, attr_key, label, label_bn, type,
+         derived_from_variant, filterable, required, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
+        getOrganizationId(),
         data.key,
         data.label,
         data.labelBn || "",
@@ -194,8 +234,14 @@ async function create(data) {
  * Color/Size vanished from the product form.
  */
 async function removeCategoryReferences(categoryId) {
-  await query("DELETE FROM attribute_definition_categories WHERE category_id = ?", [categoryId]);
-  await query("DELETE FROM attribute_definition_label_overrides WHERE category_id = ?", [categoryId]);
+  await query("DELETE FROM attribute_definition_categories WHERE organization_id = ? AND category_id = ?", [
+    getOrganizationId(),
+    categoryId,
+  ]);
+  await query("DELETE FROM attribute_definition_label_overrides WHERE organization_id = ? AND category_id = ?", [
+    getOrganizationId(),
+    categoryId,
+  ]);
 }
 
 const AttributeDefinition = { findById, findByKeys, findAll, findByCategoryOrGlobal, findDerivedFromVariant, create, removeCategoryReferences };

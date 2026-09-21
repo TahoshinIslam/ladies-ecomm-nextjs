@@ -3,6 +3,7 @@ import slugify from "slugify";
 import { query } from "../config/db.js";
 import { withTransaction } from "../lib/db/transaction.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 import { columnExists } from "../lib/columnExists.js";
 import { parseFramingListColumn } from "../lib/imageFraming.js";
 import Category from "./categoryModel.js";
@@ -30,8 +31,10 @@ function jsonArray(value) {
 async function loadVariants(productIds) {
   if (!productIds.length) return new Map();
   const rows = await query(
-    `SELECT * FROM product_variants WHERE product_id IN (${productIds.map(() => "?").join(",")}) ORDER BY position ASC`,
-    productIds,
+    `SELECT * FROM product_variants
+      WHERE organization_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})
+      ORDER BY position ASC`,
+    [getOrganizationId(), ...productIds],
   );
   const map = new Map();
   for (const r of rows) {
@@ -54,8 +57,10 @@ async function loadVariants(productIds) {
 async function loadAttributes(productIds) {
   if (!productIds.length) return new Map();
   const rows = await query(
-    `SELECT * FROM product_attributes WHERE product_id IN (${productIds.map(() => "?").join(",")}) ORDER BY position ASC`,
-    productIds,
+    `SELECT * FROM product_attributes
+      WHERE organization_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})
+      ORDER BY position ASC`,
+    [getOrganizationId(), ...productIds],
   );
   const byProduct = new Map();
   for (const r of rows) {
@@ -161,20 +166,29 @@ async function hydrate(rows, { populate = true } = {}) {
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM products WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM products WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   if (!rows.length) return null;
   return (await hydrate(rows))[0];
 }
 
 /** Exact-name lookup — used only by scripts/seedCatalog.mjs's upsert-by-name seeding. */
 async function findByName(name) {
-  const rows = await query("SELECT * FROM products WHERE name = ?", [name]);
+  const rows = await query(
+    "SELECT * FROM products WHERE organization_id = ? AND name = ? AND deleted_at IS NULL",
+    [getOrganizationId(), name],
+  );
   if (!rows.length) return null;
   return (await hydrate(rows))[0];
 }
 
 async function findBySlug(slug) {
-  const rows = await query("SELECT * FROM products WHERE slug = ?", [slug]);
+  const rows = await query(
+    "SELECT * FROM products WHERE organization_id = ? AND slug = ? AND deleted_at IS NULL",
+    [getOrganizationId(), slug],
+  );
   if (!rows.length) return null;
   return (await hydrate(rows))[0];
 }
@@ -187,8 +201,10 @@ async function findByIds(ids, { activeOnly = false } = {}) {
   if (!ids.length) return [];
   const activeClause = activeOnly ? " AND is_active = 1" : "";
   const rows = await query(
-    `SELECT * FROM products WHERE id IN (${ids.map(() => "?").join(",")})${activeClause}`,
-    ids,
+    `SELECT * FROM products
+      WHERE organization_id = ? AND deleted_at IS NULL
+        AND id IN (${ids.map(() => "?").join(",")})${activeClause}`,
+    [getOrganizationId(), ...ids],
   );
   return hydrate(rows);
 }
@@ -197,51 +213,81 @@ async function findByIds(ids, { activeOnly = false } = {}) {
  * List query — `whereSql`/`params` is a raw SQL fragment built by
  * services/productService.js's buildFilter(). `sort` is an array of
  * `{ column, dir }` (already validated against the sort allowlist there).
+ *
+ * The tenant scope is NOT part of that fragment and never should be. The
+ * caller builds a filter from query-string input; making it also responsible
+ * for the one predicate that must always hold would mean a missing scope
+ * looks exactly like a filter nobody asked for. It is prepended here, to
+ * every statement that takes a fragment, where it cannot be forgotten.
  */
 async function findByFilter(whereSql, params, { sort = [{ column: "created_at", dir: "DESC" }], skip = 0, limit = 12 } = {}) {
   const orderBy = sort.map((s) => `${s.column} ${s.dir}`).join(", ") || "created_at DESC";
   const rows = await query(
-    `SELECT * FROM products WHERE ${whereSql} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-    [...params, Number(limit), Number(skip)],
+    `SELECT * FROM products
+      WHERE organization_id = ? AND deleted_at IS NULL AND (${whereSql})
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    [getOrganizationId(), ...params, Number(limit), Number(skip)],
   );
   return hydrate(rows);
 }
 
 async function countByFilter(whereSql, params) {
-  const rows = await query(`SELECT COUNT(*) AS n FROM products WHERE ${whereSql}`, params);
+  const rows = await query(
+    `SELECT COUNT(*) AS n FROM products
+      WHERE organization_id = ? AND deleted_at IS NULL AND (${whereSql})`,
+    [getOrganizationId(), ...params],
+  );
   return rows[0].n;
 }
 
 /** GROUP BY helper for facet counts (replaces Mongo $group aggregations). */
 async function groupCountByFilter(column, whereSql, params) {
-  return query(`SELECT ${column} AS grp, COUNT(*) AS count FROM products WHERE ${whereSql} GROUP BY ${column}`, params);
+  return query(
+    `SELECT ${column} AS grp, COUNT(*) AS count FROM products
+      WHERE organization_id = ? AND deleted_at IS NULL AND (${whereSql})
+      GROUP BY ${column}`,
+    [getOrganizationId(), ...params],
+  );
 }
 
 async function distinctBrandIds(whereSql, params) {
   const rows = await query(
-    `SELECT DISTINCT brand_id FROM products WHERE ${whereSql} AND brand_id IS NOT NULL`,
-    params,
+    `SELECT DISTINCT brand_id FROM products
+      WHERE organization_id = ? AND deleted_at IS NULL AND (${whereSql}) AND brand_id IS NOT NULL`,
+    [getOrganizationId(), ...params],
   );
   return rows.map((r) => r.brand_id);
 }
 
 /** Narrow projection for app/sitemap.js — only slug + updatedAt, active products only. */
 async function findSitemapEntries() {
-  const rows = await query("SELECT id, slug, updated_at FROM products WHERE is_active = 1");
+  const rows = await query(
+    "SELECT id, slug, updated_at FROM products WHERE organization_id = ? AND deleted_at IS NULL AND is_active = 1",
+    [getOrganizationId()],
+  );
   return rows.map((r) => ({ _id: r.id, slug: r.slug, updatedAt: r.updated_at }));
 }
 
 async function countActiveByCategory(categoryId) {
-  const rows = await query("SELECT COUNT(*) AS n FROM products WHERE category_id = ? AND is_active = 1", [categoryId]);
+  const rows = await query(
+    `SELECT COUNT(*) AS n FROM products
+      WHERE organization_id = ? AND category_id = ? AND is_active = 1 AND deleted_at IS NULL`,
+    [getOrganizationId(), categoryId],
+  );
   return rows[0].n;
 }
 
 async function findVariantClash(skus, excludeProductId) {
   const ph = skus.map(() => "?").join(",");
   const excludeClause = excludeProductId ? "AND pv.product_id != ?" : "";
-  const params = excludeProductId ? [...skus, excludeProductId] : skus;
+  const params = excludeProductId
+    ? [getOrganizationId(), ...skus, excludeProductId]
+    : [getOrganizationId(), ...skus];
+  // SKU uniqueness is per store: two shops may both sell an "ABAYA-M-BLK"
+  // and neither clashes with the other.
   const rows = await query(
-    `SELECT pv.sku FROM product_variants pv WHERE pv.sku IN (${ph}) ${excludeClause} LIMIT 1`,
+    `SELECT pv.sku FROM product_variants pv
+      WHERE pv.organization_id = ? AND pv.sku IN (${ph}) ${excludeClause} LIMIT 1`,
     params,
   );
   return rows[0]?.sku || null;
@@ -326,14 +372,29 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
   // deletes them by PRIMARY KEY, which takes record locks only.
   let variantIds = (product.variants || []).map(() => generateObjectId());
   if (!isNew) {
-    const [existingRows] = await conn.query("SELECT id, sku FROM product_variants WHERE product_id = ?", [productId]);
+    const organizationId = getOrganizationId();
+    const [existingRows] = await conn.query(
+      "SELECT id, sku FROM product_variants WHERE organization_id = ? AND product_id = ?",
+      [organizationId, productId],
+    );
     variantIds = resolveVariantIds(existingRows, product.variants || []);
     if (existingRows.length) {
-      await conn.query(`DELETE FROM product_variants WHERE id IN (${existingRows.map(() => "?").join(",")})`, existingRows.map((r) => r.id));
+      await conn.query(
+        `DELETE FROM product_variants
+          WHERE organization_id = ? AND id IN (${existingRows.map(() => "?").join(",")})`,
+        [organizationId, ...existingRows.map((r) => r.id)],
+      );
     }
-    const [attrRows] = await conn.query("SELECT id FROM product_attributes WHERE product_id = ?", [productId]);
+    const [attrRows] = await conn.query(
+      "SELECT id FROM product_attributes WHERE organization_id = ? AND product_id = ?",
+      [organizationId, productId],
+    );
     if (attrRows.length) {
-      await conn.query(`DELETE FROM product_attributes WHERE id IN (${attrRows.map(() => "?").join(",")})`, attrRows.map((r) => r.id));
+      await conn.query(
+        `DELETE FROM product_attributes
+          WHERE organization_id = ? AND id IN (${attrRows.map(() => "?").join(",")})`,
+        [organizationId, ...attrRows.map((r) => r.id)],
+      );
     }
   }
 
@@ -341,10 +402,12 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
   for (let i = 0; i < variants.length; i++) {
     const v = variants[i];
     await conn.query(
-      `INSERT INTO product_variants (id, product_id, variant_name, sku, attributes, price, discount_price, stock, images, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO product_variants (id, organization_id, product_id, variant_name, sku, attributes, price,
+         discount_price, stock, images, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         variantIds[i],
+        organizationId,
         productId,
         v.variantName,
         v.sku,
@@ -362,8 +425,8 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
   for (const a of product.attributes || []) {
     for (const value of a.values || []) {
       await conn.query(
-        "INSERT INTO product_attributes (product_id, attr_key, attr_value, position) VALUES (?, ?, ?, ?)",
-        [productId, a.key, value, pos++],
+        "INSERT INTO product_attributes (organization_id, product_id, attr_key, attr_value, position) VALUES (?, ?, ?, ?, ?)",
+        [organizationId, productId, a.key, value, pos++],
       );
     }
   }
@@ -402,7 +465,7 @@ async function saveProduct(product, { framingList } = {}) {
          brand_id=?, age_group=?, base_price=?, discount_price=?, images=?, measurement_height_range=?,
          measurement_chest=?, measurement_sleeve_length=?, included_items=?, availability=?, tags=?,
          tags_text=?, is_featured=?, is_active=?, meta_title=?, meta_description=?, meta_keywords=?, og_image=?
-       WHERE id=?`,
+       WHERE organization_id=? AND id=?`,
       [
         product.name,
         product.nameBn || "",
@@ -429,6 +492,7 @@ async function saveProduct(product, { framingList } = {}) {
         product.metaDescription || "",
         product.metaKeywords || "",
         product.ogImage || "",
+        getOrganizationId(),
         product._id,
       ],
     );
@@ -449,13 +513,14 @@ async function create(data, { framingList } = {}) {
   await withDeadlockRetry(async (conn) => {
     await conn.query(
       `INSERT INTO products
-         (id, name, name_bn, slug, description, description_bn, category_id, top_category_id, brand_id,
+         (id, organization_id, name, name_bn, slug, description, description_bn, category_id, top_category_id, brand_id,
           age_group, base_price, discount_price, price_currency, images, measurement_height_range, measurement_chest,
           measurement_sleeve_length, included_items, availability, tags, tags_text, rating, num_reviews,
           is_featured, is_active, meta_title, meta_description, meta_keywords, og_image)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
+        getOrganizationId(),
         draft.name,
         draft.nameBn || "",
         slug,
@@ -504,8 +569,9 @@ async function create(data, { framingList } = {}) {
 /** Atomic, guarded stock decrement inside an order-creation transaction — see services/orderService.js. Returns true if the row matched (enough stock) and was decremented. */
 async function decrementVariantStock(conn, productId, variantId, qty) {
   const [result] = await conn.query(
-    "UPDATE product_variants SET stock = stock - ? WHERE id = ? AND product_id = ? AND stock >= ?",
-    [qty, variantId, productId, qty],
+    `UPDATE product_variants SET stock = stock - ?
+      WHERE organization_id = ? AND id = ? AND product_id = ? AND stock >= ?`,
+    [qty, getOrganizationId(), variantId, productId, qty],
   );
   return result.affectedRows === 1;
 }
@@ -513,16 +579,20 @@ async function decrementVariantStock(conn, productId, variantId, qty) {
 /** Restores stock on order cancellation — non-guarded (always succeeds), mirrors the old $inc. */
 async function incrementVariantStock(conn, productId, variantId, qty) {
   await conn.query(
-    "UPDATE product_variants SET stock = stock + ? WHERE id = ? AND product_id = ?",
-    [qty, variantId, productId],
+    `UPDATE product_variants SET stock = stock + ?
+      WHERE organization_id = ? AND id = ? AND product_id = ?`,
+    [qty, getOrganizationId(), variantId, productId],
   );
 }
 
 /** Reads a single variant's current stock/name — used by the post-order low-stock check. */
 async function findVariantForLowStockCheck(productId, variantId) {
   const rows = await query(
-    "SELECT p.name AS product_name, pv.variant_name, pv.stock FROM product_variants pv JOIN products p ON p.id = pv.product_id WHERE pv.id = ? AND pv.product_id = ?",
-    [variantId, productId],
+    `SELECT p.name AS product_name, pv.variant_name, pv.stock
+       FROM product_variants pv
+       JOIN products p ON p.id = pv.product_id AND p.organization_id = pv.organization_id
+      WHERE pv.organization_id = ? AND pv.id = ? AND pv.product_id = ? AND p.deleted_at IS NULL`,
+    [getOrganizationId(), variantId, productId],
   );
   return rows[0] || null;
 }
@@ -537,7 +607,11 @@ const imageFramingInstalled = () => columnExists("products", "image_framing");
 async function writeFramingInTx(conn, id, framingList) {
   if (framingList === undefined || !(await imageFramingInstalled())) return;
   const hasAny = Array.isArray(framingList) && framingList.length > 0;
-  await conn.query("UPDATE products SET image_framing = ? WHERE id = ?", [hasAny ? JSON.stringify(framingList) : null, id]);
+  await conn.query("UPDATE products SET image_framing = ? WHERE organization_id = ? AND id = ?", [
+    hasAny ? JSON.stringify(framingList) : null,
+    getOrganizationId(),
+    id,
+  ]);
 }
 
 /**
@@ -554,12 +628,20 @@ async function deleteWithLog(id, { deletedBy = null } = {}) {
   const { save, deleteOne, ...snapshot } = product; // eslint-disable-line no-unused-vars
   await withDeadlockRetry(async (conn) => {
     await conn.query(
-      "INSERT INTO deleted_products (product_id, name, slug, deleted_by, snapshot) VALUES (?, ?, ?, ?, ?)",
-      [product._id, product.name, product.slug, deletedBy, JSON.stringify(snapshot)],
+      `INSERT INTO deleted_products (organization_id, product_id, name, slug, deleted_by_id, snapshot)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [getOrganizationId(), product._id, product.name, product.slug, deletedBy, JSON.stringify(snapshot)],
     );
-    await conn.query("DELETE FROM cart_items WHERE product_id = ?", [product._id]);
-    await conn.query("DELETE FROM wishlist_items WHERE product_id = ?", [product._id]);
-    await conn.query("DELETE FROM products WHERE id = ?", [product._id]);
+    const organizationId = getOrganizationId();
+    await conn.query("DELETE FROM cart_items WHERE organization_id = ? AND product_id = ?", [
+      organizationId,
+      product._id,
+    ]);
+    await conn.query("DELETE FROM wishlist_items WHERE organization_id = ? AND product_id = ?", [
+      organizationId,
+      product._id,
+    ]);
+    await conn.query("DELETE FROM products WHERE organization_id = ? AND id = ?", [organizationId, product._id]);
   });
   return true;
 }

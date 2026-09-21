@@ -21,7 +21,9 @@
     "validate:production": "node scripts/validateProductionEnv.mjs",
     "test:multi-instance": "node --env-file-if-exists=.env.test scripts/multiInstanceHttpTestServer.mjs run",
     "test:http:cold-start": "node --env-file-if-exists=.env.test scripts/coldStartHttpTestServer.mjs run",
-    "smoke": "node scripts/smokeDeployment.mjs"
+    "smoke": "node scripts/smokeDeployment.mjs",
+    "check:tenancy": "node scripts/checkTenantScoping.mjs",
+    "test:tenancy": "node --env-file=.env scripts/testTenantIsolation.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

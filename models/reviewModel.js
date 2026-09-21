@@ -106,7 +106,7 @@ async function findByProduct(productId, { skip = 0, limit = 10 } = {}) {
     `SELECT * FROM reviews
       WHERE organization_id = ? AND product_id = ? AND deleted_at IS NULL
       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [productId, Number(limit), Number(skip)],
+    [getOrganizationId(), productId, Number(limit), Number(skip)],
   );
   return Promise.all(rows.map((r) => populateOne(r, { populateUser: true, populateReplier: true })));
 }
