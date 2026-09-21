@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 import User from "./userModel.js";
 import Product from "./productModel.js";
 
@@ -7,7 +8,7 @@ function rowToReview(row, user, repliedBy) {
   if (!row) return null;
   const review = {
     _id: row.id,
-    user: user ?? row.user_id,
+    user: user ?? row.customer_id,
     product: row.product_id,
     rating: row.rating,
     // "" and "not provided" are indistinguishable in the DB (title is
@@ -32,14 +33,23 @@ function rowToReview(row, user, repliedBy) {
     return saveReview(this);
   };
   review.deleteOne = async function deleteOne() {
-    await query("DELETE FROM reviews WHERE id = ?", [this._id]);
+    // Soft delete, as the dashboard's moderation does. The product's
+    // aggregate rating is recalculated by the caller either way.
+    await query(
+      "UPDATE reviews SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+      [getOrganizationId(), this._id],
+    );
   };
   return review;
 }
 
 async function populateOne(row, { populateUser = false, populateReplier = false } = {}) {
-  const user = populateUser ? await userSummary(row.user_id) : undefined;
-  const repliedBy = populateReplier && row.admin_reply_by ? await userSummary(row.admin_reply_by) : undefined;
+  const user = populateUser ? await userSummary(row.customer_id) : undefined;
+  // The replier is a staff account, not a shopper — a different table since
+  // the users/customers split. Looking it up with userSummary() would search
+  // `customers` for an id that is only ever in `users` and quietly return
+  // null, dropping the name off every reply the shop has written.
+  const repliedBy = populateReplier && row.admin_reply_by ? await staffSummary(row.admin_reply_by) : undefined;
   return rowToReview(row, user, repliedBy);
 }
 
@@ -51,34 +61,70 @@ async function userSummary(id, fields = ["name", "avatar"]) {
   return out;
 }
 
+/** The staff member who replied — a dashboard account, scoped to this store. */
+async function staffSummary(id) {
+  if (!id) return null;
+  const rows = await query(
+    `SELECT /* dashboard-table */ u.id, u.name
+       FROM users u
+       JOIN organization_users ou ON ou.user_id = u.id
+      WHERE ou.organization_id = ? AND u.id = ?
+      LIMIT 1`,
+    [getOrganizationId(), id],
+  );
+  if (!rows.length) return null;
+  return { _id: rows[0].id, name: rows[0].name, avatar: null };
+}
+
 /** Recalculates and persists a product's aggregate rating/numReviews — the SQL port of the old post("save")/post("deleteOne") hooks. */
 async function recalcProductRating(productId) {
-  const rows = await query("SELECT AVG(rating) AS avg_rating, COUNT(*) AS n FROM reviews WHERE product_id = ?", [productId]);
+  const rows = await query(
+    `SELECT AVG(rating) AS avg_rating, COUNT(*) AS n FROM reviews
+      WHERE organization_id = ? AND product_id = ? AND deleted_at IS NULL`,
+    [getOrganizationId(), productId],
+  );
   const avgRating = rows[0].n > 0 ? Math.round(Number(rows[0].avg_rating) * 10) / 10 : 0;
-  await query("UPDATE products SET rating = ?, num_reviews = ? WHERE id = ?", [avgRating, rows[0].n, productId]);
+  await query("UPDATE products SET rating = ?, num_reviews = ? WHERE organization_id = ? AND id = ?", [
+    avgRating,
+    rows[0].n,
+    getOrganizationId(),
+    productId,
+  ]);
 }
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM reviews WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM reviews WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   return populateOne(rows[0]);
 }
 
 async function findByProduct(productId, { skip = 0, limit = 10 } = {}) {
   const rows = await query(
-    "SELECT * FROM reviews WHERE product_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    `SELECT * FROM reviews
+      WHERE organization_id = ? AND product_id = ? AND deleted_at IS NULL
+      ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     [productId, Number(limit), Number(skip)],
   );
   return Promise.all(rows.map((r) => populateOne(r, { populateUser: true, populateReplier: true })));
 }
 
 async function countByProduct(productId) {
-  const rows = await query("SELECT COUNT(*) AS n FROM reviews WHERE product_id = ?", [productId]);
+  const rows = await query(
+    "SELECT COUNT(*) AS n FROM reviews WHERE organization_id = ? AND product_id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), productId],
+  );
   return rows[0].n;
 }
 
 async function ratingBreakdown(productId) {
-  const rows = await query("SELECT rating, COUNT(*) AS count FROM reviews WHERE product_id = ? GROUP BY rating", [productId]);
+  const rows = await query(
+    `SELECT rating, COUNT(*) AS count FROM reviews
+      WHERE organization_id = ? AND product_id = ? AND deleted_at IS NULL GROUP BY rating`,
+    [getOrganizationId(), productId],
+  );
   const breakdown = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
   for (const r of rows) {
     if (r.rating >= 1 && r.rating <= 5) breakdown[r.rating] = r.count;
@@ -89,8 +135,10 @@ async function ratingBreakdown(productId) {
 async function findByUserAndProducts(userId, productIds) {
   if (!productIds.length) return [];
   const rows = await query(
-    `SELECT * FROM reviews WHERE user_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})`,
-    [userId, ...productIds],
+    `SELECT * FROM reviews
+      WHERE organization_id = ? AND deleted_at IS NULL AND customer_id = ?
+        AND product_id IN (${productIds.map(() => "?").join(",")})`,
+    [getOrganizationId(), userId, ...productIds],
   );
   return Promise.all(rows.map((r) => populateOne(r, { populateUser: true, populateReplier: true })));
 }
@@ -104,8 +152,10 @@ async function findByUserAndProducts(userId, productIds) {
 async function create({ user, product, rating, title, comment, images, isVerifiedPurchase }) {
   const id = generateObjectId();
   await query(
-    "INSERT INTO reviews (id, user_id, product_id, rating, title, comment, images, is_verified_purchase, admin_reply_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [id, user, product, rating, title || "", comment, JSON.stringify(images || []), isVerifiedPurchase ? 1 : 0, ""],
+    `INSERT INTO reviews (id, organization_id, customer_id, product_id, rating, title, comment, images,
+       is_verified_purchase, admin_reply_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, getOrganizationId(), user, product, rating, title || "", comment, JSON.stringify(images || []), isVerifiedPurchase ? 1 : 0, ""],
   );
   await recalcProductRating(product);
   return findById(id);
@@ -113,7 +163,8 @@ async function create({ user, product, rating, title, comment, images, isVerifie
 
 async function saveReview(review) {
   await query(
-    "UPDATE reviews SET rating=?, title=?, comment=?, images=?, admin_reply_text=?, admin_reply_by=?, admin_reply_at=? WHERE id=?",
+    `UPDATE reviews SET rating=?, title=?, comment=?, images=?, admin_reply_text=?, admin_reply_by=?, admin_reply_at=?
+      WHERE organization_id=? AND id=?`,
     [
       review.rating,
       review.title || "",
@@ -122,6 +173,7 @@ async function saveReview(review) {
       review.adminReply?.text || "",
       review.adminReply?.repliedBy ?? null,
       review.adminReply?.repliedAt ?? null,
+      getOrganizationId(),
       review._id,
     ],
   );
@@ -145,16 +197,20 @@ async function findAdminList({ rating, productId, search, sortBy, sortOrder, ski
     clauses.push("(comment LIKE ? OR title LIKE ?)");
     params.push(`%${search}%`, `%${search}%`);
   }
-  const where = clauses.length ? clauses.join(" AND ") : "1=1";
+  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
   const sortCol = REVIEW_SORT_COLUMNS[sortBy] || "created_at";
   const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
 
-  const rows = await query(`SELECT * FROM reviews WHERE ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`, [
-    ...params,
-    Number(limit),
-    Number(skip),
-  ]);
-  const totalRows = await query(`SELECT COUNT(*) AS n FROM reviews WHERE ${where}`, params);
+  const rows = await query(
+    `SELECT * FROM reviews
+      WHERE organization_id = ? AND deleted_at IS NULL ${filters}
+      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
+    [getOrganizationId(), ...params, Number(limit), Number(skip)],
+  );
+  const totalRows = await query(
+    `SELECT COUNT(*) AS n FROM reviews WHERE organization_id = ? AND deleted_at IS NULL ${filters}`,
+    [getOrganizationId(), ...params],
+  );
 
   const productIds = [...new Set(rows.map((r) => r.product_id))];
   const products = productIds.length ? await Product.findByIds(productIds) : [];
@@ -163,7 +219,7 @@ async function findAdminList({ rating, productId, search, sortBy, sortOrder, ski
   const reviews = await Promise.all(
     rows.map(async (r) => {
       const review = await populateOne(r, { populateUser: true, populateReplier: true });
-      review.user = await userSummary(r.user_id, ["name", "email", "avatar"]);
+      review.user = await userSummary(r.customer_id, ["name", "email", "avatar"]);
       review.product = productById.get(r.product_id) || r.product_id;
       return review;
     }),
