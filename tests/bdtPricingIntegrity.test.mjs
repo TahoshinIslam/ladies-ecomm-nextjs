@@ -25,7 +25,7 @@ const canRun = dbReady;
 const reason = skipReason;
 
 describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
-  let productsPOST;
+  let createProduct;
   let getProductByIdOrSlug;
   let cartPOST, ordersPreviewPOST, ordersPOST;
   let Product;
@@ -34,7 +34,7 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
   before(async () => {
     await connectTestDb();
     await truncateAll();
-    ({ POST: productsPOST } = await import("../app/api/products/route.js"));
+    ({ createProduct } = await import("../services/productService.js"));
     ({ getProductByIdOrSlug } = await import("../services/productService.js"));
     ({ POST: cartPOST } = await import("../app/api/cart/route.js"));
     ({ POST: ordersPreviewPOST } = await import("../app/api/orders/preview/route.js"));
@@ -63,14 +63,16 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
 
   // ---------- 1 & 2: real admin/API creation defaults to BDT; DB and app defaults agree ----------
 
-  test("a product created through the real admin POST /api/products path defaults to price_currency='BDT', no exchange rate involved", async () => {
-    const body = newProductBody();
-    const req = requestAs({ method: "POST", url: "http://test/api/products", session: await createTestSession(admin._id), body });
-    const res = await productsPOST(req);
-    assert.equal(res.status, 201);
-    const json = await res.json();
+  // Products are created through the service rather than POST /api/products:
+  // that route moved to the admin dashboard. The service is what the route
+  // called, and it is where the BDT default actually lives — what this file
+  // is about is the price surviving unchanged from there through the cart
+  // and into a real order, which is entirely the storefront's business.
+  test("a product created through the real creation path defaults to price_currency='BDT', no exchange rate involved", async () => {
+    const product = await createProduct(newProductBody(), admin._id);
+    const json = { product };
     try {
-      assert.equal(json.product.priceCurrency, "BDT", "API response must report the new product as BDT-native");
+      assert.equal(json.product.priceCurrency, "BDT", "the created product must be BDT-native");
       const [row] = await rawQuery("SELECT price_currency, base_price FROM products WHERE id = ?", [json.product._id]);
       assert.equal(row.price_currency, "BDT", "the DB row itself must be BDT — not left to a stale 'USD' default");
       assert.equal(Number(row.base_price), 1000, "the entered value must be stored as-is, no ×rate conversion applied at creation");
@@ -112,12 +114,7 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
   // ---------- 3: ৳1,000 survives unchanged end-to-end ----------
 
   test("an entered price of ৳1,000 remains ৳1,000 through storage, card/detail resolution, cart, order preview, and real order creation", async () => {
-    const body = newProductBody({ basePrice: 1000 });
-    const createRes = await productsPOST(
-      requestAs({ method: "POST", url: "http://test/api/products", session: await createTestSession(admin._id), body }),
-    );
-    assert.equal(createRes.status, 201);
-    const { product } = await createRes.json();
+    const product = await createProduct(newProductBody({ basePrice: 1000 }), admin._id);
     const buyer = await createTestUser({ role: "customer" });
 
     try {
@@ -257,27 +254,21 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
 
   test("creating a product with a SKU that already exists is rejected (400), never silently duplicated", async () => {
     const sku = `DUP-SKU-${Date.now()}`;
-    const first = await productsPOST(
-      requestAs({
-        method: "POST",
-        url: "http://test/api/products",
-        session: await createTestSession(admin._id),
-        body: newProductBody({ variants: [{ variantName: "Default", sku, stock: 5 }] }),
-      }),
+    const firstProduct = await createProduct(
+      newProductBody({ variants: [{ variantName: "Default", sku, stock: 5 }] }),
+      admin._id,
     );
-    assert.equal(first.status, 201);
-    const { product: firstProduct } = await first.json();
 
     try {
-      const second = await productsPOST(
-        requestAs({
-          method: "POST",
-          url: "http://test/api/products",
-          session: await createTestSession(admin._id),
-          body: newProductBody({ variants: [{ variantName: "Default", sku, stock: 5 }] }),
-        }),
+      // Called directly, the rejection arrives as the HttpError the route
+      // used to translate into a 400 rather than as a Response.
+      await assert.rejects(
+        () => createProduct(newProductBody({ variants: [{ variantName: "Default", sku, stock: 5 }] }), admin._id),
+        (error) => {
+          assert.equal(error.status, 400, "a duplicate SKU must be rejected, not create a second product");
+          return true;
+        },
       );
-      assert.equal(second.status, 400, "a duplicate SKU must be rejected, not create a second product");
 
       const dupRows = await rawQuery("SELECT COUNT(*) AS n FROM product_variants WHERE sku = ?", [sku]);
       assert.equal(dupRows[0].n, 1, "exactly one variant must hold this SKU in the database");
@@ -289,11 +280,7 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
   // ---------- 6: inactive products cannot be purchased via direct server requests ----------
 
   test("an inactive product is rejected by cart add and by order preview/creation, even via a direct API call", async () => {
-    const body = newProductBody();
-    const createRes = await productsPOST(
-      requestAs({ method: "POST", url: "http://test/api/products", session: await createTestSession(admin._id), body }),
-    );
-    const { product } = await createRes.json();
+    const product = await createProduct(newProductBody(), admin._id);
     await rawQuery("UPDATE products SET is_active = 0 WHERE id = ?", [product._id]);
     const buyer = await createTestUser({ role: "customer" });
 
