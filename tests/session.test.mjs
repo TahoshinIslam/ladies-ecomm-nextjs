@@ -446,55 +446,14 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
 
   // ===================== 34-35: SSE authentication =====================
 
-  // The two tests that sat here drove app/api/admin/events — the staff
-  // notification stream, removed with the rest of shop management. What is
-  // worth asserting now is the guard those tests exercised, because it
-  // changed meaning rather than disappearing: requireStaff used to let an
-  // employee through, and refuses everyone since this app stopped having
-  // staff at all. The storefront's own per-user stream is unaffected and is
-  // covered below.
+  // Two tests here drove app/api/admin/events, the staff notification
+  // stream. They were briefly replaced by tests of the staff guards, which
+  // have since been deleted too: with no staff-gated route left to protect,
+  // requireAdmin/requirePermission/requireStaff had no callers. There is no
+  // staff concept in this app to assert about any more. The storefront's own
+  // per-user stream is unaffected and is covered below.
 
-  test("staff guards refuse an authenticated shopper, and say where shop management went", async () => {
-    const shopper = await createTestUser({ role: "customer" });
-    try {
-      const { requireAdmin, requirePermission, requireStaff } = await import("../lib/auth.js");
-      const req = requestAs({
-        method: "GET",
-        url: "http://test/api/anything",
-        session: await createTestSession(shopper._id),
-      });
 
-      for (const [name, call] of [
-        ["requireAdmin", () => requireAdmin(req)],
-        ["requireStaff", () => requireStaff(req)],
-        ["requirePermission", () => requirePermission(req, "products.manage")],
-      ]) {
-        await assert.rejects(
-          call,
-          (error) => {
-            assert.equal(error.status, 403, `${name} must refuse a signed-in shopper`);
-            assert.match(error.message, /admin dashboard/i);
-            return true;
-          },
-          `${name} should have thrown`,
-        );
-      }
-    } finally {
-      await deleteRows("customers", "id", shopper._id);
-    }
-  });
-
-  test("an unauthenticated caller still gets 401, not a 403 implying signing in would help", async () => {
-    const { requireAdmin } = await import("../lib/auth.js");
-    const req = requestAs({ method: "GET", url: "http://test/api/anything" });
-    await assert.rejects(
-      () => requireAdmin(req),
-      (error) => {
-        assert.equal(error.status, 401);
-        return true;
-      },
-    );
-  });
 
   // ===================== session-limit enforcement =====================
 

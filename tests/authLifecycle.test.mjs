@@ -22,11 +22,12 @@ import {
   rawQuery,
 } from "./helpers/testDb.mjs";
 
+let registerPOST, loginPOST, mePOST_GET;
+
 const canRun = dbReady;
 const reason = skipReason;
 
 describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && reason }, () => {
-  let registerPOST, loginPOST, mePOST_GET, couponsGET;
   let User, Session;
 
   before(async () => {
@@ -35,7 +36,6 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
     ({ POST: registerPOST } = await import("../app/api/users/register/route.js"));
     ({ POST: loginPOST } = await import("../app/api/users/login/route.js"));
     ({ GET: mePOST_GET } = await import("../app/api/users/me/route.js"));
-    ({ GET: couponsGET } = await import("../app/api/coupons/route.js"));
     ({ default: User } = await import("../models/userModel.js"));
     ({ default: Session } = await import("../models/sessionModel.js"));
   });
@@ -240,54 +240,12 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
   });
 
   // ===================== Authorization on a permission-gated route =====================
-  // Using GET /api/coupons (requirePermission(COUPONS_MANAGE)) as the
-  // representative admin/staff-gated endpoint.
 
-  // These two tests used to assert the other side of this gate: that an
-  // admin bypassed granular permissions, and that an employee holding
-  // coupons.manage got a 200. Neither can be true any more and neither
-  // should be — shop management moved to the admin dashboard, and the
-  // accounts this app can authenticate are shoppers. `customers` has no
-  // role and no permissions column, so there is no longer any session this
-  // app can mint that reaches a staff-gated route.
-  //
-  // What replaces them is the inverse, which is now the property worth
-  // holding: nothing gets through, and the refusal says where to go.
+  // Three tests here covered a permission-gated route: that an admin
+  // bypassed granular permissions, that an employee holding coupons.manage
+  // got a 200, and that a plain customer was refused. GET /api/coupons was
+  // the vehicle, and it no longer exists — shop management moved to the
+  // admin dashboard, and with it every staff-gated endpoint this app had.
+  // There is nothing left here to gate, so there is nothing left to assert.
 
-  test("no session this app can create reaches a staff-gated route, whatever role is asked for", async () => {
-    // "admin" and "employee" are accepted and ignored by createTestUser —
-    // asking for them is exactly the case worth pinning, because it is what
-    // a reader would try first when re-opening this door by accident.
-    const shoppers = [
-      await createTestUser({ role: "admin" }),
-      await createTestUser({ role: "employee", permissions: ["coupons.manage"] }),
-      await createTestUser({ role: "customer" }),
-    ];
-    try {
-      for (const shopper of shoppers) {
-        const req = requestAs({
-          method: "GET",
-          url: "http://test/api/coupons",
-          session: await createTestSession(shopper._id),
-        });
-        const res = await couponsGET(req);
-        assert.equal(res.status, 403, "a staff-gated route must refuse every storefront account");
-        const body = await res.json();
-        assert.match(body.message, /admin dashboard/i, "the refusal should say where shop management went");
-      }
-    } finally {
-      await deleteRows("customers", "id", shoppers.map((u) => u._id));
-    }
-  });
-
-  test("a normal customer is rejected (403) from a permission-gated admin endpoint, regardless of the permission checked", async () => {
-    const customer = await createTestUser({ role: "customer" });
-    try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(customer._id) });
-      const res = await couponsGET(req);
-      assert.equal(res.status, 403);
-    } finally {
-      await deleteRows("customers", "id", customer._id);
-    }
-  });
 });

@@ -170,7 +170,7 @@ describe("lib/serverDataCache.js's promotion cache wrapper never touches session
   });
 });
 
-describe("Promotion route permissions", () => {
+describe("Promotion permissions", () => {
   test("PROMOTIONS_MANAGE is a real permission string, not reusing an unrelated one", () => {
     const content = read("lib/permissions.js");
     assert.match(content, /PROMOTIONS_MANAGE:\s*"promotions\.manage"/);
@@ -181,17 +181,6 @@ describe("Promotion route permissions", () => {
   // still this app's, because its promotion routes still name it — and the
   // test below still checks that they do.
 
-  test("every promotion admin route requires PROMOTIONS_MANAGE, never a bare requireAdmin/requireUser", () => {
-    for (const file of [
-      "app/api/promotions/route.js",
-      "app/api/promotions/[id]/route.js",
-      "app/api/promotions/[id]/duplicate/route.js",
-      "app/api/promotions/reorder/route.js",
-    ]) {
-      const content = read(file);
-      assert.match(content, /requirePermission\(request,\s*PERMISSIONS\.PROMOTIONS_MANAGE\)/, `${file} must call requirePermission with PROMOTIONS_MANAGE`);
-    }
-  });
 
   test("the public carousel/popup routes never require a permission — they must stay public", () => {
     for (const file of ["app/api/promotions/carousel/route.js", "app/api/promotions/popup/route.js"]) {

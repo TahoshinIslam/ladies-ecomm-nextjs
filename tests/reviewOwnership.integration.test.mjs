@@ -2,10 +2,16 @@
 //
 // Directly inspects the four review Route Handlers named in the Phase 1
 // prompt — PUT/DELETE /api/reviews/[id], POST .../helpful,
-// POST .../reply — by calling their exported functions with real Request
+// by calling their exported functions with real Request objects.
+//
+// The reply endpoint that used to be covered here (POST .../reply) moved to
+// the admin dashboard with the rest of shop management, and with it the two
+// tests that a customer and an unprivileged employee were refused. The
+// "an admin can edit or delete someone else's review" cases went too: this
+// app cannot mint a session with that authority any more.
 // objects, against a real (test-only) MongoDB. No assumption is made about
 // what these handlers do; every assertion below was derived from reading
-// app/api/reviews/[id]/route.js, app/api/reviews/[id]/{helpful,reply}/route.js
+// app/api/reviews/[id]/route.js, app/api/reviews/[id]/helpful/route.js
 // and services/reviewService.js first (see the Phase 1 investigation).
 //
 // Requires MONGO_URI_TEST in the test environment. Skips (never fails) if
@@ -31,8 +37,8 @@ import {
 const canRun = dbReady;
 const reason = skipReason;
 
-describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply", { skip: !canRun && reason }, () => {
-  let PUT, DELETE, helpfulPOST, replyPOST;
+describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful", { skip: !canRun && reason }, () => {
+  let PUT, DELETE, helpfulPOST;
   let owner, otherCustomer, employeeWithReviews, employeeWithoutReviews, admin;
   let Review;
 
@@ -41,7 +47,6 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     await truncateAll();
     ({ PUT, DELETE } = await import("../app/api/reviews/[id]/route.js"));
     ({ POST: helpfulPOST } = await import("../app/api/reviews/[id]/helpful/route.js"));
-    ({ POST: replyPOST } = await import("../app/api/reviews/[id]/reply/route.js"));
     ({ default: Review } = await import("../models/reviewModel.js"));
 
     owner = await createTestUser({ role: "customer" });
@@ -99,18 +104,6 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     assert.equal(stillOriginal.comment, "Good fit, true to size.");
   });
 
-  test("admin can update someone else's review (PUT)", async () => {
-    const { review } = await makeReview();
-    const req = requestAs({
-      method: "PUT",
-      url: `http://test/api/reviews/${review._id}`,
-      session: await createTestSession(admin._id),
-      body: { comment: "Edited by admin for moderation." },
-    });
-    const res = await PUT(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    assert.equal(res.status, 200);
-  });
-
   test("unauthenticated PUT is rejected (401)", async () => {
     const { review } = await makeReview();
     const req = requestAs({
@@ -136,13 +129,6 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     const res = await DELETE(req, { params: Promise.resolve({ id: review._id.toString() }) });
     assert.equal(res.status, 200);
     assert.equal(await Review.findById(review._id), null);
-  });
-
-  test("admin can delete someone else's review (DELETE)", async () => {
-    const { review } = await makeReview();
-    const req = requestAs({ method: "DELETE", url: `http://test/api/reviews/${review._id}`, session: await createTestSession(admin._id) });
-    const res = await DELETE(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    assert.equal(res.status, 200);
   });
 
   test("nonexistent (but valid-format) review id returns 404 on PUT/DELETE", async () => {
@@ -280,53 +266,4 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     assert.equal(res.status, 404);
   });
 
-  test("reply requires REVIEWS_MANAGE — plain customer (including the review's own owner) gets 403", async () => {
-    const { review } = await makeReview();
-    const req = requestAs({
-      method: "POST",
-      url: `http://test/api/reviews/${review._id}/reply`,
-      session: await createTestSession(owner._id), // the review's own author — still just a customer
-      body: { text: "Trying to reply to my own review" },
-    });
-    const res = await replyPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    assert.equal(res.status, 403);
-  });
-
-  test("reply requires REVIEWS_MANAGE — employee WITHOUT that permission gets 403", async () => {
-    const { review } = await makeReview();
-    const req = requestAs({
-      method: "POST",
-      url: `http://test/api/reviews/${review._id}/reply`,
-      session: await createTestSession(employeeWithoutReviews._id),
-      body: { text: "Should not be allowed" },
-    });
-    const res = await replyPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    assert.equal(res.status, 403);
-  });
-
-  test("reply succeeds for an employee WITH REVIEWS_MANAGE, and for admin", async () => {
-    const { review } = await makeReview();
-    const req = requestAs({
-      method: "POST",
-      url: `http://test/api/reviews/${review._id}/reply`,
-      session: await createTestSession(employeeWithReviews._id),
-      body: { text: "Thanks for the feedback!" },
-    });
-    const res = await replyPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
-    assert.equal(res.status, 200);
-    const json = await res.json();
-    assert.equal(json.review.adminReply.text, "Thanks for the feedback!");
-  });
-
-  test("reply on a nonexistent review returns 404", async () => {
-    const fakeId = "507f1f77bcf86cd799439011";
-    const req = requestAs({
-      method: "POST",
-      url: `http://test/api/reviews/${fakeId}/reply`,
-      session: await createTestSession(admin._id),
-      body: { text: "x" },
-    });
-    const res = await replyPOST(req, { params: Promise.resolve({ id: fakeId }) });
-    assert.equal(res.status, 404);
-  });
 });
