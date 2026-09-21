@@ -12,6 +12,7 @@ import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
 import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 import { getCachedProductList } from "../../../lib/serverDataCache.js";
 import { getShopCacheKey } from "../../../lib/shopCacheEligibility.js";
+import { getOrganizationId } from "../../../lib/tenant.js";
 
 export const GET = withRoute(async (request) => {
   const user = await getSessionUser(request).catch(() => null);
@@ -30,7 +31,9 @@ export const GET = withRoute(async (request) => {
   // search, no dynamic attribute facet, non-admin) is cache-eligible;
   // anything else falls straight through to the real, uncached read exactly
   // as before.
-  const cacheKey = !isAdmin ? getShopCacheKey(query, { isAdmin: false }) : null;
+  const cacheKey = !isAdmin
+    ? getShopCacheKey(query, { isAdmin: false, organizationId: getOrganizationId() })
+    : null;
   const [result, locale] = await Promise.all([
     cacheKey ? getCachedProductList(query, cacheKey, { includeFacets: true }) : listProducts(query, { isAdmin }),
     getServerLocale(),
