@@ -12,7 +12,8 @@ const encoder = new TextEncoder();
 // and automatically resend it as the `Last-Event-ID` request header on
 // its own automatic reconnect — no custom reconnect logic needed
 // client-side; see resolveStartCursor() in lib/events.js for how the
-// server honors it. Same shape as app/api/admin/events/route.js.
+// server honors it. Same shape as the staff event stream that used to sit
+// at app/api/admin/events, before shop management moved to the dashboard.
 const sseLine = (event, data, id) => {
   const idLine = id ? `id: ${id}\n` : "";
   return encoder.encode(`${idLine}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

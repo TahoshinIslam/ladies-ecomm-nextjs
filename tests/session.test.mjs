@@ -26,7 +26,7 @@ const reason = skipReason;
 
 describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && reason }, () => {
   let loginPOST, logoutPOST, mePOST_GET, meUpdatePUT, couponsGET, couponsPOST;
-  let adminEventsGET, orderEventsGET, orderCreatePOST;
+  let orderEventsGET, orderCreatePOST;
   let resetPasswordPOST;
 
   before(async () => {
@@ -40,7 +40,6 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
     ({ POST: logoutPOST } = await import("../app/api/users/logout/route.js"));
     ({ GET: mePOST_GET, PUT: meUpdatePUT } = await import("../app/api/users/me/route.js"));
     ({ GET: couponsGET, POST: couponsPOST } = await import("../app/api/coupons/route.js"));
-    ({ GET: adminEventsGET } = await import("../app/api/admin/events/route.js"));
     ({ GET: orderEventsGET } = await import("../app/api/orders/[id]/events/route.js"));
     ({ POST: orderCreatePOST } = await import("../app/api/orders/route.js"));
     ({ POST: resetPasswordPOST } = await import("../app/api/users/reset-password/[token]/route.js"));
@@ -435,89 +434,54 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
 
   // ===================== 34-35: SSE authentication =====================
 
-  test("SSE (admin events): missing session is rejected before the stream opens", async () => {
-    const req = requestAs({ method: "GET", url: "http://test/api/admin/events" });
-    const res = await adminEventsGET(req);
-    assert.equal(res.status, 401);
-  });
+  // The two tests that sat here drove app/api/admin/events — the staff
+  // notification stream, removed with the rest of shop management. What is
+  // worth asserting now is the guard those tests exercised, because it
+  // changed meaning rather than disappearing: requireStaff used to let an
+  // employee through, and refuses everyone since this app stopped having
+  // staff at all. The storefront's own per-user stream is unaffected and is
+  // covered below.
 
-  test("SSE (admin events): a customer is rejected (403); an authorized staff member succeeds (200) via cookie only, no ?token= anywhere", async () => {
-    const customer = await createTestUser({ role: "customer" });
-    const employee = await createTestUser({ role: "employee" });
+  test("staff guards refuse an authenticated shopper, and say where shop management went", async () => {
+    const shopper = await createTestUser({ role: "customer" });
     try {
-      const customerReq = requestAs({ method: "GET", url: "http://test/api/admin/events", session: await createTestSession(customer._id) });
-      assert.equal((await adminEventsGET(customerReq)).status, 403);
-
-      // The route's ReadableStream sets a 25s heartbeat setInterval that
-      // only clears when request.signal fires "abort" — a real EventSource
-      // disconnect does this naturally, but here we must trigger it
-      // ourselves (via an AbortController) or the interval leaks and keeps
-      // the Node process alive past the end of the test run.
-      const staffController = new AbortController();
-      const staffReq = requestAs({ method: "GET", url: "http://test/api/admin/events", session: await createTestSession(employee._id), signal: staffController.signal });
-      const staffRes = await adminEventsGET(staffReq);
-      try {
-        assert.equal(staffRes.status, 200);
-        assert.equal(staffRes.headers.get("content-type"), "text/event-stream");
-        assert.match(staffRes.headers.get("cache-control") || "", /no-store|no-cache/);
-      } finally {
-        staffController.abort();
-      }
-    } finally {
-      await deleteRows("users", "id", [customer._id, employee._id]);
-    }
-  });
-
-  test("SSE (order events): the order's owner can open the stream; a different customer cannot (403); confirms no ?token= is read from the URL at all", async () => {
-    const owner = await createTestUser();
-    const stranger = await createTestUser();
-    const product = await createTestProduct({ stock: 5 });
-    try {
-      const created = await (
-        await orderCreatePOST(
-          requestAs({
-            method: "POST",
-            url: "http://test/api/orders",
-            session: await createTestSession(owner._id),
-            body: {
-              items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }],
-              shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
-            },
-          }),
-        )
-      ).json();
-      const orderId = created.order._id;
-
-      // A URL with NO ?token= query param at all — proving the route
-      // authenticates purely from the cookie. Aborted afterward for the
-      // same reason as the admin-events success case above: the route's
-      // heartbeat setInterval only clears on request.signal "abort".
-      const ownerController = new AbortController();
-      const ownerReq = requestAs({ method: "GET", url: `http://test/api/orders/${orderId}/events`, session: await createTestSession(owner._id), signal: ownerController.signal });
-      const ownerRes = await orderEventsGET(ownerReq, { params: Promise.resolve({ id: orderId }) });
-      try {
-        assert.equal(ownerRes.status, 200);
-        assert.ok(!ownerReq.url.includes("token="), "sanity check on the request URL itself: no token query param was ever constructed");
-      } finally {
-        ownerController.abort();
-      }
-
-      const strangerReq = requestAs({ method: "GET", url: `http://test/api/orders/${orderId}/events`, session: await createTestSession(stranger._id) });
-      const strangerRes = await orderEventsGET(strangerReq, { params: Promise.resolve({ id: orderId }) });
-      assert.equal(strangerRes.status, 403);
-
-      // A ?token= query param, even if present, is simply ignored — the
-      // route never reads searchParams for auth at all anymore.
-      const withStaleQueryParam = requestAs({
+      const { requireAdmin, requirePermission, requireStaff } = await import("../lib/auth.js");
+      const req = requestAs({
         method: "GET",
-        url: `http://test/api/orders/${orderId}/events?token=some-old-jwt-shaped-string`,
+        url: "http://test/api/anything",
+        session: await createTestSession(shopper._id),
       });
-      const ignoredRes = await orderEventsGET(withStaleQueryParam, { params: Promise.resolve({ id: orderId }) });
-      assert.equal(ignoredRes.status, 401, "no cookie was presented, so this is unauthenticated regardless of the query string");
+
+      for (const [name, call] of [
+        ["requireAdmin", () => requireAdmin(req)],
+        ["requireStaff", () => requireStaff(req)],
+        ["requirePermission", () => requirePermission(req, "products.manage")],
+      ]) {
+        await assert.rejects(
+          call,
+          (error) => {
+            assert.equal(error.status, 403, `${name} must refuse a signed-in shopper`);
+            assert.match(error.message, /admin dashboard/i);
+            return true;
+          },
+          `${name} should have thrown`,
+        );
+      }
     } finally {
-      await deleteRows("orders", "user_id", owner._id);
-      await deleteRows("users", "id", [owner._id, stranger._id]);
+      await deleteRows("users", "id", shopper._id);
     }
+  });
+
+  test("an unauthenticated caller still gets 401, not a 403 implying signing in would help", async () => {
+    const { requireAdmin } = await import("../lib/auth.js");
+    const req = requestAs({ method: "GET", url: "http://test/api/anything" });
+    await assert.rejects(
+      () => requireAdmin(req),
+      (error) => {
+        assert.equal(error.status, 401);
+        return true;
+      },
+    );
   });
 
   // ===================== session-limit enforcement =====================

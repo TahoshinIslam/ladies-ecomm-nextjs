@@ -62,7 +62,8 @@ function buildPageCsp(nonce) {
     // res.cloudinary.com: several components render raw <img src={...}>
     // pointing directly at Cloudinary-hosted product/upload images
     // (bypassing next/image's own same-origin optimization proxy) —
-    // confirmed by inspecting components/admin/ImageDropzone.jsx,
+    // confirmed by inspecting the admin image-upload field (since moved
+    // to the admin dashboard),
     // components/product/CompareTray.jsx, and others. data:/blob: are
     // Next.js's own documented defaults for inline/placeholder images.
     "img-src 'self' https://res.cloudinary.com data: blob:",

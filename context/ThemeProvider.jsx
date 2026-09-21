@@ -151,7 +151,7 @@ export default function AppProviders({ initialTheme = "light", initialLocale, ch
     // opacity transitions down to near-instant for any user who has it
     // enabled, without each of the ~15 components that call `motion.*`
     // needing its own `useReducedMotion()` check (previously only
-    // components/admin/AdminLayout.jsx had one). The CSS
+    // the old admin layout had one). The CSS
     // `@media (prefers-reduced-motion: reduce)` block in globals.css
     // still separately covers plain CSS transitions/animations (not
     // framer-motion's own JS-driven ones) — the two are complementary,

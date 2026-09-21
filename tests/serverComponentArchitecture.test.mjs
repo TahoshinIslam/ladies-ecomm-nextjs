@@ -21,14 +21,18 @@ const SERVER_PAGE_SHELLS = [
   "views/ProductDetailPage.jsx",
   "views/OrdersPage.jsx",
   "views/OrderDetailPage.jsx",
-  "views/admin/OverviewPage.jsx",
 ];
 
 // The Client Component islands this migration introduced — each MUST
 // keep its "use client" directive (they own real interactive state:
 // hero rotation, product tabs, order actions/SSE, the shop filter shell,
-// the product-detail interactive body, the admin charts, the newsletter
-// form, the guided-finder button).
+// the product-detail interactive body, the newsletter form, the
+// guided-finder button).
+//
+// views/admin/OverviewPage.jsx and views/admin/OverviewCharts.jsx were in
+// these lists until shop management moved to the admin dashboard. The
+// server-shell/client-island split they demonstrated is a pattern that
+// travelled with them, not one this app still has an example of.
 //
 // views/home/NewsletterPoster.jsx (formerly listed here) was retired
 // during the Leo Store visual migration: its standalone dark-block
@@ -42,7 +46,6 @@ const CLIENT_ISLANDS = [
   "views/home/GuidedFinderSection.jsx",
   "views/shop/ShopPageClient.jsx",
   "views/product/ProductDetailInteractive.jsx",
-  "views/admin/OverviewCharts.jsx",
   "components/order/OrderDetailActions.jsx",
 ];
 

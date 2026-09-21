@@ -29,10 +29,11 @@ describe("Popup is a dynamically-imported client island, never in the critical b
     assert.match(content, /<CampaignPopup\s*\/>/);
   });
 
-  test("/admin has its own layout, structurally separate from StorefrontShell — CampaignPopup can never render there", () => {
-    const adminLayout = read("app/admin/layout.jsx");
-    assert.doesNotMatch(adminLayout, /StorefrontShell/);
-  });
+  // This used to read app/admin/layout.jsx and assert it did not render
+  // StorefrontShell, which is how the popup was kept out of the admin area.
+  // There is no admin area in this app any more, so the property now holds
+  // for a stronger reason: the only tree that mounts CampaignPopup is the
+  // storefront shell, and that is asserted directly above.
 });
 
 describe("Campaign popup excludes sensitive storefront routes by default", () => {
@@ -169,16 +170,16 @@ describe("lib/serverDataCache.js's promotion cache wrapper never touches session
   });
 });
 
-describe("Admin nav and permissions wiring", () => {
+describe("Promotion route permissions", () => {
   test("PROMOTIONS_MANAGE is a real permission string, not reusing an unrelated one", () => {
     const content = read("lib/permissions.js");
     assert.match(content, /PROMOTIONS_MANAGE:\s*"promotions\.manage"/);
   });
 
-  test("/admin/promotions is registered in ADMIN_NAV gated by PROMOTIONS_MANAGE", () => {
-    const content = read("components/admin/adminNav.js");
-    assert.match(content, /to:\s*"\/admin\/promotions".*perm:\s*PERMISSIONS\.PROMOTIONS_MANAGE/);
-  });
+  // The ADMIN_NAV assertion that sat here read components/admin/adminNav.js.
+  // Navigation is the dashboard's concern now. The permission string is
+  // still this app's, because its promotion routes still name it — and the
+  // test below still checks that they do.
 
   test("every promotion admin route requires PROMOTIONS_MANAGE, never a bare requireAdmin/requireUser", () => {
     for (const file of [
