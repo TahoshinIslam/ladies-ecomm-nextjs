@@ -270,6 +270,50 @@ async function run() {
     breakdown.reduce((sum, r) => sum + Number(r.count), 0) ===
       Number((await query("SELECT COUNT(*) AS n FROM orders WHERE organization_id = ? AND deleted_at IS NULL", [org]))[0].n));
 
+  /* ── Uploaded media ─────────────────────────────────────────────────── */
+
+  // Images the shop owner uploads from the dashboard live in the shared
+  // `files` table and are served by this app at /files/<id>. Two things must
+  // hold: a shopper can see this store's product photos without signing in,
+  // and cannot see anyone else's — nor any file that was never meant to be
+  // public, like a staff avatar.
+  const png = Buffer.from(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a" +
+      "49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082",
+    "hex",
+  );
+  const media = [
+    ["iso_media_ours", "product", org, true],
+    ["iso_media_avatar", "avatar", null, false],
+    ["iso_media_theirs", "product", decoyId, false],
+  ];
+  for (const [id, purpose, owner] of media) {
+    await query("DELETE FROM files WHERE id = ?", [id]);
+    await query(
+      `INSERT INTO files (id, organization_id, branch_id, purpose, filename, mime_type, size_bytes, data)
+       VALUES (?, ?, NULL, ?, 'pixel.png', 'image/png', ?, ?)`,
+      [id, owner, purpose, png.length, png],
+    );
+  }
+
+  const { GET: serveFile } = await import("../app/files/[id]/route.js");
+  for (const [id, purpose, , visible] of media) {
+    const res = await serveFile(new Request(`http://test/files/${id}`), {
+      params: Promise.resolve({ id }),
+    });
+    check(
+      `media: ${purpose}${visible ? " for this store is served" : " is not served"}`,
+      res.status === (visible ? 200 : 404),
+      `status ${res.status}`,
+    );
+  }
+  const unknown = await serveFile(new Request("http://test/files/nope"), {
+    params: Promise.resolve({ id: "nope" }),
+  });
+  check("media: an unknown id is a plain 404", unknown.status === 404);
+
+  await query("DELETE FROM files WHERE id IN (?, ?, ?)", media.map(([id]) => id));
+
   /* ── Writes must not reach across either ────────────────────────────── */
 
   // A helpful vote on another store's review must not land.
