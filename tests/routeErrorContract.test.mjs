@@ -30,7 +30,7 @@ const canRun = dbReady;
 const reason = skipReason;
 
 describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { skip: !canRun && reason }, () => {
-  let loginPOST, registerPOST, ordersPOST, orderGET, reviewsPUT, couponsGET;
+  let loginPOST, registerPOST, ordersPOST, orderGET, reviewsPUT, meGET;
   let User, Order, Product;
 
   before(async () => {
@@ -40,7 +40,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     ({ POST: ordersPOST } = await import("../app/api/orders/route.js"));
     ({ GET: orderGET } = await import("../app/api/orders/[id]/route.js"));
     ({ PUT: reviewsPUT } = await import("../app/api/reviews/[id]/route.js"));
-    ({ GET: couponsGET } = await import("../app/api/coupons/route.js"));
+    ({ GET: meGET } = await import("../app/api/users/me/route.js"));
     ({ default: User } = await import("../models/userModel.js"));
     ({ default: Order } = await import("../models/orderModel.js"));
     ({ default: Product } = await import("../models/productModel.js"));
@@ -179,26 +179,20 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     }
   });
 
+  // The 403 case that sat below this one used GET /api/coupons with a plain
+  // customer. Both halves of it are gone: that route moved to the admin
+  // dashboard, and so did every other endpoint this app could refuse on
+  // authorization rather than authentication. A shopper is either signed in
+  // or not. /api/users/me carries the same error contract for the 401 side.
+
   test("unauthenticated request -> 401, consistent shape", async () => {
-    const req = requestAs({ method: "GET", url: "http://test/api/coupons" });
-    const res = await couponsGET(req);
+    const req = requestAs({ method: "GET", url: "http://test/api/users/me" });
+    const res = await meGET(req);
     assert.equal(res.status, 401);
     const json = await res.json();
     assertErrorShape(json);
   });
 
-  test("authenticated but unauthorized (forbidden) -> 403, consistent shape", async () => {
-    const customer = await createTestUser({ role: "customer" });
-    try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(customer._id) });
-      const res = await couponsGET(req);
-      assert.equal(res.status, 403);
-      const json = await res.json();
-      assertErrorShape(json);
-    } finally {
-      await deleteRows("customers", "id", customer._id);
-    }
-  });
 
   test("stock/business conflict -> 409, consistent shape (concurrent guarded-decrement failure)", async () => {
     const user = await createTestUser();
@@ -296,8 +290,8 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
   });
 
   test("malformed session cookie -> 401, consistent shape (see tests/authLifecycle.test.mjs and tests/session.test.mjs for the full session-lifecycle matrix)", async () => {
-    const req = new Request("http://test/api/coupons", { headers: { cookie: "tahos_session=not-a-real-session-token" } });
-    const res = await couponsGET(req);
+    const req = new Request("http://test/api/users/me", { headers: { cookie: "tahos_session=not-a-real-session-token" } });
+    const res = await meGET(req);
     assert.equal(res.status, 401);
     const json = await res.json();
     assertErrorShape(json);
@@ -313,8 +307,8 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
   });
 
   test("every response in this file carries application/json content-type", async () => {
-    const req = requestAs({ method: "GET", url: "http://test/api/coupons" });
-    const res = await couponsGET(req);
+    const req = requestAs({ method: "GET", url: "http://test/api/users/me" });
+    const res = await meGET(req);
     assert.match(res.headers.get("content-type") || "", /application\/json/);
   });
 });

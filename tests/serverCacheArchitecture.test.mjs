@@ -150,26 +150,16 @@ describe("Phase 8 — no internal HTTP API fetch was reintroduced by the cache l
 });
 
 describe("Phase 8 — mutation invalidation calls occur after the mutating write, never before", () => {
+  // Every catalog-mutating route moved to the admin dashboard, which does
+  // its own cache invalidation. What is left here are the routes where the
+  // storefront itself still writes: placing an order, cancelling one,
+  // recording a payment, and a shopper's own review.
   const ROUTE_INVALIDATION_FILES = [
-    "app/api/products/route.js",
-    "app/api/products/[idOrSlug]/route.js",
-    "app/api/categories/route.js",
-    "app/api/categories/[id]/route.js",
-    "app/api/attributes/route.js",
-    "app/api/attributes/[id]/route.js",
-    "app/api/settings/route.js",
-    "app/api/theme/[id]/route.js",
-    "app/api/theme/[id]/activate/route.js",
     "app/api/reviews/product/[productId]/route.js",
     "app/api/reviews/[id]/route.js",
     "app/api/orders/route.js",
     "app/api/orders/[id]/cancel/route.js",
-    "app/api/orders/[id]/status/route.js",
     "app/api/payments/cod/[orderId]/route.js",
-    "app/api/promotions/route.js",
-    "app/api/promotions/[id]/route.js",
-    "app/api/promotions/[id]/duplicate/route.js",
-    "app/api/promotions/reorder/route.js",
   ];
 
   for (const file of ROUTE_INVALIDATION_FILES) {
