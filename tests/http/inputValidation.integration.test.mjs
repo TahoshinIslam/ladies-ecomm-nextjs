@@ -111,7 +111,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
     }
   });
 
@@ -126,7 +126,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       });
       assert.equal(res.status, 415);
     } finally {
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
     }
   });
 
@@ -140,7 +140,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       const res = await req(jar, "/api/orders?limit=999999");
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -153,7 +153,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
     }
   });
 
@@ -167,7 +167,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
     }
   });
 
@@ -189,7 +189,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       });
       assert.equal(noCsrf.status, 403, "CSRF remains mandatory even on a newly-validated route");
     } finally {
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -208,7 +208,7 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -240,9 +240,9 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
       assert.equal(regression.status, 409, "a cancelled order must never be moved to another status");
     } finally {
       const buyer = await User.findOne({ email: buyerEmail });
-      if (buyer) await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("users", "id", admin._id);
-      await deleteRows("users", "email", buyerEmail);
+      if (buyer) await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("customers", "id", admin._id);
+      await deleteRows("customers", "email", buyerEmail);
       await deleteRows("products", "id", product._id);
     }
   });

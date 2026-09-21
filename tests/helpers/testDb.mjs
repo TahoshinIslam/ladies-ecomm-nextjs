@@ -18,6 +18,12 @@
 
 import crypto from "node:crypto";
 
+// Fixtures belong to the organization scripts/setupTestDb.mjs created, which
+// is also what STORE_ORGANIZATION_ID names in .env.test. Read from the
+// environment rather than hard-coded so the two cannot drift apart: the app
+// code under test resolves the same value through lib/tenant.js.
+export const testOrganizationId = () => process.env.STORE_ORGANIZATION_ID;
+
 const TEST_DB_NAME_PATTERN = /(_test|_ci)$/i;
 
 export const dbReady =
@@ -89,19 +95,30 @@ export async function rawQuery(sql, params) {
 }
 
 // Truncates every table this test suite writes to, in an order that
-// respects the schema's ON DELETE CASCADE relationships (see
-// sql/schema.sql) — a parent truncated first would otherwise leave FK
-// errors on the child tables that still reference rows about to vanish.
-// Called by individual test files' own before()/after() blocks (not
-// automatically) so each file controls exactly when its data resets;
-// dbReady/connectTestDb() already refuse to run this against anything
-// that isn't clearly a test database.
+// respects the schema's ON DELETE CASCADE relationships — a parent
+// truncated first would otherwise leave FK errors on the child tables that
+// still reference rows about to vanish. Called by individual test files'
+// own before()/after() blocks (not automatically) so each file controls
+// exactly when its data resets; dbReady/connectTestDb() already refuse to
+// run this against anything that isn't clearly a test database.
+//
+// Four of these were renamed when the storefront moved onto the shared
+// schema: users -> customers, sessions -> customer_sessions,
+// themes -> storefront_themes, events -> storefront_events.
+//
+// `organizations` and `branches` are deliberately NOT here. They are not
+// fixture data — they are the tenant every fixture hangs off, created once
+// by scripts/setupTestDb.mjs. Truncating them would take every fixture with
+// them by cascade and leave the next test inserting rows whose
+// organization_id references nothing.
 const TRUNCATE_ORDER = [
   "order_items", "orders", "cart_items", "carts", "coupon_usages", "coupon_categories", "coupons",
-  "payments", "wishlist_items", "wishlists", "notifications", "reviews", "addresses", "sessions",
-  "rate_limit_counters", "events", "deleted_products", "product_attributes", "product_variants", "products",
+  "payments", "wishlist_items", "wishlists", "notifications", "reviews", "review_helpful_votes",
+  "addresses", "customer_sessions", "rate_limit_counters", "storefront_events", "deleted_products",
+  "product_attributes", "product_variants", "products",
   "attribute_definition_options", "attribute_definition_label_overrides", "attribute_definition_categories",
-  "attribute_definitions", "brands", "categories", "promotions", "themes", "users",
+  "attribute_definitions", "brands", "categories", "promotions", "storefront_themes", "store_settings",
+  "customers",
 ];
 
 export async function truncateAll() {
@@ -198,15 +215,26 @@ export function requestAs({
 
 const unique = () => crypto.randomBytes(6).toString("hex");
 
-export async function createTestUser({ role = "customer", permissions = [] } = {}) {
+/**
+ * A shopper.
+ *
+ * `role` and `permissions` are still accepted and ignored. They were columns
+ * on the old `users` table; `customers` has neither, because a shopper has
+ * no role and staff are not in this table at all — they are the dashboard's
+ * accounts. Callers that pass `{ role: "employee" }` therefore get a plain
+ * customer, which is the honest result: this app can no longer create a
+ * staff member. The parameters stay so those call sites keep saying what
+ * they meant while they are being retired.
+ */
+export async function createTestUser({ role, permissions } = {}) {
+  void role;
+  void permissions;
   const { default: User } = await import("../../models/userModel.js");
   const suffix = unique();
   const user = await User.create({
     name: `Test User ${suffix}`,
     email: `test-${suffix}@example.invalid`,
     password: "TestPassword123!",
-    role,
-    permissions,
     isVerified: true,
   });
   return user;

@@ -211,7 +211,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     assert.match(csrfRaw, /path=\//);
     assert.ok(!csrfRaw.includes("httponly"), "the CSRF cookie must NOT be HttpOnly — client JS has to read it to attach X-CSRF-Token");
 
-    await deleteRows("users", "email", email);
+    await deleteRows("customers", "email", email);
   });
 
   // =========================================================================
@@ -305,9 +305,9 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     const meAfterLogoutRes = await req(jar, "/api/users/me");
     assert.equal(meAfterLogoutRes.status, 401);
 
-    await deleteRows("orders", "user_id", me2.user._id);
-    await deleteRows("carts", "user_id", me2.user._id);
-    await deleteRows("users", "email", email);
+    await deleteRows("orders", "customer_id", me2.user._id);
+    await deleteRows("carts", "customer_id", me2.user._id);
+    await deleteRows("customers", "email", email);
     await deleteRows("products", "id", product._id);
   });
 
@@ -349,7 +349,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     assert.equal(fixationLoginRes.status, 200);
     assert.notEqual(attackerJar.get(SESSION_COOKIE), "attacker-planted-garbage-session-value", "the server must issue a brand-new session, never accept/reuse the presented one");
 
-    await deleteRows("users", "email", email);
+    await deleteRows("customers", "email", email);
   });
 
   test("real HTTP: Authorization: Bearer alone (no cookie) returns 401; a ?token= query string alone (no cookie) returns 401", async () => {
@@ -377,7 +377,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
 
     after(async () => {
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
     });
 
     const cartBody = () => ({ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 });
@@ -482,7 +482,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       const res = await req(crossedJar, "/api/cart", { method: "POST", origin: BASE_URL, csrf: otherCsrf, body: cartBody() });
       assert.equal(res.status, 403, "header and cookie agree with each other, but neither matches THIS session's csrfTokenHash");
 
-      await deleteRows("users", "email", otherEmail);
+      await deleteRows("customers", "email", otherEmail);
     });
 
     test("an expired session with an otherwise-valid CSRF pair fails with 401 (not 403) — session state is checked before CSRF is even relevant", async () => {
@@ -490,12 +490,12 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       const { email: expiredEmail } = await registerNewUser(expiredJar);
       const rawToken = expiredJar.get(SESSION_COOKIE);
       const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-      await rawQuery("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
+      await rawQuery("UPDATE customer_sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
 
       const res = await req(expiredJar, "/api/cart", { method: "POST", origin: BASE_URL, csrf: expiredJar.get("tahos_csrf"), body: cartBody() });
       assert.equal(res.status, 401);
 
-      await deleteRows("users", "email", expiredEmail);
+      await deleteRows("customers", "email", expiredEmail);
     });
 
     test("a revoked session (real logout) with its previously-valid CSRF pair fails with 401", async () => {
@@ -511,7 +511,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       await req(revokedJar, "/api/users/logout", { method: "POST", origin: BASE_URL, csrf: staleCsrfValue });
 
       const user = await User.findOne({ email: revokedEmail });
-      const [revokedSession] = await rawQuery("SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1", [user._id]);
+      const [revokedSession] = await rawQuery("SELECT * FROM customer_sessions WHERE customer_id = ? ORDER BY created_at DESC LIMIT 1", [user._id]);
       assert.ok(revokedSession.revoked_at, "sanity check: logout really did revoke it server-side");
 
       const staleJar = new CookieJar();
@@ -519,7 +519,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       const res = await req(staleJar, "/api/cart", { method: "POST", origin: BASE_URL, csrf: staleCsrfValue, body: cartBody() });
       assert.equal(res.status, 401, "the real HTTP request with the stale (now-revoked) session cookie and its own previously-valid CSRF token must fail with 401");
 
-      await deleteRows("users", "email", revokedEmail);
+      await deleteRows("customers", "email", revokedEmail);
     });
   });
 
@@ -571,7 +571,7 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
     after(async () => {
       await deleteRows("orders", "id", orderId);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "email", [customerEmail, staffEmail, ownerEmail, strangerEmail]);
+      await deleteRows("customers", "email", [customerEmail, staffEmail, ownerEmail, strangerEmail]);
     });
 
     async function openSse(path, jar) {

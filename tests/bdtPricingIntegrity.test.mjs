@@ -182,10 +182,10 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
       assert.equal(order.currency, "BDT");
       assert.equal(order.items[0].snapshot.price, 1000, "the immutable order snapshot must also record the raw ৳1,000, not a converted value");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("carts", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("carts", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -334,11 +334,11 @@ describe("BDT-only pricing integrity", { skip: !canRun && reason }, () => {
       );
       assert.equal(orderRes.status, 400);
 
-      const orderCount = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [buyer._id]);
+      const orderCount = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [buyer._id]);
       assert.equal(orderCount[0].n, 0, "no order must have been created for the inactive product");
     } finally {
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 });

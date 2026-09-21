@@ -66,9 +66,9 @@ describe("GET /api/orders — limit parameter is bounded (Phase 5 fix)", { skip:
   });
 
   after(async () => {
-    await deleteRows("orders", "user_id", buyer._id);
+    await deleteRows("orders", "customer_id", buyer._id);
     await deleteRows("products", "id", product._id);
-    await deleteRows("users", "id", [admin._id, buyer._id]);
+    await deleteRows("customers", "id", [admin._id, buyer._id]);
     await disconnectTestDb();
   });
 

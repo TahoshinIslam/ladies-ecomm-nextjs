@@ -113,7 +113,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.equal(sixth.allowed, false, "the 6th request in the same window must be blocked");
       assert.ok(Number.isInteger(sixth.retryAfterSeconds) && sixth.retryAfterSeconds > 0, "retryAfterSeconds must be a valid positive integer");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -143,7 +143,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     } finally {
       delete process.env.TRUST_PROXY_HEADERS;
       delete process.env.TRUSTED_PROXY_HOP_COUNT;
-      await rawQuery("DELETE FROM users WHERE email LIKE 'ratetest-%'");
+      await rawQuery("DELETE FROM customers WHERE email LIKE 'ratetest-%'");
     }
   });
 
@@ -350,7 +350,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.notEqual(fpRes.status, 503, "forgot-password is NOT IP-only either — same guarantee");
     } finally {
       process.env.NODE_ENV = originalNodeEnv;
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -386,7 +386,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     const email = `p3b-nonprod-${crypto.randomBytes(4).toString("hex")}@example.invalid`;
     const res = await registerPOST(requestAs({ method: "POST", url: "http://test/api/users/register", body: { name: "Non-Prod Test", email, password: "NonProdTest123!" } }));
     assert.equal(res.status, 201, "in the test environment, with no trust configured, register must behave exactly as before this closure — this is what keeps the rest of the test suite (which calls register directly, all over both prior phases) working without every file configuring a full proxy trust chain");
-    await rawQuery("DELETE FROM users WHERE email = ?", [email]);
+    await rawQuery("DELETE FROM customers WHERE email = ?", [email]);
   });
 
   // ===================== Phase 3B: IP-shape validation, hop-count hardening =====================
@@ -652,7 +652,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.deepEqual(Object.keys(existingJson).sort(), Object.keys(nonexistentJson).sort());
       assert.equal(existingJson.message, nonexistentJson.message, "the response message must not differ based on account existence — the rate limiter must not introduce a new enumeration signal on top of the existing generic response");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -678,7 +678,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       const sixthRes = await loginPOST(loginReq(user.email, "TestPassword123!"));
       assert.equal(sixthRes.status, 423, "lockout's specific 423 must still be observable — the rate limiter must not mask it with a generic 429 at this threshold");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -713,7 +713,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       assert.doesNotMatch(json.message, /coupon|code|exist/i, "the 429 body must say nothing coupon-specific");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -728,7 +728,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
       const res = await couponValidatePOST(req);
       assert.equal(res.status, 403, "CSRF is still enforced even though the request would otherwise be within the rate limit");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -744,7 +744,7 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
         assert.equal(res.status, 200);
       }
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 

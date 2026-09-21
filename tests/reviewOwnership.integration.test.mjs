@@ -52,7 +52,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
   });
 
   after(async () => {
-    await deleteRows("users", "id", [owner._id, otherCustomer._id, employeeWithReviews._id, employeeWithoutReviews._id, admin._id]).catch(() => {});
+    await deleteRows("customers", "id", [owner._id, otherCustomer._id, employeeWithReviews._id, employeeWithoutReviews._id, admin._id]).catch(() => {});
     await disconnectTestDb();
   });
 
@@ -229,7 +229,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     const req = requestAs({ method: "POST", url: `http://test/api/reviews/${review._id}/helpful`, session: await createTestSession(otherCustomer._id) });
     await helpfulPOST(req, { params: Promise.resolve({ id: review._id.toString() }) });
     const { query } = await import("../config/db.js");
-    const rows = await query("SELECT * FROM review_helpful_votes WHERE review_id = ? AND user_id = ?", [review._id, otherCustomer._id]);
+    const rows = await query("SELECT * FROM review_helpful_votes WHERE review_id = ? AND customer_id = ?", [review._id, otherCustomer._id]);
     assert.equal(rows.length, 1, "confirmed: the vote is now recorded against the voting user's identity");
   });
 
@@ -247,7 +247,7 @@ describe("review ownership — PUT/DELETE /api/reviews/[id], POST helpful/reply"
     assert.equal(
       final.helpfulCount,
       1,
-      "the review_helpful_votes PRIMARY KEY (review_id, user_id) makes this atomic across a real race, not just sequential calls — exactly one of the 10 concurrent requests actually increments",
+      "the review_helpful_votes PRIMARY KEY (review_id, customer_id) makes this atomic across a real race, not just sequential calls — exactly one of the 10 concurrent requests actually increments",
     );
   });
 

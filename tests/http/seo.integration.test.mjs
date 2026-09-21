@@ -130,7 +130,7 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
   after(async () => {
     if (createdIds.orders.length) await deleteRows("orders", "id", createdIds.orders);
     if (createdIds.products.length) await deleteRows("products", "id", createdIds.products);
-    if (createdIds.users.length) await deleteRows("users", "id", createdIds.users);
+    if (createdIds.users.length) await deleteRows("customers", "id", createdIds.users);
     await disconnectTestDb();
   });
 

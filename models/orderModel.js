@@ -210,8 +210,9 @@ async function create(data, conn) {
     await conn.query(
       `INSERT INTO order_items (organization_id, order_id, product_id, variant_id, quantity, snapshot_name,
          snapshot_sku, snapshot_attributes, snapshot_price, snapshot_image, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        getOrganizationId(),
         id,
         it.product,
         it.variantId,

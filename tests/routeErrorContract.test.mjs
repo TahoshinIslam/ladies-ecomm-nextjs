@@ -90,7 +90,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -105,7 +105,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       assertErrorShape(json);
       assert.equal(json.message, "Order not found");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -141,9 +141,9 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await deleteRows("orders", "user_id", user._id);
+      await deleteRows("orders", "customer_id", user._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -172,10 +172,10 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       assertErrorShape(json);
       assert.match(json.message, /already exists/i);
 
-      await deleteRows("users", "email", email);
+      await deleteRows("customers", "email", email);
     } finally {
-      await deleteRows("users", "id", user._id);
-      await deleteRows("users", "id", other._id);
+      await deleteRows("customers", "id", user._id);
+      await deleteRows("customers", "id", other._id);
     }
   });
 
@@ -196,7 +196,7 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await deleteRows("users", "id", customer._id);
+      await deleteRows("customers", "id", customer._id);
     }
   });
 
@@ -222,9 +222,9 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
       const json = await res.json();
       assertErrorShape(json);
     } finally {
-      await deleteRows("orders", "user_id", user._id);
+      await deleteRows("orders", "customer_id", user._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 

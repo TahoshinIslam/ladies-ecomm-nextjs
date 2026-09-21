@@ -54,7 +54,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       await deleteRows("products", "id", json.product._id);
     } finally {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -68,7 +68,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       assert.equal(res.status, 400);
     } finally {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -79,7 +79,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       const res = await productsPOST(await createReq(admin, body));
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -93,7 +93,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       assert.equal(res.status, 400);
     } finally {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -107,7 +107,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       assert.equal(res.status, 400);
     } finally {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -122,7 +122,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       assert.equal(res.status, 400);
     } finally {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -136,7 +136,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       assert.equal(res.status, 400);
     } finally {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -149,7 +149,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -170,7 +170,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
     } finally {
       if (product) await deleteRows("products", "id", product._id);
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -183,7 +183,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -203,7 +203,7 @@ describe("POST/PUT /api/products — validation contract", { skip: !canRun && re
 
     after(async () => {
       await deleteRows("categories", "id", [category._id, child._id]);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     });
 
     async function freshProduct() {

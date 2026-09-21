@@ -123,7 +123,7 @@ describe("product/category/attribute cache invalidation flow", { skip }, () => {
       await deleteRows("products", "id", madeProducts);
       await deleteRows("attribute_definitions", "id", madeDefs);
       await deleteRows("categories", "id", madeCategories);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     } finally {
       await disconnectTestDb();
     }

@@ -49,14 +49,14 @@ describe("GET /api/admin/cron/cleanup — authenticated, repeat-safe scheduled c
     // Seed one already-expired row in each covered table so the sweep has
     // something real to delete, not just a trivially-empty run.
     await rawQuery(
-      "INSERT INTO sessions (id, user_id, token_hash, csrf_token_hash, expires_at, last_seen_at, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO customer_sessions (id, customer_id, token_hash, csrf_token_hash, expires_at, last_seen_at, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ["c".repeat(24), "d".repeat(24), "a".repeat(64), "b".repeat(64), new Date(Date.now() - 1000), new Date(Date.now() - 1000), ""],
     );
     await rawQuery(
       "INSERT INTO rate_limit_counters (key_hash, action, window_start, count, expires_at) VALUES (?, ?, ?, ?, ?)",
       ["c".repeat(64), "cleanuptest-action", new Date(Date.now() - 120000), 1, new Date(Date.now() - 1000)],
     );
-    await rawQuery("INSERT INTO events (channel, type, payload, expires_at) VALUES (?, ?, ?, ?)", [
+    await rawQuery("INSERT INTO storefront_events (channel, type, payload, expires_at) VALUES (?, ?, ?, ?)", [
       "cleanuptest-channel",
       "CLEANUP_TEST",
       JSON.stringify({}),

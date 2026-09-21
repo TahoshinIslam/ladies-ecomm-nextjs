@@ -73,7 +73,7 @@ async function seedFixtures() {
   // the exact shape 0003's up() reads (shipping_zones JSON array of
   // {region, currency, tiers:[{baseCost, freeAbove}]}).
   await rawQuery(
-    `INSERT INTO settings (id, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
+    `INSERT INTO store_settings (id, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
      VALUES ('main', '{}', '{}', '{}', '{}', '{}', ?)
      ON DUPLICATE KEY UPDATE shipping_zones = VALUES(shipping_zones)`,
     [JSON.stringify([{ region: "INTL", currency: "USD", tiers: [{ baseCost: 25, freeAbove: 200 }] }])],
@@ -87,7 +87,7 @@ const asJson = (v) => (typeof v === "string" ? JSON.parse(v) : v);
 async function cleanupFixtures() {
   await deleteRows("product_variants", "id", VARIANT_IDS);
   await deleteRows("products", "id", PRODUCT_IDS);
-  await rawQuery("DELETE FROM settings WHERE id = 'main'");
+  await rawQuery("DELETE FROM store_settings WHERE id = 'main'");
   await ensureMigrationsTable();
   await rawQuery("DELETE FROM schema_migrations WHERE id = ?", ["0003_bdt_price_currency"]);
 }
@@ -142,7 +142,7 @@ describe("scripts/migrations/0003_bdt_price_currency.mjs — real up() against r
       const [rows] = await withConnection((conn) => conn.query("SELECT price FROM product_variants WHERE id = ?", [id]));
       assert.equal(Number(rows[0].price), priceUsd * RATE);
     }
-    const [settingsRows] = await withConnection((conn) => conn.query("SELECT shipping_zones FROM settings WHERE id = 'main'"));
+    const [settingsRows] = await withConnection((conn) => conn.query("SELECT shipping_zones FROM store_settings WHERE id = 'main'"));
     const zones = asJson(settingsRows[0].shipping_zones);
     const intl = zones.find((z) => z.region === "INTL");
     assert.equal(intl.currency, "BDT");
@@ -177,7 +177,7 @@ describe("scripts/migrations/0003_bdt_price_currency.mjs — real up() against r
       const [rows] = await withConnection((conn) => conn.query("SELECT price FROM product_variants WHERE id = ?", [id]));
       assert.equal(Number(rows[0].price), priceUsd * RATE, "variant price must not double-convert on a second run");
     }
-    const [settingsRows] = await withConnection((conn) => conn.query("SELECT shipping_zones FROM settings WHERE id = 'main'"));
+    const [settingsRows] = await withConnection((conn) => conn.query("SELECT shipping_zones FROM store_settings WHERE id = 'main'"));
     const zones = asJson(settingsRows[0].shipping_zones);
     const intl = zones.find((z) => z.region === "INTL");
     assert.equal(intl.currency, "BDT", "INTL zone must still read BDT, not re-flagged/re-converted");

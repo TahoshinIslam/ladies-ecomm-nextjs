@@ -117,7 +117,7 @@ describe("new admin-created department + shoe (real server, real cache)", { skip
       await deleteRows("products", "id", productIds);
       await deleteRows("attribute_definitions", "id", defIds);
       await deleteRows("categories", "id", categoryIds);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     } finally {
       await disconnectTestDb();
     }

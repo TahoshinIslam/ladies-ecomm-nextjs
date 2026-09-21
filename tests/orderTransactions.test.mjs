@@ -71,10 +71,10 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
   }
 
   async function cleanup(buyer, ...products) {
-    await deleteRows("orders", "user_id", buyer._id);
-    await deleteRows("carts", "user_id", buyer._id);
+    await deleteRows("orders", "customer_id", buyer._id);
+    await deleteRows("carts", "customer_id", buyer._id);
     for (const p of products) await deleteRows("products", "id", p._id);
-    await deleteRows("users", "id", buyer._id);
+    await deleteRows("customers", "id", buyer._id);
   }
 
   test("a successful multi-item order is created with server-computed totals", async () => {
@@ -183,11 +183,11 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(updated.variants[0].stock, 4, "the Small variant's own stock must decrement by 1");
       assert.equal(updated.variants[1].stock, 4, "the Large variant's own stock must decrement by 1, independently of the Small variant");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("carts", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("carts", "customer_id", buyer._id);
       await deleteRows("products", "id", multiVariant._id);
       await deleteRows("categories", "id", category._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -472,7 +472,7 @@ describe("Order transactions: creation, stock, cart, promo, cancellation, owners
       assert.equal(adminRes.status, 200);
     } finally {
       await cleanup(buyer, productA);
-      await deleteRows("users", "id", [stranger._id, admin._id]);
+      await deleteRows("customers", "id", [stranger._id, admin._id]);
     }
   });
 });

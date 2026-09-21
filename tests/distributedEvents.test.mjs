@@ -144,7 +144,7 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
   });
 
   after(async () => {
-    await rawQuery("DELETE FROM events WHERE channel LIKE 'phase11-distributed-events-test%'");
+    await rawQuery("DELETE FROM storefront_events WHERE channel LIKE 'phase11-distributed-events-test%'");
     await disconnectTestDb();
   });
 

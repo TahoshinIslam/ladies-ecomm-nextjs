@@ -31,11 +31,11 @@ async function countEventsByPayload(channel, type, orderId, status) {
   const params = [channel, orderId];
   if (type) { clauses.push("type = ?"); params.push(type); }
   if (status) { clauses.push("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.status')) = ?"); params.push(status); }
-  const [{ n }] = await rawQuery(`SELECT COUNT(*) AS n FROM events WHERE ${clauses.join(" AND ")}`, params);
+  const [{ n }] = await rawQuery(`SELECT COUNT(*) AS n FROM storefront_events WHERE ${clauses.join(" AND ")}`, params);
   return n;
 }
 async function deleteEventsByOrderId(orderId) {
-  await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [orderId]);
+  await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [orderId]);
 }
 
 const canRun = dbReady;
@@ -99,9 +99,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const json = await res.json();
       assert.equal(json.order.status, "processing");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -115,9 +115,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "processing" });
       assert.equal(res.status, 200);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -144,9 +144,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         assert.equal(second.deliveredAt.getTime(), first.deliveredAt.getTime(), "deliveredAt must not be rewritten by a repeat 'delivered' request");
         assert.equal(second.updatedAt.getTime(), first.updatedAt.getTime(), "updatedAt must not change — no save() must occur on a true no-op");
       } finally {
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", [admin._id, buyer._id]);
+        await deleteRows("customers", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -172,9 +172,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         assert.ok(countAfterFirst >= 1);
       } finally {
         await deleteNotificationsLike(`#${order._id?.toString?.().slice(-6) ?? ""}`);
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", [admin._id, buyer._id]);
+        await deleteRows("customers", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -205,9 +205,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       } finally {
         await deleteNotificationsLike(`#${order._id?.toString?.().slice(-6) ?? ""}`);
         await deleteEventsByOrderId(order._id?.toString?.() ?? "");
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", [admin._id, buyer._id]);
+        await deleteRows("customers", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -221,19 +221,19 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         await setStatus(admin, order._id, { status: "processing" });
         await setStatus(admin, order._id, { status: "shipped", trackingNumber: "TRK-001" });
         const before = await Order.findById(order._id);
-        const [{ n: eventsBefore }] = await rawQuery("SELECT COUNT(*) AS n FROM events WHERE channel = ?", [`order:${order._id}`]);
+        const [{ n: eventsBefore }] = await rawQuery("SELECT COUNT(*) AS n FROM storefront_events WHERE channel = ?", [`order:${order._id}`]);
 
         const res = await setStatus(admin, order._id, { status: "shipped", trackingNumber: "TRK-001" });
         assert.equal(res.status, 200);
         const after = await Order.findById(order._id);
-        const [{ n: eventsAfter }] = await rawQuery("SELECT COUNT(*) AS n FROM events WHERE channel = ?", [`order:${order._id}`]);
+        const [{ n: eventsAfter }] = await rawQuery("SELECT COUNT(*) AS n FROM storefront_events WHERE channel = ?", [`order:${order._id}`]);
 
         assert.equal(after.updatedAt.getTime(), before.updatedAt.getTime(), "no save() when tracking number is unchanged");
         assert.equal(eventsAfter, eventsBefore, "no re-emitted order-channel event for an unchanged tracking number");
       } finally {
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", [admin._id, buyer._id]);
+        await deleteRows("customers", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -253,16 +253,16 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         const json = await res.json();
         assert.equal(json.order.trackingNumber, "TRK-002");
 
-        const orderEvents = await rawQuery("SELECT * FROM events WHERE channel = ? ORDER BY id DESC LIMIT 1", [`order:${order._id}`]);
+        const orderEvents = await rawQuery("SELECT * FROM storefront_events WHERE channel = ? ORDER BY id DESC LIMIT 1", [`order:${order._id}`]);
         const latestPayload = orderEvents[0] ? (typeof orderEvents[0].payload === "string" ? JSON.parse(orderEvents[0].payload) : orderEvents[0].payload) : null;
         assert.equal(latestPayload?.trackingNumber, "TRK-002", "the customer channel must reflect the new tracking number");
 
         const adminEventsAfter = await countEventsByPayload("admin", null, order._id.toString());
         assert.equal(adminEventsAfter, adminEventsBefore, "a tracking-only change must not touch the admin channel");
       } finally {
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", [admin._id, buyer._id]);
+        await deleteRows("customers", "id", [admin._id, buyer._id]);
       }
     });
 
@@ -290,9 +290,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
         assert.equal(after, before, "concurrent repeats of an already-cancelled status must create zero additional notifications");
       } finally {
         await deleteNotificationsLike(`#${order._id?.toString?.().slice(-6) ?? ""}`);
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", [admin._id, buyer._id]);
+        await deleteRows("customers", "id", [admin._id, buyer._id]);
       }
     });
   });
@@ -313,10 +313,10 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const persisted = await Order.findById(order._id);
       assert.equal(persisted.status, "delivered", "delivered must remain unchanged after a rejected regression attempt");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -332,9 +332,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const persisted = await Order.findById(order._id);
       assert.equal(persisted.status, "cancelled");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -349,9 +349,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "pending" });
       assert.equal(res.status, 409);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -364,9 +364,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, {});
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -379,9 +379,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "not-a-real-status" });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -394,9 +394,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: ["processing", "shipped"] });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -409,9 +409,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "Processing" });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -424,9 +424,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, order._id, { status: "processing", total: 1 });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 
@@ -436,7 +436,7 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, "not-a-valid-id", { status: "processing" });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -446,7 +446,7 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(admin, "507f1f77bcf86cd799439011", { status: "processing" });
       assert.equal(res.status, 404);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -459,9 +459,9 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const res = await setStatus(customer, order._id, { status: "processing" });
       assert.equal(res.status, 403);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [customer._id, buyer._id]);
+      await deleteRows("customers", "id", [customer._id, buyer._id]);
     }
   });
 
@@ -480,10 +480,10 @@ describe("PUT /api/orders/[id]/status — validation and transition contract", {
       const [payment] = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payment.status, "completed");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [admin._id, buyer._id]);
+      await deleteRows("customers", "id", [admin._id, buyer._id]);
     }
   });
 });

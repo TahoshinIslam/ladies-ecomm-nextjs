@@ -94,7 +94,7 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -107,7 +107,7 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
       );
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -120,7 +120,7 @@ describe("Phase 5C — cart path-param ObjectId contract", { skip: !canRun && re
       );
       assert.equal(res.status, 200);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 });

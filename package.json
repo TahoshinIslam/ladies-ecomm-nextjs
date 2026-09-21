@@ -23,7 +23,8 @@
     "test:http:cold-start": "node --env-file-if-exists=.env.test scripts/coldStartHttpTestServer.mjs run",
     "smoke": "node scripts/smokeDeployment.mjs",
     "check:tenancy": "node scripts/checkTenantScoping.mjs",
-    "test:tenancy": "node --import ./tests/helpers/nextResolveHook.mjs --env-file=.env scripts/testTenantIsolation.mjs"
+    "test:tenancy": "node --import ./tests/helpers/nextResolveHook.mjs --env-file=.env scripts/testTenantIsolation.mjs",
+    "test:db:setup": "NODE_ENV=test node --env-file=.env.test scripts/setupTestDb.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

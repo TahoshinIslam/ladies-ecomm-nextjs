@@ -91,10 +91,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(payments.length, 1);
       assert.equal(payments[0].status, "pending");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -111,10 +111,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(unchanged.status, "pending");
       assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [buyer._id, stranger._id]);
+      await deleteRows("customers", "id", [buyer._id, stranger._id]);
     }
   });
 
@@ -125,7 +125,7 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const res = await codPOST(codRequest(fakeId, await createTestSession(buyer._id)), { params: Promise.resolve({ orderId: fakeId }) });
       assert.equal(res.status, 404);
     } finally {
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -142,10 +142,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(after_.status, "delivered", "the order status must be untouched by the rejected attempt");
       assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0, "no Payment must have been created for the rejected attempt");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -162,10 +162,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(after_.status, "cancelled");
       assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -189,10 +189,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(payments.length, 1, "exactly one Payment row ever exists per order, enforced by paymentModel's unique `order` index");
       assert.equal(String(firstJson.order._id), String(secondJson.order._id));
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -214,10 +214,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(payments.length, 1);
       assert.equal(String(payments[0].id), String(originalPayment.id));
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -236,10 +236,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
 
       assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 1);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -269,10 +269,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1, "concurrent duplicate COD creation must still leave exactly one Payment row");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -328,10 +328,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       assert.equal(persisted.total, order.total, "the order's own fields must be unaffected by the aborted in-transaction mutation");
       assert.equal((await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id])).length, 0, "no Payment may remain when the Order half of the transaction failed");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -362,10 +362,10 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       });
       assert.equal(adminRes.status, 200);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [buyer._id, stranger._id, admin._id]);
+      await deleteRows("customers", "id", [buyer._id, stranger._id, admin._id]);
     }
   });
 
@@ -378,9 +378,9 @@ describe("COD payment: POST /api/payments/cod/[orderId], GET /api/payments/order
       const res = await codPOST(req, { params: Promise.resolve({ orderId: order._id }) });
       assert.equal(res.status, 401);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 });

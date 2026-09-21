@@ -17,18 +17,18 @@ import assert from "node:assert/strict";
 import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestUser, createTestProduct, deleteRows, rawQuery } from "./helpers/testDb.mjs";
 
 async function countOrders(userId) {
-  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [userId]);
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [userId]);
   return n;
 }
 async function countEventsByPayloadOrderId(type, orderId) {
   const [{ n }] = await rawQuery(
-    "SELECT COUNT(*) AS n FROM events WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?",
+    "SELECT COUNT(*) AS n FROM storefront_events WHERE type = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?",
     [type, orderId],
   );
   return n;
 }
 async function countEventsByChannelType(channel, type) {
-  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM events WHERE channel = ? AND type = ?", [channel, type]);
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM storefront_events WHERE channel = ? AND type = ?", [channel, type]);
   return n;
 }
 async function countPaymentsForOrder(orderId) {
@@ -127,7 +127,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(eventCount, 1, "exactly one NEW_ORDER event must exist for the newly committed order");
 
     await deleteRows("orders", "id", order._id);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("createOrder: sequential idempotent replay produces exactly one NEW_ORDER event, never two", async () => {
@@ -145,7 +145,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(eventCount, 1, "a sequential replay must never create a second NEW_ORDER event");
 
     await deleteRows("orders", "id", first.order._id);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [first.order._id.toString()]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [first.order._id.toString()]);
   });
 
   test("createOrder: concurrent idempotent replay (same key, simultaneous requests) still produces exactly one NEW_ORDER event", async () => {
@@ -164,7 +164,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(eventCount, 1, "a concurrent replay race must never create a second NEW_ORDER event");
 
     await deleteRows("orders", "id", winnerId);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [winnerId]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [winnerId]);
   });
 
   test("cancelOrder: a forced Event.create failure rolls back the cancellation transaction — order status is unchanged, stock is not restored", async () => {
@@ -189,7 +189,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(cancelledEvents, 0);
 
     await deleteRows("orders", "id", order._id);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("cancelOrder: a successful cancellation commits both the status change and its two events atomically", async () => {
@@ -209,7 +209,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(adminEvents, 1);
 
     await deleteRows("orders", "id", order._id);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("codCreate: a forced Event.create failure rolls back the Payment creation and order-status change together", async () => {
@@ -234,7 +234,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
     assert.equal(paymentCount, 0, "no Payment document must exist — it rolled back with the same transaction");
 
     await deleteRows("orders", "id", order._id);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("codCreate: a successful COD creation commits the Payment, the order status change, and the event atomically", async () => {
@@ -254,7 +254,7 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
 
     await deleteRows("orders", "id", order._id);
     await deleteRows("payments", "order_id", order._id);
-    await rawQuery("DELETE FROM events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
+    await rawQuery("DELETE FROM storefront_events WHERE JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?", [order._id.toString()]);
   });
 
   test("createProduct (non-transactional): the event write is genuinely AWAITED — the function does not return until the emit settles", async () => {

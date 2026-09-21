@@ -113,11 +113,11 @@ describe("product create/edit + storefront visibility (shoes)", { skip: !canRun 
 
   after(async () => {
     try {
-      await deleteRows("carts", "user_id", madeUsers);
+      await deleteRows("carts", "customer_id", madeUsers);
       await deleteRows("products", "id", madeProducts);
       await deleteRows("attribute_definitions", "id", madeDefs);
       await deleteRows("categories", "id", madeCategories);
-      await deleteRows("users", "id", madeUsers);
+      await deleteRows("customers", "id", madeUsers);
     } finally {
       await disconnectTestDb();
     }

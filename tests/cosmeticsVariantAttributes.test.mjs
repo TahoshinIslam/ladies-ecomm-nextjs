@@ -150,13 +150,13 @@ describe("Variant attributes generalize beyond color/size/fabric (cosmetics test
       assert.equal(orderAttrs[shadeDef.key], "ivory");
       assert.ok(!("color" in orderAttrs) && !("size" in orderAttrs) && !("fabric" in orderAttrs));
 
-      await deleteRows("orders", "user_id", user._id);
+      await deleteRows("orders", "customer_id", user._id);
     } finally {
-      await deleteRows("carts", "user_id", user._id);
+      await deleteRows("carts", "customer_id", user._id);
       await deleteRows("products", "id", product._id);
       await deleteRows("attribute_definitions", "id", shadeDef._id);
       await deleteRows("categories", "id", [department._id, leaf._id]);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 });

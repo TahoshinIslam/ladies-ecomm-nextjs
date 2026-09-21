@@ -60,7 +60,7 @@ describe("image framing persistence", { skip: !canRun && reason }, () => {
       await deleteRows("promotions", "id", madePromotions);
       await deleteRows("products", "id", madeProducts);
       await deleteRows("categories", "id", madeCategories);
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     } finally {
       await disconnectTestDb();
     }

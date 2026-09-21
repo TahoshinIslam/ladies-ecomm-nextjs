@@ -370,9 +370,13 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
   // an edit reads the current rows plainly (the products-row UPDATE that
   // precedes this call already serialises edits of the same product) and
   // deletes them by PRIMARY KEY, which takes record locks only.
+  // Declared for the whole function, not just the edit branch below: the
+  // insert loops after it run for a brand-new product too, and scoping this
+  // to `if (!isNew)` made every product creation throw ReferenceError.
+  const organizationId = getOrganizationId();
+
   let variantIds = (product.variants || []).map(() => generateObjectId());
   if (!isNew) {
-    const organizationId = getOrganizationId();
     const [existingRows] = await conn.query(
       "SELECT id, sku FROM product_variants WHERE organization_id = ? AND product_id = ?",
       [organizationId, productId],

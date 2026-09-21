@@ -131,7 +131,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(customer._id) }));
       assert.equal(res.status, 403);
     } finally {
-      await deleteRows("users", "id", customer._id);
+      await deleteRows("customers", "id", customer._id);
     }
   });
 
@@ -143,7 +143,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const json = await res.json();
       assert.equal(json.url, "https://res.cloudinary.com/mock/image/upload/mock-id.png");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -155,7 +155,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const json = await res.json();
       assert.match(json.message, /No file uploaded/i);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -167,7 +167,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 400);
       assert.equal(cloudinaryMockState.calls.length, before, "Cloudinary must never be reached for a rejected file");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -177,7 +177,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/webp", fileName: "photo.webp", bytes: realImageBytes("webp") }));
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -187,7 +187,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/jpeg", fileName: "photo.jpg", bytes: realImageBytes("jpeg") }));
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -197,7 +197,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "image/avif", fileName: "photo.avif", bytes: realImageBytes("avif") }));
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -207,7 +207,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), mimeType: "application/pdf", fileName: "doc.pdf" }));
       assert.equal(res.status, 415);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -217,7 +217,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("png", 5 * 1024 * 1024 + 1) }));
       assert.equal(res.status, 413);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -227,7 +227,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("png", 5 * 1024 * 1024) }));
       assert.equal(res.status, 201, "services/uploadService.js: `file.size > MAX_BYTES` — exactly MAX_BYTES is not rejected");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -248,7 +248,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const json = await res.json();
       assert.equal(json.files.length, 2);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -266,7 +266,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadMultiplePOST(req);
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -281,7 +281,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.ok(!("stack" in json));
     } finally {
       cloudinaryMockState.shouldReject = false;
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -298,7 +298,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.ok(!("stack" in badJson));
       assert.ok(!badJson.message.includes("/Users/") && !badJson.message.includes("/app/"), "no filesystem path in the error message");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -317,7 +317,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       // real PNG, so this succeeds purely on the filename being irrelevant.
       assert.equal(res.status, 201, "the filename itself is never inspected, so a hostile filename doesn't even reach a validation branch");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -327,7 +327,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), fileName: "no_extension_at_all" }));
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -337,7 +337,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), fileName: "PHOTO.PNG" }));
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -350,7 +350,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415, "a spoofed declared MIME type on non-image bytes is now rejected by the real signature check");
       assert.equal(cloudinaryMockState.calls.length, before, "Cloudinary must never be reached for a rejected file");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -363,7 +363,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415);
       assert.equal(cloudinaryMockState.calls.length, before);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -376,7 +376,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415);
       assert.equal(cloudinaryMockState.calls.length, before);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -389,7 +389,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415, "image/svg+xml was never in ALLOWED_TYPES to begin with");
       assert.equal(cloudinaryMockState.calls.length, before);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -402,7 +402,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415);
       assert.equal(cloudinaryMockState.calls.length, before);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -416,7 +416,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415);
       assert.equal(cloudinaryMockState.calls.length, before);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -428,7 +428,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       assert.equal(res.status, 415, "a real image whose declared type doesn't match its actual signature must still be rejected");
       assert.equal(cloudinaryMockState.calls.length, before);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 
@@ -438,7 +438,7 @@ describe("Upload: POST /api/upload, POST /api/upload/multiple (Cloudinary mocked
       const res = await uploadPOST(uploadRequest({ session: await createTestSession(admin._id), bytes: realImageBytes("jpeg"), mimeType: "image/jpg", fileName: "photo.jpg" }));
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 });

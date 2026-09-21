@@ -33,7 +33,7 @@ import {
 async function countOrders(userIds, couponId) {
   const ids = Array.isArray(userIds) ? userIds : [userIds];
   const [{ n }] = await rawQuery(
-    `SELECT COUNT(*) AS n FROM orders WHERE user_id IN (${ids.map(() => "?").join(",")}) AND coupon_id = ?`,
+    `SELECT COUNT(*) AS n FROM orders WHERE customer_id IN (${ids.map(() => "?").join(",")}) AND coupon_id = ?`,
     [...ids, couponId],
   );
   return n;
@@ -98,7 +98,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.discount, 150);
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -111,7 +111,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.discount, 100, "10% of 1000 = 100");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -126,7 +126,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.discount, 200);
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -141,7 +141,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.message, "Coupon is inactive");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -154,7 +154,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.message, "Coupon has expired");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -173,7 +173,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(res.status, 200, "confirmed: a coupon 'meant' to start later is usable immediately — no such gate exists in the code");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -188,7 +188,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.message, "Minimum order of 500 required");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -207,7 +207,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.message, "Coupon usage limit reached");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -219,7 +219,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(res.status, 400);
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -232,7 +232,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(res.status, 404);
       assert.equal(json.message, "Coupon not found");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -244,7 +244,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(res.status, 200, "services/couponService.js's validateCoupon() explicitly does code?.toUpperCase() before the lookup");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -267,7 +267,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(res.status, 200, "confirmed: whitespace-padded codes resolve successfully via Mongoose's automatic query-side trim/uppercase casting");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -292,7 +292,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(res.status, 404);
       assert.equal(json.message, "Coupon not found");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -311,7 +311,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(stored.usedCount, 0, "validateCoupon() never writes — repeated calls never consume usage");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -334,7 +334,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(stored.usedCount, 0, "confirms no write occurred — this is NOT a claim-safety test");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -376,10 +376,10 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       const successfulCount = await countOrders([buyer1._id, buyer2._id], coupon._id);
       assert.equal(successfulCount, 1, "only the winning order actually references the coupon");
     } finally {
-      await deleteRows("orders", "user_id", [buyer1._id, buyer2._id]);
+      await deleteRows("orders", "customer_id", [buyer1._id, buyer2._id]);
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [buyer1._id, buyer2._id]);
+      await deleteRows("customers", "id", [buyer1._id, buyer2._id]);
     }
   });
 
@@ -411,10 +411,10 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       const finalCoupon = await Coupon.findById(coupon._id);
       assert.equal(finalCoupon.usedCount, 1, "the rejected second attempt must not have incremented global usedCount either");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -444,10 +444,10 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       const res2 = await place(buyer2);
       assert.equal(res2.status, 201, "a different user's own per-user limit is independent");
     } finally {
-      await deleteRows("orders", "user_id", [buyer1._id, buyer2._id]);
+      await deleteRows("orders", "customer_id", [buyer1._id, buyer2._id]);
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", [buyer1._id, buyer2._id]);
+      await deleteRows("customers", "id", [buyer1._id, buyer2._id]);
     }
   });
 
@@ -477,10 +477,10 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.ok(statuses.every((s) => [201, 400, 409].includes(s)), "no raw duplicate-key 500 may surface");
       assert.equal(statuses.filter((s) => s === 201).length, 1, "exactly one of the two concurrent orders for this user may claim the coupon");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("products", "id", [productA._id, productB._id]);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -526,10 +526,10 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       );
       assert.equal(succeeding.status, 201);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -582,10 +582,10 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       );
       assert.equal(again.status, 201, "restored usage means this user can use the coupon again after cancelling");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -600,7 +600,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       assert.equal(json.discount, 330);
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -617,7 +617,7 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
       );
     } finally {
       await deleteRows("coupons", "id", coupon._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 });

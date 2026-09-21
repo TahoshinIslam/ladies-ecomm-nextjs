@@ -70,7 +70,7 @@ describe("POST /api/upload — Cloudinary unconfigured (503, no credential/stack
       assert.ok(!json.message.includes("/Users/"), "no filesystem path leaked");
       assert.ok(!("stack" in json), "no stack trace field in the response body");
     } finally {
-      await deleteRows("users", "id", admin._id);
+      await deleteRows("customers", "id", admin._id);
     }
   });
 });

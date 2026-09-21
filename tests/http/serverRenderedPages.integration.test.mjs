@@ -92,7 +92,7 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
   after(async () => {
     if (createdIds.orders.length) await deleteRows("orders", "id", createdIds.orders);
     if (createdIds.products.length) await deleteRows("products", "id", createdIds.products);
-    if (createdIds.users.length) await deleteRows("users", "id", createdIds.users);
+    if (createdIds.users.length) await deleteRows("customers", "id", createdIds.users);
     await disconnectTestDb();
   });
 

@@ -104,9 +104,9 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
       assert.equal(refreshedLineA.quantity, 2);
       assert.equal(refreshedLineB.quantity, 2);
     } finally {
-      await deleteRows("carts", "user_id", user._id);
+      await deleteRows("carts", "customer_id", user._id);
       await deleteRows("products", "id", [productA._id, productB._id]);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -136,10 +136,10 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
       const order = (await orderRes.json()).order;
       assert.equal(String(order.user), String(user._id));
     } finally {
-      await deleteRows("orders", "user_id", user._id);
-      await deleteRows("carts", "user_id", user._id);
+      await deleteRows("orders", "customer_id", user._id);
+      await deleteRows("carts", "customer_id", user._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -155,7 +155,7 @@ describe("Guest-cart merge, checkout, and logout continuity under session-cookie
       const afterLogout = await cartGET(requestAs({ method: "GET", url: "http://test/api/cart", session }));
       assert.equal(afterLogout.status, 401, "the old session cookie no longer authenticates cart access — the client falls back to its (untouched) guest cart");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 });

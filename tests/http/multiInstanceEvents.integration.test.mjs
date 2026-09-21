@@ -45,7 +45,7 @@ async function countEvents({ channel, type, orderId }) {
     clauses.push("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?");
     params.push(orderId);
   }
-  const rows = await rawQuery(`SELECT COUNT(*) AS n FROM events WHERE ${clauses.join(" AND ")}`, params);
+  const rows = await rawQuery(`SELECT COUNT(*) AS n FROM storefront_events WHERE ${clauses.join(" AND ")}`, params);
   return Number(rows[0].n);
 }
 
@@ -164,7 +164,7 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
   after(async () => {
     if (dbConnectable) {
       if (order?._id) await deleteRows("orders", "id", order._id);
-      await rawQuery("DELETE FROM events");
+      await rawQuery("DELETE FROM storefront_events");
       await disconnectTestDb();
     }
   });

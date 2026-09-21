@@ -68,7 +68,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
     assert.equal(json.user.email, email);
     assert.equal(json.user.password, undefined, "password must never appear in the response");
     assert.ok(sessionCookieFromResponse(res), "Set-Cookie: tahos_session=... must be present");
-    await rawQuery("DELETE FROM users WHERE email = ?", [email]);
+    await rawQuery("DELETE FROM customers WHERE email = ?", [email]);
   });
 
   test("successful login sets a session cookie, no token in the response body", async () => {
@@ -91,11 +91,11 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // normal find() without this explicit opt-in confirms the field-level
       // protection itself, tested separately in tests/session.test.mjs;
       // here we opt in specifically to verify the STORED VALUE is a hash.
-      const [stored] = await rawQuery("SELECT token_hash FROM sessions WHERE user_id = ?", [user._id]);
+      const [stored] = await rawQuery("SELECT token_hash FROM customer_sessions WHERE customer_id = ?", [user._id]);
       assert.notEqual(stored.token_hash, rawValue, "the stored value must be a hash, not the raw token itself");
       assert.equal(stored.token_hash.length, 64, "SHA-256 hex digest is 64 characters");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -109,7 +109,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       assert.equal(json.message, "Invalid credentials");
       assert.equal(sessionCookieFromResponse(res), undefined);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -143,7 +143,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await loginPOST(correctReq);
       assert.equal(res.status, 423, "a locked account rejects even the correct password");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -169,7 +169,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // "no lock is in effect," holds either way.
       assert.equal(after_.lockUntil, null);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -205,13 +205,13 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // index's own background sweep (which runs on its own ~60s cycle).
       const crypto = await import("node:crypto");
       const tokenHash = crypto.createHash("sha256").update(session.rawToken).digest("hex");
-      await rawQuery("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
+      await rawQuery("UPDATE customer_sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
 
       const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -226,14 +226,14 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
   test("a session for a user that no longer exists is rejected (401) — no server-side session to fall back on", async () => {
     const user = await createTestUser({ role: "customer" });
     const session = await createTestSession(user._id);
-    await deleteRows("users", "id", user._id); // delete AFTER creating the session — the session record itself is still otherwise valid
+    await deleteRows("customers", "id", user._id); // delete AFTER creating the session — the session record itself is still otherwise valid
     const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
     const res = await mePOST_GET(req);
     assert.equal(res.status, 401, "lib/session.js's validateSessionToken() returns null when the referenced user no longer exists, even for an otherwise well-formed, unexpired, unrevoked session");
@@ -243,28 +243,40 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
   // Using GET /api/coupons (requirePermission(COUPONS_MANAGE)) as the
   // representative admin/staff-gated endpoint.
 
-  test("admin permission enforcement: an admin (bypasses granular permissions entirely) can access a permission-gated route", async () => {
-    const admin = await createTestUser({ role: "admin" });
-    try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(admin._id) });
-      const res = await couponsGET(req);
-      assert.equal(res.status, 200);
-    } finally {
-      await deleteRows("users", "id", admin._id);
-    }
-  });
+  // These two tests used to assert the other side of this gate: that an
+  // admin bypassed granular permissions, and that an employee holding
+  // coupons.manage got a 200. Neither can be true any more and neither
+  // should be — shop management moved to the admin dashboard, and the
+  // accounts this app can authenticate are shoppers. `customers` has no
+  // role and no permissions column, so there is no longer any session this
+  // app can mint that reaches a staff-gated route.
+  //
+  // What replaces them is the inverse, which is now the property worth
+  // holding: nothing gets through, and the refusal says where to go.
 
-  test("staff permission enforcement: an employee WITH coupons.manage succeeds, WITHOUT it is rejected (403)", async () => {
-    const withPerm = await createTestUser({ role: "employee", permissions: ["coupons.manage"] });
-    const withoutPerm = await createTestUser({ role: "employee", permissions: [] });
+  test("no session this app can create reaches a staff-gated route, whatever role is asked for", async () => {
+    // "admin" and "employee" are accepted and ignored by createTestUser —
+    // asking for them is exactly the case worth pinning, because it is what
+    // a reader would try first when re-opening this door by accident.
+    const shoppers = [
+      await createTestUser({ role: "admin" }),
+      await createTestUser({ role: "employee", permissions: ["coupons.manage"] }),
+      await createTestUser({ role: "customer" }),
+    ];
     try {
-      const okReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withPerm._id) });
-      assert.equal((await couponsGET(okReq)).status, 200);
-
-      const forbiddenReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withoutPerm._id) });
-      assert.equal((await couponsGET(forbiddenReq)).status, 403);
+      for (const shopper of shoppers) {
+        const req = requestAs({
+          method: "GET",
+          url: "http://test/api/coupons",
+          session: await createTestSession(shopper._id),
+        });
+        const res = await couponsGET(req);
+        assert.equal(res.status, 403, "a staff-gated route must refuse every storefront account");
+        const body = await res.json();
+        assert.match(body.message, /admin dashboard/i, "the refusal should say where shop management went");
+      }
     } finally {
-      await deleteRows("users", "id", [withPerm._id, withoutPerm._id]);
+      await deleteRows("customers", "id", shoppers.map((u) => u._id));
     }
   });
 
@@ -275,7 +287,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await couponsGET(req);
       assert.equal(res.status, 403);
     } finally {
-      await deleteRows("users", "id", customer._id);
+      await deleteRows("customers", "id", customer._id);
     }
   });
 });

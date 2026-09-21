@@ -157,7 +157,7 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const res = await createOrderReq(jar, product, { omitKey: true });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -170,7 +170,7 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const res = await createOrderReq(jar, product, { idempotencyKey: "too short" });
       assert.equal(res.status, 400);
     } finally {
-      await deleteRows("users", "id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -183,8 +183,8 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const res = await createOrderReq(jar, product, { idempotencyKey: freshKey() });
       assert.equal(res.status, 201);
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -213,8 +213,8 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const p = await Product.findById(product._id);
       assert.equal(p.variants[0].stock, 4, "requirement 7: stock decremented exactly once across the real request + its replay");
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -234,11 +234,11 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const [json1, json2] = await Promise.all([res1.json(), res2.json()]);
       assert.equal(String(json1.order._id), String(json2.order._id));
 
-      const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [userId]);
+      const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [userId]);
       assert.equal(n, 1);
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -258,8 +258,8 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       });
       assert.equal(res2.status, 422);
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -276,8 +276,8 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const [json1, json2] = await Promise.all([res1.json(), res2.json()]);
       assert.notEqual(json1.order._id, json2.order._id);
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -297,8 +297,8 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       assert.notEqual(jsonA.order._id, jsonB.order._id);
     } finally {
       const ids = [buyerA.userId, buyerB.userId];
-      await deleteRows("orders", "user_id", ids);
-      await deleteRows("users", "id", ids);
+      await deleteRows("orders", "customer_id", ids);
+      await deleteRows("customers", "id", ids);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -319,8 +319,8 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       });
       assert.equal(noCsrf.status, 403, "requirement 12: CSRF remains mandatory for order creation");
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -349,9 +349,9 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1, "exactly one Payment row over real HTTP duplicate COD requests");
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("payments", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("payments", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -371,9 +371,9 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       const payments = await rawQuery("SELECT * FROM payments WHERE order_id = ?", [order._id]);
       assert.equal(payments.length, 1);
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("payments", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("payments", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });
@@ -398,9 +398,9 @@ describe("Phase 4B closure — real HTTP: order-request and COD idempotency requ
       assert.equal(deliveredRetry.status, 200);
       assert.equal((await deliveredRetry.json()).order.status, "delivered", "delivered must never regress to processing");
     } finally {
-      await deleteRows("orders", "user_id", userId);
-      await deleteRows("payments", "user_id", userId);
-      await deleteRows("users", "id", userId);
+      await deleteRows("orders", "customer_id", userId);
+      await deleteRows("payments", "customer_id", userId);
+      await deleteRows("customers", "id", userId);
       await deleteRows("products", "id", product._id);
     }
   });

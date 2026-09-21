@@ -41,7 +41,7 @@ import {
 } from "./helpers/testDb.mjs";
 
 async function countOrdersForUser(userId) {
-  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE user_id = ?", [userId]);
+  const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [userId]);
   return n;
 }
 
@@ -83,9 +83,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
     const settings = await Settings.getSingleton();
     settings.promotions.firstOrderFreeShipping = priorPromoSetting;
     await settings.save();
-    await deleteRows("orders", "user_id", user._id);
+    await deleteRows("orders", "customer_id", user._id);
     await deleteRows("products", "id", product._id);
-    await deleteRows("users", "id", user._id);
+    await deleteRows("customers", "id", user._id);
     // Deliberately NOT disconnecting here — this file has a second
     // describe() block below that shares the same connection. Only the
     // very last describe's after() disconnects.
@@ -146,9 +146,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       assert.equal(updatedUser.firstOrderPromoUsed, true, "the promo flag was claimed exactly once");
       assert.equal(json1.order.shippingCost, 0, "the first (real) order got the free-shipping promo");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -170,7 +170,7 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
     assert.equal(String(json1.order._id), String(json2.order._id), "both concurrent responses refer to the same Order");
 
     const orders = await rawQuery(
-      "SELECT o.* FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.user_id = ? AND oi.product_id = ?",
+      "SELECT o.* FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE o.customer_id = ? AND oi.product_id = ?",
       [user._id, product._id],
     );
     assert.equal(orders.length, 1, "exactly one Order document exists for this concurrent pair");
@@ -202,9 +202,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const json2 = await res2.json();
       assert.equal(String(json2.order._id), String(json1.order._id));
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -228,9 +228,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       assert.equal(String(replayJson.order._id), String(actualOrder._id));
       assert.equal(await countOrdersForUser(buyer._id), 1);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -259,9 +259,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const stockAfterSecond = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(stockAfterSecond, stockAfterFirst, "no additional stock mutation from the rejected request");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -283,9 +283,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const jsonB = await resB.json();
       assert.notEqual(String(jsonA.order._id), String(jsonB.order._id));
     } finally {
-      await deleteRows("orders", "user_id", [buyerA._id, buyerB._id]);
+      await deleteRows("orders", "customer_id", [buyerA._id, buyerB._id]);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", [buyerA._id, buyerB._id]);
+      await deleteRows("customers", "id", [buyerA._id, buyerB._id]);
     }
   });
 
@@ -436,9 +436,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const afterStock = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(afterStock, stockBefore - 1);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -474,9 +474,9 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
       const stockAfterReplay = (await Product.findById(p._id)).variants[0].stock;
       assert.equal(stockAfterReplay, stockAfterCancel, "the replay must not touch stock again");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", p._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 });
@@ -494,9 +494,9 @@ describe("Order idempotency index — real MySQL behavior", { skip: !canRun && r
   });
 
   after(async () => {
-    await deleteRows("orders", "user_id", user._id);
+    await deleteRows("orders", "customer_id", user._id);
     await deleteRows("products", "id", product._id);
-    await deleteRows("users", "id", user._id);
+    await deleteRows("customers", "id", user._id);
     await disconnectTestDb();
   });
 
@@ -508,7 +508,7 @@ describe("Order idempotency index — real MySQL behavior", { skip: !canRun && r
   // service logic layered on top of it.
   const createRaw = (data) => withTransaction((conn) => Order.create(data, conn));
 
-  test("the unique compound index on (user_id, idempotency_key_hash) exists in MySQL, over a nullable column (the functional equivalent of Mongo's partial-filter index)", async () => {
+  test("the unique compound index on (customer_id, idempotency_key_hash) exists in MySQL, over a nullable column (the functional equivalent of Mongo's partial-filter index)", async () => {
     const rows = await rawQuery("SHOW INDEX FROM orders");
     const byName = {};
     for (const r of rows) {
@@ -516,10 +516,10 @@ describe("Order idempotency index — real MySQL behavior", { skip: !canRun && r
       byName[r.Key_name].push(r);
     }
     const idx = byName.uq_orders_user_idempotency;
-    assert.ok(idx, "the (user_id, idempotency_key_hash) index must exist");
+    assert.ok(idx, "the (customer_id, idempotency_key_hash) index must exist");
     assert.equal(idx[0].Non_unique, 0, "must be unique");
     const cols = idx.map((c) => c.Column_name);
-    assert.deepEqual(cols, ["user_id", "idempotency_key_hash"]);
+    assert.deepEqual(cols, ["customer_id", "idempotency_key_hash"]);
   });
 
   test("legacy orders with no idempotencyKeyHash at all can coexist without colliding on the unique index", async () => {
@@ -573,8 +573,8 @@ describe("Order idempotency index — real MySQL behavior", { skip: !canRun && r
       assert.ok(a._id);
       assert.ok(b._id);
     } finally {
-      await deleteRows("orders", "user_id", otherUser._id);
-      await deleteRows("users", "id", otherUser._id);
+      await deleteRows("orders", "customer_id", otherUser._id);
+      await deleteRows("customers", "id", otherUser._id);
     }
   });
 
