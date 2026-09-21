@@ -7,7 +7,8 @@
  * products, customers or orders to this shop's visitors. There is no runtime
  * signal for that, so the check has to be static.
  *
- * It reads every SQL string literal in models/, works out which tables it
+ * It reads every SQL string literal under the directories below, works out
+ * which tables it
  * touches, and requires the statement to mention `organization_id` whenever
  * one of them is tenant-scoped. Crude on purpose: it cannot tell a correct
  * scope from a decorative mention of the column, so it proves only that the
@@ -16,8 +17,8 @@
  *
  *   node scripts/checkTenantScoping.mjs
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 /** Tables carrying organization_id in the shared schema. */
 const TENANT_TABLES = new Set([
@@ -58,8 +59,31 @@ const SOFT_DELETED = new Set([
 const SQL_START = /\b(SELECT|INSERT\s+(?:IGNORE\s+)?INTO|UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\b/i;
 const TABLE_REF = /\b(?:FROM|JOIN|INTO|UPDATE)\s+`?([a-z_][a-z0-9_]*)`?/gi;
 
+/**
+ * Where SQL lives. `models/` is most of it, but not all: analytics builds
+ * its own aggregates, and the expiry sweeper deletes by table name. A check
+ * that only read models/ would have passed a dashboard query selecting
+ * `FROM users` — a table this app no longer owns.
+ */
+const ROOTS = ["models", "services", "lib", "app"];
+const SKIP_DIRS = new Set(["node_modules", ".next", ".git"]);
+
 const failures = [];
-const modelsDir = join(process.cwd(), "models");
+
+function* sourceFiles(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (SKIP_DIRS.has(entry)) continue;
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) yield* sourceFiles(full);
+    else if (/\.(js|jsx|mjs)$/.test(entry)) yield full;
+  }
+}
 
 /**
  * Pull string and template literals out of JavaScript source.
@@ -137,8 +161,9 @@ function resolveConstants(sql, source) {
   });
 }
 
-for (const file of readdirSync(modelsDir).filter((f) => f.endsWith(".js"))) {
-  const source = readFileSync(join(modelsDir, file), "utf8");
+for (const path of ROOTS.flatMap((r) => [...sourceFiles(join(process.cwd(), r))])) {
+  const file = relative(process.cwd(), path);
+  const source = readFileSync(path, "utf8");
 
   for (const { value: raw, line } of stringLiterals(source)) {
     const sql = resolveConstants(raw, source);
@@ -182,7 +207,7 @@ for (const file of readdirSync(modelsDir).filter((f) => f.endsWith(".js"))) {
 }
 
 if (!failures.length) {
-  console.log("Tenant scoping: every query in models/ names its organization.");
+  console.log(`Tenant scoping: every query in ${ROOTS.join("/, ")}/ names its organization.`);
   process.exit(0);
 }
 
@@ -191,7 +216,7 @@ for (const f of failures) byFile.set(f.file, [...(byFile.get(f.file) ?? []), f])
 
 console.log(`\n${failures.length} unscoped or stale quer${failures.length === 1 ? "y" : "ies"}:\n`);
 for (const [file, items] of [...byFile].sort((a, b) => b[1].length - a[1].length)) {
-  console.log(`  models/${file}  (${items.length})`);
+  console.log(`  ${file}  (${items.length})`);
   for (const i of items) {
     console.log(`      line ${String(i.line).padEnd(4)} ${i.table} — ${i.reason}`);
     if (i.sql) console.log(`               ${i.sql}`);

@@ -188,9 +188,9 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
 
     if (key === "availability") {
       if (val === "in_stock") {
-        clauses.push("EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)");
+        clauses.push("EXISTS (SELECT 1 FROM product_variants pv WHERE pv.organization_id = products.organization_id AND pv.product_id = products.id AND pv.stock > 0)");
       } else if (val === "out_of_stock") {
-        clauses.push("NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)");
+        clauses.push("NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.organization_id = products.organization_id AND pv.product_id = products.id AND pv.stock > 0)");
       }
       continue;
     }
@@ -250,7 +250,7 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
       const values = String(val).split(",").map((v) => v.trim()).filter(Boolean);
       if (values.length) {
         attributeClauses.push({
-          sql: `EXISTS (SELECT 1 FROM product_attributes pa WHERE pa.product_id = products.id AND pa.attr_key = ? AND pa.attr_value IN (${values.map(() => "?").join(",")}))`,
+          sql: `EXISTS (SELECT 1 FROM product_attributes pa WHERE pa.organization_id = products.organization_id AND pa.product_id = products.id AND pa.attr_key = ? AND pa.attr_value IN (${values.map(() => "?").join(",")}))`,
           params: [rawKey, ...values],
         });
       }
@@ -320,11 +320,11 @@ export async function buildFacetCounts(query, baseFilter, scopeIds) {
       Product.countByFilter(`${collectionFilter.where} AND is_featured = 1`, collectionFilter.params),
       Product.countByFilter(`${collectionFilter.where} AND ${REAL_DISCOUNT_SQL}`, collectionFilter.params),
       Product.countByFilter(
-        `${availabilityFilter.where} AND EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)`,
+        `${availabilityFilter.where} AND EXISTS (SELECT 1 FROM product_variants pv WHERE pv.organization_id = products.organization_id AND pv.product_id = products.id AND pv.stock > 0)`,
         availabilityFilter.params,
       ),
       Product.countByFilter(
-        `${availabilityFilter.where} AND NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = products.id AND pv.stock > 0)`,
+        `${availabilityFilter.where} AND NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.organization_id = products.organization_id AND pv.product_id = products.id AND pv.stock > 0)`,
         availabilityFilter.params,
       ),
       Product.countByFilter(`${ratingFilter.where} AND rating >= 5`, ratingFilter.params),

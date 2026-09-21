@@ -12,7 +12,11 @@
  * `?` count stopped matching its parameter array when the scope was added.
  * Those throw the moment they execute.
  *
- *   node --env-file=.env scripts/testTenantIsolation.mjs
+ *   npm run test:tenancy
+ *
+ * It runs under tests/helpers/nextResolveHook.mjs because the services it
+ * exercises import "next/server", which plain Node cannot resolve on an
+ * extensionless subpath.
  *
  * The decoy organization is created and removed by this script. Nothing
  * belonging to the real store is written.
@@ -236,7 +240,54 @@ async function run() {
     `${attrs.length} definitions`);
   check("attribute by key is scoped", (await AttributeDefinition.findByKeys(["decoyattr"])).length === 0);
 
+  /* ── Aggregates must count only this store ──────────────────────────── */
+
+  const analytics = await import("../services/analyticsService.js");
+  const overview = await analytics.getOverview();
+  const [{ n: realOrders }] = await query(
+    `SELECT COUNT(*) AS n FROM orders
+      WHERE organization_id = ? AND deleted_at IS NULL AND status NOT IN ('cancelled', 'refunded')`,
+    [org],
+  );
+  const [{ n: realCustomers }] = await query(
+    "SELECT COUNT(*) AS n FROM customers WHERE organization_id = ? AND deleted_at IS NULL",
+    [org],
+  );
+  check("order count excludes the decoy", Number(overview.totalOrders) === Number(realOrders),
+    `${overview.totalOrders} orders`);
+  check("customer count excludes the decoy", Number(overview.totalUsers) === Number(realCustomers),
+    `${overview.totalUsers} customers`);
+  check("revenue excludes the decoy's 999", overview.totalRevenue < 999 || !String(overview.totalRevenue).includes("999"),
+    `revenue ${overview.totalRevenue}`);
+
+  const top = await analytics.getTopProducts(50);
+  check("top products exclude the decoy", !top.some((t) => t._id === decoy.productId));
+  const byMethod = await analytics.getRevenueByMethod();
+  check("revenue by method excludes the decoy",
+    byMethod.reduce((sum, r) => sum + r.revenue, 0) < Number(overview.totalRevenue) + 1);
+  const breakdown = await analytics.getStatusBreakdown();
+  check("status breakdown counts only this store",
+    breakdown.reduce((sum, r) => sum + Number(r.count), 0) ===
+      Number((await query("SELECT COUNT(*) AS n FROM orders WHERE organization_id = ? AND deleted_at IS NULL", [org]))[0].n));
+
   /* ── Writes must not reach across either ────────────────────────────── */
+
+  // A helpful vote on another store's review must not land.
+  const reviewService = await import("../services/reviewService.js");
+  let votedAcross = false;
+  try {
+    await reviewService.markHelpful(decoy.reviewId, decoy.customerId);
+    votedAcross = true;
+  } catch {
+    // 404 is the expected outcome: the review is not visible here.
+  }
+  const [decoyReview] = await query(
+    "SELECT helpful_count FROM reviews WHERE organization_id = ? AND id = ?",
+    [decoyId, decoy.reviewId],
+  );
+  check("a helpful vote cannot reach another store's review",
+    !votedAcross && Number(decoyReview.helpful_count) === 0);
+
 
   const before = await query(
     "SELECT is_active FROM storefront_themes WHERE organization_id = ? AND id = ?",

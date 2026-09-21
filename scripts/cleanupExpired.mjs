@@ -44,6 +44,7 @@
 
 import connectDB, { query, closePool } from "../config/db.js";
 import { countExpired, runExpiryCleanup, EXPIRY_CLEANUP_TABLES } from "../lib/expiryCleanup.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
@@ -56,14 +57,14 @@ async function main() {
 
   if (DRY_RUN) {
     for (const table of EXPIRY_CLEANUP_TABLES) {
-      const n = await countExpired(query, table);
+      const n = await countExpired(query, table, getOrganizationId());
       log(`DRY RUN — would delete ${n} expired row(s) from ${table}. Nothing written.`);
     }
     await closePool();
     return;
   }
 
-  const { deleted, total } = await runExpiryCleanup(query);
+  const { deleted, total } = await runExpiryCleanup(query, getOrganizationId());
   for (const [table, n] of Object.entries(deleted)) {
     log(`${table}: deleted ${n} expired row(s)`);
   }

@@ -7,6 +7,7 @@ import { emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
 import { isDuplicateKeyError } from "../lib/idempotency.js";
 import { withTransaction } from "../lib/db/tx.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 export async function getProductReviews(productId, { page = 1, limit = 10 } = {}) {
   const skip = (Number(page) - 1) * Number(limit);
@@ -140,12 +141,17 @@ export async function deleteReview(reviewId, actingUser) {
 export async function markHelpful(reviewId, userId) {
   requireObjectIdFormat(reviewId, "reviewId");
   return withTransaction(async (conn) => {
-    const [reviewRows] = await conn.query("SELECT helpful_count FROM reviews WHERE id = ? FOR UPDATE", [reviewId]);
+    const organizationId = getOrganizationId();
+    const [reviewRows] = await conn.query(
+      `SELECT helpful_count FROM reviews
+        WHERE organization_id = ? AND id = ? AND deleted_at IS NULL FOR UPDATE`,
+      [organizationId, reviewId],
+    );
     if (!reviewRows.length) throw new HttpError(404, "Review not found");
 
     const [voteResult] = await conn.query(
-      "INSERT IGNORE INTO review_helpful_votes (review_id, user_id) VALUES (?, ?)",
-      [reviewId, userId],
+      "INSERT IGNORE INTO review_helpful_votes (organization_id, review_id, customer_id) VALUES (?, ?, ?)",
+      [organizationId, reviewId, userId],
     );
     if (voteResult.affectedRows === 0) {
       // Already voted — idempotent no-op, not an error: returns the
@@ -154,7 +160,10 @@ export async function markHelpful(reviewId, userId) {
       return reviewRows[0].helpful_count;
     }
 
-    await conn.query("UPDATE reviews SET helpful_count = helpful_count + 1 WHERE id = ?", [reviewId]);
+    await conn.query("UPDATE reviews SET helpful_count = helpful_count + 1 WHERE organization_id = ? AND id = ?", [
+      organizationId,
+      reviewId,
+    ]);
     return reviewRows[0].helpful_count + 1;
   });
 }
