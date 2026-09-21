@@ -88,17 +88,6 @@ const orderEndpoints = (b) => ({
         ? [...result.orders.map((o) => ({ type: "Order", id: o._id })), { type: "Order", id: "LIST" }]
         : [{ type: "Order", id: "LIST" }],
   }),
-  updateOrderStatus: b.mutation({
-    query: ({ id, ...body }) => ({
-      url: `/orders/${id}/status`,
-      method: "PUT",
-      body,
-    }),
-    // Same reasoning as cancelOrder above: the specific row + LIST (a
-    // status change can move this row across a status-filtered view's
-    // boundary).
-    invalidatesTags: (r, e, a) => [{ type: "Order", id: a.id }, { type: "Order", id: "LIST" }],
-  }),
 });
 
 // ====== Reviews ======
@@ -147,19 +136,6 @@ const reviewEndpoints = (b) => ({
     query: (id) => ({ url: `/reviews/${id}/helpful`, method: "POST" }),
     invalidatesTags: ["Review"],
   }),
-  // Admin
-  listAllReviews: b.query({
-    query: (params = {}) => `/reviews?${buildQueryString(params)}`,
-    providesTags: ["Review"],
-  }),
-  replyToReview: b.mutation({
-    query: ({ id, text }) => ({
-      url: `/reviews/${id}/reply`,
-      method: "POST",
-      body: { text },
-    }),
-    invalidatesTags: ["Review"],
-  }),
 });
 
 // ====== Coupons ======
@@ -167,54 +143,10 @@ const couponEndpoints = (b) => ({
   validateCoupon: b.mutation({
     query: (body) => ({ url: "/coupons/validate", method: "POST", body }),
   }),
-  listCoupons: b.query({
-    query: (params = {}) => `/coupons?${buildQueryString(params)}`,
-    providesTags: ["Coupon"],
-  }),
-  createCoupon: b.mutation({
-    query: (body) => ({ url: "/coupons", method: "POST", body }),
-    invalidatesTags: ["Coupon"],
-  }),
-  updateCoupon: b.mutation({
-    query: ({ id, ...body }) => ({
-      url: `/coupons/${id}`,
-      method: "PUT",
-      body,
-    }),
-    invalidatesTags: ["Coupon"],
-  }),
-  deleteCoupon: b.mutation({
-    query: (id) => ({ url: `/coupons/${id}`, method: "DELETE" }),
-    invalidatesTags: ["Coupon"],
-  }),
 });
 
 // ====== Promotions (admin) ======
 const promotionEndpoints = (b) => ({
-  listPromotions: b.query({
-    query: (params = {}) => `/promotions?${buildQueryString(params)}`,
-    providesTags: ["Promotion"],
-  }),
-  createPromotion: b.mutation({
-    query: (body) => ({ url: "/promotions", method: "POST", body }),
-    invalidatesTags: ["Promotion"],
-  }),
-  updatePromotion: b.mutation({
-    query: ({ id, ...body }) => ({ url: `/promotions/${id}`, method: "PUT", body }),
-    invalidatesTags: ["Promotion"],
-  }),
-  deletePromotion: b.mutation({
-    query: (id) => ({ url: `/promotions/${id}`, method: "DELETE" }),
-    invalidatesTags: ["Promotion"],
-  }),
-  duplicatePromotion: b.mutation({
-    query: (id) => ({ url: `/promotions/${id}/duplicate`, method: "POST" }),
-    invalidatesTags: ["Promotion"],
-  }),
-  reorderPromotions: b.mutation({
-    query: (body) => ({ url: "/promotions/reorder", method: "POST", body }),
-    invalidatesTags: ["Promotion"],
-  }),
 });
 
 // ====== Addresses ======
@@ -260,28 +192,6 @@ const paymentEndpoints = (b) => ({
 
 // ====== Upload ======
 const uploadEndpoints = (b) => ({
-  uploadImage: b.mutation({
-    query: ({ file, folder = "shoestore" }) => {
-      const fd = new FormData();
-      fd.append("image", file);
-      return {
-        url: `/upload?folder=${encodeURIComponent(folder)}`,
-        method: "POST",
-        body: fd,
-      };
-    },
-  }),
-  uploadMultiple: b.mutation({
-    query: ({ files, folder = "shoestore" }) => {
-      const fd = new FormData();
-      files.forEach((f) => fd.append("images", f));
-      return {
-        url: `/upload/multiple?folder=${encodeURIComponent(folder)}`,
-        method: "POST",
-        body: fd,
-      };
-    },
-  }),
 });
 
 // ====== Notifications ======
@@ -318,22 +228,6 @@ const categoryBrandEndpoints = (b) => ({
     query: () => "/categories",
     providesTags: ["Category"],
   }),
-  createCategory: b.mutation({
-    query: (body) => ({ url: "/categories", method: "POST", body }),
-    invalidatesTags: ["Category"],
-  }),
-  updateCategory: b.mutation({
-    query: ({ id, ...body }) => ({
-      url: `/categories/${id}`,
-      method: "PUT",
-      body,
-    }),
-    invalidatesTags: ["Category"],
-  }),
-  deleteCategory: b.mutation({
-    query: (id) => ({ url: `/categories/${id}`, method: "DELETE" }),
-    invalidatesTags: ["Category"],
-  }),
   // `{ category: topCategoryId }` scopes the returned brands to that
   // category's real products (see services/productService.js's
   // listBrandsForCategory()) — used by the storefront's Brand filter
@@ -341,18 +235,6 @@ const categoryBrandEndpoints = (b) => ({
   // no args, this keeps its original unscoped shape (every active brand),
   // which the admin product form's brand dropdown still relies on.
   getBrands: b.query({ query: (params = {}) => `/brands?${buildQueryString(params)}`, providesTags: ["Brand"] }),
-  createBrand: b.mutation({
-    query: (body) => ({ url: "/brands", method: "POST", body }),
-    invalidatesTags: ["Brand"],
-  }),
-  updateBrand: b.mutation({
-    query: ({ id, ...body }) => ({ url: `/brands/${id}`, method: "PUT", body }),
-    invalidatesTags: ["Brand"],
-  }),
-  deleteBrand: b.mutation({
-    query: (id) => ({ url: `/brands/${id}`, method: "DELETE" }),
-    invalidatesTags: ["Brand"],
-  }),
 });
 
 // ====== Attributes ======
@@ -360,18 +242,6 @@ const attributeEndpoints = (b) => ({
   getAttributes: b.query({
     query: (category) => (category ? `/attributes?category=${category}` : "/attributes"),
     providesTags: ["Attribute"],
-  }),
-  createAttribute: b.mutation({
-    query: (body) => ({ url: "/attributes", method: "POST", body }),
-    invalidatesTags: ["Attribute"],
-  }),
-  updateAttribute: b.mutation({
-    query: ({ id, ...body }) => ({ url: `/attributes/${id}`, method: "PUT", body }),
-    invalidatesTags: ["Attribute"],
-  }),
-  deleteAttribute: b.mutation({
-    query: (id) => ({ url: `/attributes/${id}`, method: "DELETE" }),
-    invalidatesTags: ["Attribute"],
   }),
 });
 
@@ -407,48 +277,24 @@ export const {
   useLazyGetOrderQuery,
   useCancelOrderMutation,
   useGetAllOrdersQuery,
-  useUpdateOrderStatusMutation,
   useGetProductReviewsQuery,
   useGetMyReviewProductsQuery,
   useCreateReviewMutation,
   useUpdateReviewMutation,
   useDeleteReviewMutation,
   useMarkHelpfulMutation,
-  useListAllReviewsQuery,
-  useReplyToReviewMutation,
   useValidateCouponMutation,
-  useListCouponsQuery,
-  useCreateCouponMutation,
-  useListPromotionsQuery,
-  useCreatePromotionMutation,
-  useUpdatePromotionMutation,
-  useDeletePromotionMutation,
-  useDuplicatePromotionMutation,
-  useReorderPromotionsMutation,
-  useUpdateCouponMutation,
-  useDeleteCouponMutation,
   useGetMyAddressesQuery,
   useCreateAddressMutation,
   useUpdateAddressMutation,
   useDeleteAddressMutation,
   useCodCreateMutation,
   useGetPaymentByOrderQuery,
-  useUploadImageMutation,
-  useUploadMultipleMutation,
   useGetCategoriesQuery,
-  useCreateCategoryMutation,
-  useUpdateCategoryMutation,
-  useDeleteCategoryMutation,
   useGetBrandsQuery,
-  useCreateBrandMutation,
-  useUpdateBrandMutation,
-  useDeleteBrandMutation,
   useGetNotificationsQuery,
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
   useGetAttributesQuery,
-  useCreateAttributeMutation,
-  useUpdateAttributeMutation,
-  useDeleteAttributeMutation,
   usePrefetch,
 } = shopApi;

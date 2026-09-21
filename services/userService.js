@@ -3,45 +3,9 @@ import crypto from "crypto";
 import User from "../models/userModel.js";
 import { sendEmail, buildPasswordResetEmail } from "../utlis/sendEmail.js";
 import { HttpError } from "../lib/http.js";
-import { PERMISSIONS } from "../lib/permissions.js";
 import { revokeAllSessionsForUser } from "../lib/session.js";
 import { buildAppUrl } from "../lib/appUrl.js";
 import { requireObjectIdFormat, isHexTokenFormat } from "../lib/validation.js";
-
-// Explicit allowlist for every user object an ADMIN-facing endpoint
-// returns (list/detail/update — app/api/users/route.js, app/api/users/[id]/
-// route.js). Confirmed defect this fixes: models/userModel.js's rowToUser()
-// puts `password` (the bcrypt hash) and `resetPasswordToken` (the SHA-256
-// hash of an active reset token) on every user object as plain enumerable
-// fields, and listUsers()/getUserById()/updateUser() below previously
-// returned that object straight into NextResponse.json() with no
-// sanitization at all — unlike the self-service paths (registers/login/
-// getMe/updateMe), which already only ever return a hand-picked safe
-// shape (see authService.js's publicUser() and updateMe() above). An admin
-// legitimately needs more than the self-service shape (phone, permissions,
-// verification/lock state, timestamps) — this is that same idea, just with
-// the admin-relevant fields added back in, while still never including
-// password or either reset-password field.
-function toAdminSafeUser(user) {
-  if (!user) return user;
-  return {
-    _id: user._id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    permissions: user.permissions || [],
-    avatar: user.avatar,
-    phone: user.phone,
-    isVerified: user.isVerified,
-    loginAttempts: user.loginAttempts,
-    lockUntil: user.lockUntil,
-    isLocked: user.isLocked,
-    lastLogin: user.lastLogin,
-    firstOrderPromoUsed: user.firstOrderPromoUsed,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-  };
-}
 
 // ========== SELF-SERVICE ==========
 
@@ -148,92 +112,9 @@ export async function resetPassword(token, password) {
 const ADMIN_USER_WRITABLE_FIELDS = ["name", "email", "role", "isVerified", "permissions"];
 const VALID_ROLES = ["customer", "employee", "admin"];
 
-// Derived from lib/permissions.js — the same constants the route guards and
-// the frontend's usePermission() check against, so an admin can never
-// assign an employee a permission string that nothing actually enforces.
-const VALID_PERMISSIONS = Object.values(PERMISSIONS);
-
-export async function listUsers({ page = 1, limit = 20, search, sortBy, sortOrder, role } = {}) {
-  const pageNum = Math.max(1, Number(page) || 1);
-  const limitNum = Math.min(100, Number(limit) || 20);
-  const skip = (pageNum - 1) * limitNum;
-
-  const filter = {};
-  if (role) filter.role = role;
-  if (search && String(search).trim()) {
-    const term = String(search).trim();
-    filter.$or = [{ name: term }, { email: term }];
-  }
-
-  const [users, total] = await Promise.all([
-    User.find(filter, { sort: { field: sortBy || "createdAt", dir: sortOrder === "asc" ? 1 : -1 }, skip, limit: limitNum }),
-    User.countDocuments(filter),
-  ]);
-  return {
-    users: users.map(toAdminSafeUser),
-    total,
-    page: pageNum,
-    limit: limitNum,
-    pages: Math.max(1, Math.ceil(total / limitNum)),
-  };
-}
-
-export async function getUserById(id) {
-  requireObjectIdFormat(id, "id");
-  const user = await User.findById(id);
-  if (!user) throw new HttpError(404, "User not found");
-  return toAdminSafeUser(user);
-}
-
-export async function updateUser(id, body, actingUser) {
-  requireObjectIdFormat(id, "id");
-  const user = await User.findById(id);
-  if (!user) throw new HttpError(404, "User not found");
-
-  const updates = {};
-  for (const key of ADMIN_USER_WRITABLE_FIELDS) {
-    if (body[key] !== undefined) updates[key] = body[key];
-  }
-
-  // An admin cannot demote themselves or strip their own permissions — the
-  // last admin doing this would lock everyone out of the admin panel with
-  // no UI path to undo it.
-  const isSelf = user._id.toString() === actingUser._id.toString();
-  if (isSelf && (updates.role !== undefined || updates.permissions !== undefined)) {
-    throw new HttpError(400, "You cannot change your own role or permissions");
-  }
-
-  if (updates.role && !VALID_ROLES.includes(updates.role)) {
-    throw new HttpError(400, "Invalid role");
-  }
-
-  if (updates.permissions !== undefined) {
-    if (!Array.isArray(updates.permissions)) throw new HttpError(400, "Permissions must be an array");
-    const bad = updates.permissions.filter((p) => !VALID_PERMISSIONS.includes(p));
-    if (bad.length) throw new HttpError(400, `Invalid permission(s): ${bad.join(", ")}`);
-  }
-
-  // Permissions only mean anything for employees — clear them for any other
-  // role so a demoted employee doesn't keep latent rights.
-  const finalRole = updates.role ?? user.role;
-  if (finalRole !== "employee") updates.permissions = [];
-
-  if (updates.email && updates.email !== user.email) {
-    const taken = await User.findOne({ email: updates.email });
-    if (taken && taken._id.toString() !== user._id.toString()) {
-      throw new HttpError(400, "Email already in use");
-    }
-  }
-
-  Object.assign(user, updates);
-  await user.save();
-  return toAdminSafeUser(user);
-}
-
-export async function deleteUser(id) {
-  requireObjectIdFormat(id, "id");
-  const user = await User.findById(id);
-  if (!user) throw new HttpError(404, "User not found");
-  if (user.role === "admin") throw new HttpError(400, "Cannot delete an admin user");
-  await user.deleteOne();
-}
+// listUsers, getUserById, updateUser and deleteUser used to live here. They
+// served the user-administration endpoints, which moved to the admin
+// dashboard along with the rest of shop management — and with them the only
+// reason this app had to know about roles or permissions at all. What is
+// left is what a shopper does with their own account: change their profile,
+// and recover their password.

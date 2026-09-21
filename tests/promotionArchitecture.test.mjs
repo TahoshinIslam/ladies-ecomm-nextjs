@@ -170,11 +170,11 @@ describe("lib/serverDataCache.js's promotion cache wrapper never touches session
   });
 });
 
+// This suite checked that promotion routes named a real permission and that
+// PROMOTIONS_MANAGE was not an alias of something else. Both the routes and
+// lib/permissions.js are the dashboard's now; there are no permissions in
+// this app to name.
 describe("Promotion permissions", () => {
-  test("PROMOTIONS_MANAGE is a real permission string, not reusing an unrelated one", () => {
-    const content = read("lib/permissions.js");
-    assert.match(content, /PROMOTIONS_MANAGE:\s*"promotions\.manage"/);
-  });
 
   // The ADMIN_NAV assertion that sat here read components/admin/adminNav.js.
   // Navigation is the dashboard's concern now. The permission string is

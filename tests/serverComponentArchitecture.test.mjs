@@ -90,7 +90,6 @@ describe("Phase 7 — server-only auth/serialization helpers", () => {
     const content = read("lib/serverPageAuth.js");
     assert.match(content, /export async function getServerPageUser/);
     assert.match(content, /export async function requireServerUser/);
-    assert.match(content, /export async function requireServerPermission/);
     // Never a bearer/query-string token fallback.
     assert.ok(!/authorization/i.test(content));
     assert.ok(!/searchParams\.get\(["']token["']\)/.test(content));
