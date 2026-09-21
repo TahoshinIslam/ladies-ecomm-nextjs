@@ -114,7 +114,7 @@ describe("Phase 11 — events table TTL-equivalent and index shape (MySQL)", () 
 });
 
 describe("Phase 11 — SSE routes read the durable outbox, not an in-memory bus", { skip: false }, () => {
-  for (const rel of ["app/api/admin/events/route.js", "app/api/orders/[id]/events/route.js"]) {
+  for (const rel of ["app/api/user/events/route.js", "app/api/orders/[id]/events/route.js"]) {
     test(`${rel} imports readEventsSince/resolveStartCursor from lib/events.js`, () => {
       const content = fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
       assert.match(content, /readEventsSince/);
@@ -243,7 +243,7 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
 });
 
 describe("Phase 12 — SSE routes resolve the cursor BEFORE opening the stream and fail closed", () => {
-  for (const rel of ["app/api/admin/events/route.js", "app/api/orders/[id]/events/route.js"]) {
+  for (const rel of ["app/api/user/events/route.js", "app/api/orders/[id]/events/route.js"]) {
     test(`${rel}: resolveStartCursor is called and awaited before \`new ReadableStream(\`, not inside it`, () => {
       const content = fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
       const cursorCallIndex = content.indexOf("await resolveStartCursor(");

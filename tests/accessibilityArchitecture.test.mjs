@@ -42,7 +42,6 @@ describe("Phase 10 — skip link and its target exist", () => {
     // Server Component wrapper that fetches the department nav data and
     // renders StorefrontShell, so it no longer contains the landmark itself.
     assert.match(read("components/layout/StorefrontShell.jsx"), /id="main"/);
-    assert.match(read("components/admin/AdminLayout.jsx"), /id="main"/);
   });
 });
 
@@ -137,12 +136,9 @@ describe("Phase 10 — forms expose labels and validation errors accessibly", ()
     assert.match(content, /showPassword \? "Hide password" : "Show password"/);
   });
 
-  test("the admin Field helper (views/admin/SettingsPage.jsx) and ComboField (components/admin/ProductFormModal.jsx) associate label and control via htmlFor/id", () => {
-    const settings = read("views/admin/SettingsPage.jsx");
-    assert.match(settings, /htmlFor=\{controlId\}/);
-    const products = read("components/admin/ProductFormModal.jsx");
-    assert.match(products, /htmlFor=\{inputId\}/);
-  });
+  // Removed with the admin section: this asserted the admin forms' label/error wiring, which the admin
+  // dashboard now owns and tests against its own source.
+
 });
 
 describe("Phase 10 — carousel has accessible controls and reduced-motion behavior", () => {

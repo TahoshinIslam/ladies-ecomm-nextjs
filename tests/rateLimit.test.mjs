@@ -9,7 +9,7 @@ import { test, describe, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestSession, requestAs, createTestUser, deleteRows, rawQuery } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, createTestSession, requestAs, createTestUser, deleteRows, rawQuery, testOrganizationId } from "./helpers/testDb.mjs";
 
 // forgotPassword() sends a real email via nodemailer for an EXISTING
 // account (see services/userService.js) — mocked here the same way
@@ -244,8 +244,8 @@ describe("Phase 3 rate limiter — direct Route Handler tests", { skip: !canRun 
     const oldWindowStart = new Date(Date.now() - 10 * 60_000);
     const rawKeyHash = crypto.createHash("sha256").update(identity).digest("hex");
     await rawQuery(
-      "INSERT INTO rate_limit_counters (key_hash, action, window_start, count, expires_at) VALUES (?, ?, ?, ?, ?)",
-      [rawKeyHash, "test:stale-row", oldWindowStart, 999, new Date(Date.now() - 5 * 60_000)], // already "expired" by our own field — MySQL has no TTL-index sweep at all, cleanup is an explicit periodic job (see sql/schema.sql), so correctness must not depend on it either way
+      "INSERT INTO rate_limit_counters (organization_id, key_hash, action, window_start, count, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [testOrganizationId(), rawKeyHash, "test:stale-row", oldWindowStart, 999, new Date(Date.now() - 5 * 60_000)], // already "expired" by our own field — MySQL has no TTL-index sweep at all, cleanup is an explicit periodic job (see sql/schema.sql), so correctness must not depend on it either way
     );
 
     const current = await checkRateLimit({ identity, action: "test:stale-row", limit: 5, windowMs: 60_000 });

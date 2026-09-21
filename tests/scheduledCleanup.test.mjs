@@ -8,7 +8,7 @@
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, rawQuery } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, truncateAll, rawQuery, testOrganizationId, createTestUser } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -48,15 +48,21 @@ describe("GET /api/admin/cron/cleanup — authenticated, repeat-safe scheduled c
   test("the correct bearer token succeeds and reports per-table + total counts", async () => {
     // Seed one already-expired row in each covered table so the sweep has
     // something real to delete, not just a trivially-empty run.
+    //
+    // The session needs a real customer: customer_sessions carries a
+    // composite foreign key on (organization_id, customer_id), so the
+    // placeholder id this used to invent is now rejected outright.
+    const cleanupCustomerId = (await createTestUser())._id;
     await rawQuery(
-      "INSERT INTO customer_sessions (id, customer_id, token_hash, csrf_token_hash, expires_at, last_seen_at, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      ["c".repeat(24), "d".repeat(24), "a".repeat(64), "b".repeat(64), new Date(Date.now() - 1000), new Date(Date.now() - 1000), ""],
+      "INSERT INTO customer_sessions (id, organization_id, customer_id, token_hash, csrf_token_hash, expires_at, last_seen_at, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ["c".repeat(24), testOrganizationId(), cleanupCustomerId, "a".repeat(64), "b".repeat(64), new Date(Date.now() - 1000), new Date(Date.now() - 1000), ""],
     );
     await rawQuery(
-      "INSERT INTO rate_limit_counters (key_hash, action, window_start, count, expires_at) VALUES (?, ?, ?, ?, ?)",
-      ["c".repeat(64), "cleanuptest-action", new Date(Date.now() - 120000), 1, new Date(Date.now() - 1000)],
+      "INSERT INTO rate_limit_counters (organization_id, key_hash, action, window_start, count, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [testOrganizationId(), "c".repeat(64), "cleanuptest-action", new Date(Date.now() - 120000), 1, new Date(Date.now() - 1000)],
     );
-    await rawQuery("INSERT INTO storefront_events (channel, type, payload, expires_at) VALUES (?, ?, ?, ?)", [
+    await rawQuery("INSERT INTO storefront_events (organization_id, channel, type, payload, expires_at) VALUES (?, ?, ?, ?, ?)", [
+      testOrganizationId(),
       "cleanuptest-channel",
       "CLEANUP_TEST",
       JSON.stringify({}),
@@ -67,10 +73,10 @@ describe("GET /api/admin/cron/cleanup — authenticated, repeat-safe scheduled c
     assert.equal(res.status, 200);
     const json = await res.json();
     assert.equal(json.success, true);
-    assert.ok(json.deleted.sessions >= 1);
+    assert.ok(json.deleted.customer_sessions >= 1);
     assert.ok(json.deleted.rate_limit_counters >= 1);
-    assert.ok(json.deleted.events >= 1);
-    assert.equal(json.total, json.deleted.sessions + json.deleted.rate_limit_counters + json.deleted.events);
+    assert.ok(json.deleted.storefront_events >= 1);
+    assert.equal(json.total, json.deleted.customer_sessions + json.deleted.rate_limit_counters + json.deleted.storefront_events);
   });
 
   test("calling it again immediately (repeat/overlapping-scheduler simulation) is a safe no-op — never errors, never double-deletes", async () => {

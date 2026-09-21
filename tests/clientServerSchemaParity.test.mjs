@@ -115,19 +115,13 @@ describe("Phase 5C — client and server accept/reject the SAME address label va
 });
 
 describe("Phase 5D — real client forms actually import the remaining shared enums", () => {
-  test("views/admin/CouponsPage.jsx imports DISCOUNT_TYPES from schemas/couponSchemas.js (not a hand-copied enum)", () => {
-    const source = read("views/admin/CouponsPage.jsx");
-    assert.match(source, /import\s*\{\s*DISCOUNT_TYPES\s*\}\s*from\s*["']\.\.\/\.\.\/schemas\/couponSchemas\.js["']/);
-    assert.match(source, /discountType:\s*z\.enum\(DISCOUNT_TYPES\)/);
-    assert.ok(!/discountType:\s*z\.enum\(\["percentage",\s*"flat"\]\)/.test(source), "the old hand-copied enum literal must be gone");
-  });
+  // Removed with the admin section: this asserted that the admin coupon form imported its enum rather than copying it, which the admin
+  // dashboard now owns and tests against its own source.
 
-  test("components/admin/ProductFormModal.jsx imports AGE_GROUP_VALUES_LIST and AVAILABILITY_VALUES from schemas/catalogSchemas.js", () => {
-    const source = read("components/admin/ProductFormModal.jsx");
-    assert.match(source, /import\s*\{\s*AGE_GROUP_VALUES_LIST,\s*AVAILABILITY_VALUES\s*\}\s*from\s*["']\.\.\/\.\.\/schemas\/catalogSchemas\.js["']/);
-    assert.match(source, /ageGroup:\s*z\.enum\(AGE_GROUP_VALUES_LIST\)/);
-    assert.match(source, /availability:\s*z\.enum\(AVAILABILITY_VALUES\)/);
-  });
+
+  // Removed with the admin section: this asserted that the admin product form imported its enums rather than copying them, which the admin
+  // dashboard now owns and tests against its own source.
+
 
   test("DISCOUNT_TYPES matches exactly what the real createCouponSchema accepts", () => {
     for (const discountType of DISCOUNT_TYPES) {

@@ -36,17 +36,13 @@ const allSourceFiles = ALL_SOURCE_DIRS.flatMap((d) => findFiles(d));
 const clientFiles = allSourceFiles.filter((f) => /^\s*["']use client["'];?\s*$/m.test(fs.readFileSync(f, "utf8")));
 
 describe("Phase 9 — recharts stays isolated to the admin-only chunk (no dynamic import needed)", () => {
-  test("only views/admin/OverviewCharts.jsx imports recharts", () => {
-    const offenders = allSourceFiles
-      .filter((f) => path.relative(ROOT, f) !== "views/admin/OverviewCharts.jsx")
-      .filter((f) => /from ["']recharts["']/.test(fs.readFileSync(f, "utf8")));
-    assert.deepEqual(offenders.map((f) => path.relative(ROOT, f)), []);
-  });
+  // Removed with the admin section: this asserted which module was allowed to import recharts, which the admin
+  // dashboard now owns and tests against its own source.
 
-  test("views/admin/OverviewCharts.jsx is a Client Component (recharts needs a browser)", () => {
-    const content = read("views/admin/OverviewCharts.jsx");
-    assert.ok(/^\s*["']use client["'];?\s*$/m.test(content));
-  });
+
+  // Removed with the admin section: this asserted that the admin charts were a Client Component, which the admin
+  // dashboard now owns and tests against its own source.
+
 
   test("no public-route view/page file imports OverviewCharts.jsx or recharts directly", () => {
     const PUBLIC_ROOTS = ["views/HomePage.jsx", "views/ShopPage.jsx", "views/ProductDetailPage.jsx", "views/OrdersPage.jsx", "views/OrderDetailPage.jsx", "views/CheckoutPage.jsx", "views/ComparePage.jsx"];
@@ -73,7 +69,6 @@ describe("Phase 9 — recharts stays isolated to the admin-only chunk (no dynami
     // assertion is meant to force that review, not silently pass either way.
     assert.deepEqual(offenderPaths, [
       "components/layout/StorefrontShell.jsx",
-      "views/admin/ProductsPage.jsx",
     ]);
     for (const f of offenders) {
       const content = fs.readFileSync(f, "utf8");
@@ -92,7 +87,6 @@ describe("Phase 9 — the six Server Component shells did not regress to client 
     "views/ProductDetailPage.jsx",
     "views/OrdersPage.jsx",
     "views/OrderDetailPage.jsx",
-    "views/admin/OverviewPage.jsx",
   ];
 
   for (const rel of SHELLS) {

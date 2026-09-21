@@ -20,8 +20,7 @@ import {
   requestAs,
   createTestUser,
   deleteRows,
-  rawQuery,
-} from "./helpers/testDb.mjs";
+  rawQuery, testOrganizationId } from "./helpers/testDb.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -234,8 +233,8 @@ describe("product create/edit + storefront visibility (shoes)", { skip: !canRun 
       const [{ sku }] = await rawQuery("SELECT sku FROM product_variants WHERE product_id = ? LIMIT 1", [json.product._id]);
       await assert.rejects(
         rawQuery(
-          "INSERT INTO product_variants (id, product_id, variant_name, sku, attributes, stock, images, position) VALUES (?, ?, 'x', ?, '{}', 1, '[]', 9)",
-          [`ffffffffffffffffffff${String(Math.floor(Math.random() * 9000) + 1000)}`, json.product._id, sku.toUpperCase()],
+          "INSERT INTO product_variants (id, organization_id, product_id, variant_name, sku, attributes, stock, images, position) VALUES (?, ?, ?, 'x', ?, '{}', 1, '[]', 9)",
+          [`ffffffffffffffffffff${String(Math.floor(Math.random() * 9000) + 1000)}`, testOrganizationId(), json.product._id, sku.toUpperCase()],
         ),
         (err) => err.code === "ER_DUP_ENTRY",
       );

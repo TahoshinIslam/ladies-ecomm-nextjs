@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import { homepageFramingKey } from "../lib/imageFraming.js";
-import { dbReady, skipReason, connectTestDb, disconnectTestDb, rawQuery, deleteRows } from "./helpers/testDb.mjs";
+import { dbReady, skipReason, connectTestDb, disconnectTestDb, rawQuery, deleteRows, testOrganizationId, createTestCategory } from "./helpers/testDb.mjs";
 
 const read = (rel) => fs.readFileSync(new URL(`../${rel}`, import.meta.url).pathname, "utf8");
 
@@ -58,9 +58,11 @@ describe("migration 0006_image_framing — against a real disposable database", 
     const id = generateObjectId();
     const slug = `mig-0006-${Date.now()}`;
     await rawQuery(
-      `INSERT INTO products (id, name, slug, description, description_bn, category_id, base_price, price_currency, images, included_items, tags, tags_text)
-       VALUES (?, 'Migration 0006 row', ?, 'kept', '', ?, 1234.5, 'BDT', '["https://example.test/keep.jpg"]', '[]', '[]', '')`,
-      [id, slug, generateObjectId()],
+      `INSERT INTO products (id, organization_id, name, slug, description, description_bn, category_id, base_price, price_currency, images, included_items, tags, tags_text)
+       VALUES (?, ?, 'Migration 0006 row', ?, 'kept', '', ?, 1234.5, 'BDT', '["https://example.test/keep.jpg"]', '[]', '[]', '')`,
+      // A real category: products carry a composite foreign key on
+      // (organization_id, category_id) now, so an invented id is rejected.
+      [id, testOrganizationId(), slug, (await createTestCategory())._id],
     );
     try {
       await rawQuery("ALTER TABLE products DROP COLUMN image_framing");
@@ -86,9 +88,16 @@ describe("migration 0006_image_framing — against a real disposable database", 
     assert.doesNotMatch(src, /DROP\s+(TABLE|COLUMN)|DELETE\s+FROM|UPDATE\s+\w+\s+SET|TRUNCATE/i);
     assert.match(src, /information_schema\.columns/, "checks for the column before adding it");
     assert.match(read("scripts/runMigrations.mjs"), /0006_image_framing\.mjs/);
+    // sql/schema.sql is a generated snapshot of the shared schema now, so
+    // this checks the property (the column exists and is nullable) rather
+    // than a literal DDL string. MariaDB renders a JSON column as `longtext`
+    // with a json_valid CHECK, which is why matching "desktop_framing JSON
+    // NULL" verbatim stopped working without anything actually being wrong.
     const schema = read("sql/schema.sql");
-    for (const col of ["desktop_framing JSON NULL", "mobile_framing JSON NULL", "image_framing JSON NULL"]) {
-      assert.ok(schema.includes(col), `schema.sql (fresh installs) declares ${col}`);
+    for (const col of ["desktop_framing", "mobile_framing", "image_framing"]) {
+      const declaration = new RegExp(`\`${col}\`[^,\n]*`, "i").exec(schema);
+      assert.ok(declaration, `schema.sql (fresh installs) declares ${col}`);
+      assert.match(declaration[0], /DEFAULT NULL/i, `${col} must be nullable — the migration is additive`);
     }
   });
 });

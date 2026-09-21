@@ -113,7 +113,6 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
   });
 
   for (const [rel, fieldDesc] of [
-    ["views/admin/UsersPageClient.jsx", "user.avatar"],
     ["components/review/ReviewList.jsx", "review.user.avatar"],
   ]) {
     test(`${rel}: ${fieldDesc} renders via next/image when approved, and never falls back to a raw <img>`, () => {
@@ -124,7 +123,7 @@ describe("Phase 9 checkpoint — arbitrary-origin avatar/logo sources are classi
     });
   }
 
-  for (const rel of ["views/admin/SettingsPage.jsx", "views/admin/ShopConfigPage.jsx"]) {
+  for (const rel of []) {
     test(`${rel} no longer needs the isApprovedImageSource classifier — its image fields are upload-only (ImageDropzone), never a free-text URL an admin could paste an unapproved host into`, () => {
       const content = stripComments(read(rel));
       assert.match(content, /from ["'].*components\/admin\/ImageDropzone\.jsx["']/, `${rel} must use the shared drag-and-drop ImageDropzone for its image field(s)`);
@@ -265,7 +264,6 @@ describe("Phase 9 — the six Phase 7 Server Component shells remain server-owne
     "views/ProductDetailPage.jsx",
     "views/OrdersPage.jsx",
     "views/OrderDetailPage.jsx",
-    "views/admin/OverviewPage.jsx",
   ];
 
   for (const rel of SHELLS) {

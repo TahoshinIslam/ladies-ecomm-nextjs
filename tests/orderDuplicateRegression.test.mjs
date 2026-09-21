@@ -515,7 +515,9 @@ describe("Order idempotency index — real MySQL behavior", { skip: !canRun && r
       byName[r.Key_name] = byName[r.Key_name] || [];
       byName[r.Key_name].push(r);
     }
-    const idx = byName.uq_orders_user_idempotency;
+    // Renamed with the column it covers: user_id became customer_id when
+    // shoppers moved to their own table.
+    const idx = byName.uq_orders_customer_idempotency;
     assert.ok(idx, "the (customer_id, idempotency_key_hash) index must exist");
     assert.equal(idx[0].Non_unique, 0, "must be unique");
     const cols = idx.map((c) => c.Column_name);
