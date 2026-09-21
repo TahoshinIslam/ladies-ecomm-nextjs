@@ -119,17 +119,41 @@ function stringLiterals(source) {
   return found;
 }
 
+/**
+ * Resolve `${NAME}` against `const NAME = "…"` in the same file.
+ *
+ * A model that factors a shared predicate into a constant is doing the right
+ * thing, and a check that punished it would push the SQL back to being
+ * copied into every statement. Only single-identifier interpolations of
+ * file-level string constants are substituted; anything computed (a built
+ * WHERE clause, a joined list of placeholders) is left as-is and still has
+ * to name the column itself, because there is no way to know from here what
+ * it will hold at runtime.
+ */
+function resolveConstants(sql, source) {
+  return sql.replace(/\$\{([A-Za-z_$][\w$]*)\}/g, (whole, name) => {
+    const declaration = new RegExp(`const\\s+${name}\\s*=\\s*("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\`[^\`]*\`)`).exec(source);
+    return declaration ? declaration[1].slice(1, -1) : whole;
+  });
+}
+
 for (const file of readdirSync(modelsDir).filter((f) => f.endsWith(".js"))) {
   const source = readFileSync(join(modelsDir, file), "utf8");
 
-  for (const { value: sql, line } of stringLiterals(source)) {
+  for (const { value: raw, line } of stringLiterals(source)) {
+    const sql = resolveConstants(raw, source);
     if (!SQL_START.test(sql)) continue;
 
     const tables = new Set();
     for (const match of sql.matchAll(TABLE_REF)) tables.add(match[1].toLowerCase());
 
+    // A statement may say, in SQL, that it means the dashboard's own table
+    // rather than the storefront's — the staff fan-out reads `users` on
+    // purpose. Spelled out in the query so the intent travels with it.
+    const deliberate = /\/\*\s*dashboard-table\s*\*\//.test(sql);
+
     for (const table of tables) {
-      if (RENAMED[table]) {
+      if (RENAMED[table] && !deliberate) {
         failures.push({
           file, line, table,
           reason: `\`${table}\` no longer exists — it is \`${RENAMED[table]}\` in the shared schema`,
