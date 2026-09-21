@@ -218,28 +218,18 @@ describe("API schema", () => {
   });
 });
 
-describe("editor wiring", () => {
-  const src = read("components/admin/imageFraming/ImageFramingEditor.jsx");
-  test("offers a Stretch mode with all eight handles, pointer + keyboard operation and a distortion warning", () => {
-    assert.match(src, /\["free", "Stretch"/);
-    assert.match(src, /FREE_HANDLES\.map/);
-    assert.deepEqual([...FREE_HANDLES].sort(), ["e", "n", "ne", "nw", "s", "se", "sw", "w"]);
-    assert.match(src, /aria-label=\{`Stretch \$\{meta\.label\}`\}/);
-    assert.match(src, /onPointerDown=\{\(e\) => startBoxDrag\(e, handle\)\}/);
-    assert.match(src, /onKeyDown=\{\(e\) => onHandleKeyDown\(e, handle\)\}/);
-    assert.match(src, /touchAction: "none"/);
-    assert.match(src, /stretchAmount\(active, current\)/);
-  });
-  test("handles live outside the clipped frame so an edge on the border is still grabbable", () => {
-    const frameIdx = src.indexOf('data-testid="framing-frame"');
-    const overlayIdx = src.indexOf('data-testid="stretch-overlay"');
-    assert.ok(frameIdx > -1 && overlayIdx > frameIdx);
-    assert.match(src.slice(src.lastIndexOf("<div", frameIdx), frameIdx), /overflow-hidden/);
-    assert.doesNotMatch(src.slice(src.lastIndexOf("<div", overlayIdx), overlayIdx), /overflow-hidden/);
-  });
-});
 
-// The assertion removed from here read the admin framing editor's source.
-// That editor moved to the dashboard with the rest of shop management; what
-// this file still owns is the framing maths and how the storefront renders
-// a framed image.
+// An "editor wiring" suite used to sit here, reading
+// components/admin/imageFraming/ImageFramingEditor.jsx to assert how Stretch
+// mode was wired up — its eight handles, pointer and keyboard operation, and
+// that the handles lived outside the clipped frame so an edge on the border
+// stayed grabbable. That editor moved to the dashboard with the rest of shop
+// management and is tested against its own source there.
+//
+// Its `read()` ran in the describe body rather than inside a test, so the
+// failure it left behind was a suite-level throw that a per-test pass/fail
+// count does not show — the file reported 24 passing while the run as a
+// whole still counted a failure.
+//
+// What this file still owns is the framing maths (FREE_HANDLES,
+// stretchAmount and friends) and how the storefront renders a framed image.
