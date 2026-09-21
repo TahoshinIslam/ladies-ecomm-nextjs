@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 import { columnExists } from "../lib/columnExists.js";
 import { parseFramingColumn } from "../lib/imageFraming.js";
 
@@ -43,8 +44,8 @@ function rowToPromotion(row) {
     frequency: row.frequency,
     cooldownHours: row.cooldown_hours,
     version: row.version,
-    createdBy: row.created_by,
-    updatedBy: row.updated_by,
+    createdBy: row.created_by_id,
+    updatedBy: row.updated_by_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -56,7 +57,10 @@ function rowToPromotion(row) {
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM promotions WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM promotions WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   return rowToPromotion(rows[0]);
 }
 
@@ -71,13 +75,23 @@ async function findAll({ type, status } = {}) {
     clauses.push("status = ?");
     params.push(status);
   }
-  const where = clauses.length ? clauses.join(" AND ") : "1=1";
-  const rows = await query(`SELECT * FROM promotions WHERE ${where} ORDER BY sort_order ASC, priority DESC, id ASC`, params);
+  // Scope written out rather than pushed onto `clauses`: a caller-driven
+  // WHERE that might contain organization_id is how a missing one hides.
+  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
+  const rows = await query(
+    `SELECT * FROM promotions
+      WHERE organization_id = ? AND deleted_at IS NULL ${filters}
+      ORDER BY sort_order ASC, priority DESC, id ASC`,
+    [getOrganizationId(), ...params],
+  );
   return rows.map(rowToPromotion);
 }
 
 async function findIdsByType(type) {
-  const rows = await query("SELECT id FROM promotions WHERE type = ?", [type]);
+  const rows = await query(
+    "SELECT id FROM promotions WHERE organization_id = ? AND type = ? AND deleted_at IS NULL",
+    [getOrganizationId(), type],
+  );
   return rows.map((r) => r.id);
 }
 
@@ -85,14 +99,15 @@ async function create(data) {
   const id = generateObjectId();
   await query(
     `INSERT INTO promotions
-       (id, name, type, placement, status, title, title_bn, subtitle, subtitle_bn, cta_label, cta_label_bn,
+       (id, organization_id, name, type, placement, status, title, title_bn, subtitle, subtitle_bn, cta_label, cta_label_bn,
         desktop_image, mobile_image, image_alt, image_alt_bn, target_type, target_product_id, target_category_id,
         target_collection, target_shop_filter_category_id, target_shop_filter_collection, target_shop_filter_style_id,
         target_url, start_at, end_at, priority, sort_order, audience, page_scope, popup_delay_ms, frequency,
-        cooldown_hours, version, created_by, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        cooldown_hours, version, created_by_id, updated_by_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
+      getOrganizationId(),
       data.name,
       data.type,
       data.placement,
@@ -139,8 +154,8 @@ async function savePromotion(p) {
        desktop_image=?, mobile_image=?, image_alt=?, image_alt_bn=?, target_type=?, target_product_id=?, target_category_id=?,
        target_collection=?, target_shop_filter_category_id=?, target_shop_filter_collection=?, target_shop_filter_style_id=?,
        target_url=?, start_at=?, end_at=?, priority=?, sort_order=?, audience=?, page_scope=?, popup_delay_ms=?, frequency=?,
-       cooldown_hours=?, version=?, updated_by=?
-     WHERE id=?`,
+       cooldown_hours=?, version=?, updated_by_id=?
+     WHERE organization_id=? AND id=?`,
     [
       p.name,
       p.type,
@@ -175,6 +190,7 @@ async function savePromotion(p) {
       p.cooldownHours ?? null,
       p.version ?? 1,
       p.updatedBy || null,
+      getOrganizationId(),
       p._id,
     ],
   );
@@ -182,12 +198,20 @@ async function savePromotion(p) {
 }
 
 async function deleteById(id) {
-  const result = await query("DELETE FROM promotions WHERE id = ?", [id]);
+  // Soft delete: the dashboard marks promotions rather than removing them,
+  // and this table is shared, so "deleted" has to mean one thing.
+  const result = await query(
+    "UPDATE promotions SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   return result.affectedRows > 0;
 }
 
 async function updateSortOrder(id, type, sortOrder) {
-  await query("UPDATE promotions SET sort_order = ? WHERE id = ? AND type = ?", [sortOrder, id, type]);
+  await query(
+    "UPDATE promotions SET sort_order = ? WHERE organization_id = ? AND id = ? AND type = ?",
+    [sortOrder, getOrganizationId(), id, type],
+  );
 }
 
 /** Public eligibility query: matching type/placement/status/pageScope, within schedule bounds. */
@@ -196,11 +220,13 @@ async function findEligible({ type, placement, pageScope, now }) {
   const sortSql = type === "popup" ? "priority DESC, start_at DESC, id ASC" : "sort_order ASC, priority DESC, id ASC";
   const rows = await query(
     `SELECT * FROM promotions
-     WHERE type = ? AND placement = ? AND status = 'active' AND page_scope IN (${pageScopes.map(() => "?").join(",")})
+     WHERE organization_id = ? AND deleted_at IS NULL
+       AND type = ? AND placement = ? AND status = 'active'
+       AND page_scope IN (${pageScopes.map(() => "?").join(",")})
        AND (start_at IS NULL OR start_at <= ?)
        AND (end_at IS NULL OR end_at > ?)
      ORDER BY ${sortSql}`,
-    [type, placement, ...pageScopes, now, now],
+    [getOrganizationId(), type, placement, ...pageScopes, now, now],
   );
   return rows.map(rowToPromotion);
 }
@@ -211,11 +237,15 @@ async function findEligible({ type, placement, pageScope, now }) {
 const framingInstalled = () => columnExists("promotions", "desktop_framing");
 
 async function writeFraming(id, desktopFraming, mobileFraming) {
-  await query("UPDATE promotions SET desktop_framing = ?, mobile_framing = ? WHERE id = ?", [
-    desktopFraming ? JSON.stringify(desktopFraming) : null,
-    mobileFraming ? JSON.stringify(mobileFraming) : null,
-    id,
-  ]);
+  await query(
+    "UPDATE promotions SET desktop_framing = ?, mobile_framing = ? WHERE organization_id = ? AND id = ?",
+    [
+      desktopFraming ? JSON.stringify(desktopFraming) : null,
+      mobileFraming ? JSON.stringify(mobileFraming) : null,
+      getOrganizationId(),
+      id,
+    ],
+  );
 }
 
 const Promotion = { findById, findAll, findIdsByType, create, deleteById, updateSortOrder, findEligible, framingInstalled, writeFraming };

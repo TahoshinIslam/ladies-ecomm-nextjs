@@ -1,5 +1,6 @@
 import { query, withConnection } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 const DEFAULT_COLORS = {
   primary: "#111111", primaryForeground: "#ffffff", accent: "#f97316", accentForeground: "#ffffff",
@@ -40,7 +41,7 @@ function rowToTheme(row) {
     siteName: row.site_name,
     tagline: row.tagline,
     features: { ...DEFAULT_FEATURES, ...jsonOrDefault(row.features, {}) },
-    updatedBy: row.updated_by,
+    updatedBy: row.updated_by_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -48,34 +49,66 @@ function rowToTheme(row) {
     return saveTheme(this);
   };
   theme.deleteOne = async function deleteOne() {
-    await query("DELETE FROM themes WHERE id = ?", [this._id]);
+    // Soft delete, matching how the dashboard removes a theme. A hard DELETE
+    // would work and be simpler, but the two applications share this table:
+    // one removing rows outright while the other marks them would make
+    // "deleted" mean two different things depending on who did it.
+    await query(
+      "UPDATE storefront_themes SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+      [getOrganizationId(), this._id],
+    );
   };
   return theme;
 }
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM themes WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM storefront_themes WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   return rowToTheme(rows[0]);
 }
 
 async function findActive() {
-  const rows = await query("SELECT * FROM themes WHERE is_active = 1 LIMIT 1");
+  const rows = await query(
+    "SELECT * FROM storefront_themes WHERE organization_id = ? AND deleted_at IS NULL AND is_active = 1 LIMIT 1",
+    [getOrganizationId()],
+  );
   return rowToTheme(rows[0]);
 }
 
 async function findByName(name) {
-  const rows = await query("SELECT * FROM themes WHERE name = ?", [name]);
+  const rows = await query(
+    "SELECT * FROM storefront_themes WHERE organization_id = ? AND name = ? AND deleted_at IS NULL",
+    [getOrganizationId(), name],
+  );
   return rowToTheme(rows[0]);
 }
 
 async function findAll() {
-  const rows = await query("SELECT * FROM themes ORDER BY is_active DESC, created_at DESC");
+  const rows = await query(
+    `SELECT * FROM storefront_themes
+      WHERE organization_id = ? AND deleted_at IS NULL
+      ORDER BY is_active DESC, created_at DESC`,
+    [getOrganizationId()],
+  );
   return rows.map(rowToTheme);
 }
 
+/**
+ * Only one theme is active at a time — for THIS store.
+ *
+ * Unscoped this was the most destructive statement in the model: activating
+ * a theme would have switched off the active theme of every other shop in
+ * the database, and each of them would have rendered with defaults until
+ * someone noticed.
+ */
 async function deactivateAllExcept(conn, id) {
-  await conn.query("UPDATE themes SET is_active = 0 WHERE id != ?", [id || ""]);
+  await conn.query(
+    "UPDATE storefront_themes SET is_active = 0 WHERE organization_id = ? AND id != ?",
+    [getOrganizationId(), id || ""],
+  );
 }
 
 async function create(data) {
@@ -83,11 +116,12 @@ async function create(data) {
   await withConnection(async (conn) => {
     if (data.isActive) await deactivateAllExcept(conn, id);
     await conn.query(
-      `INSERT INTO themes (id, name, is_active, colors, dark_colors, fonts, radius, shadow_style, density,
-         logo_url, logo_dark_url, favicon_url, site_name, tagline, features, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO storefront_themes (id, organization_id, name, is_active, colors, dark_colors, fonts, radius,
+         shadow_style, density, logo_url, logo_dark_url, favicon_url, site_name, tagline, features, updated_by_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
+        getOrganizationId(),
         data.name || "Default",
         data.isActive ? 1 : 0,
         JSON.stringify({ ...DEFAULT_COLORS, ...(data.colors || {}) }),
@@ -113,8 +147,9 @@ async function saveTheme(theme) {
   await withConnection(async (conn) => {
     if (theme.isActive) await deactivateAllExcept(conn, theme._id);
     await conn.query(
-      `UPDATE themes SET name=?, is_active=?, colors=?, dark_colors=?, fonts=?, radius=?, shadow_style=?, density=?,
-         logo_url=?, logo_dark_url=?, favicon_url=?, site_name=?, tagline=?, features=?, updated_by=? WHERE id=?`,
+      `UPDATE storefront_themes SET name=?, is_active=?, colors=?, dark_colors=?, fonts=?, radius=?, shadow_style=?,
+         density=?, logo_url=?, logo_dark_url=?, favicon_url=?, site_name=?, tagline=?, features=?, updated_by_id=?
+        WHERE organization_id=? AND id=?`,
       [
         theme.name,
         theme.isActive ? 1 : 0,
@@ -131,6 +166,7 @@ async function saveTheme(theme) {
         theme.tagline || "",
         JSON.stringify(theme.features),
         theme.updatedBy || null,
+        getOrganizationId(),
         theme._id,
       ],
     );
