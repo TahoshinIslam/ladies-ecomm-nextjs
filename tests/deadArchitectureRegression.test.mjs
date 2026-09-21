@@ -124,7 +124,11 @@ describe("Phase 6 — COD-only enforcement stays in place", () => {
     // layer of its own, unlike the old Mongoose schema this test used to
     // check directly.
     const content = fs.readFileSync(abs("sql/schema.sql"), "utf8");
-    assert.match(content, /method\s+ENUM\('cod'\)/);
+    // Matched case-insensitively and with optional backticks: schema.sql is
+    // a generated dump now, and MariaDB writes `method` enum('cod') where
+    // the hand-written DDL said method ENUM('cod'). Same constraint, same
+    // meaning — only the rendering differs.
+    assert.match(content, /`?method`?\s+enum\('cod'\)/i);
   });
 });
 

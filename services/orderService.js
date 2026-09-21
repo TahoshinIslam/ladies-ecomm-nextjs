@@ -350,7 +350,12 @@ export async function createOrder(
     // (this transaction aborted on the unique-index conflict, so nothing
     // from THIS attempt — stock, promo, cart, order — was persisted).
     // Resolve to the winner instead of surfacing a raw duplicate-key 500.
-    if (isDuplicateKeyError(err, "uq_orders_user_idempotency")) {
+    // The index is named for the column it covers, which became customer_id
+    // when shoppers moved to their own table. Matching the old name meant
+    // this branch never fired: two simultaneous requests carrying the same
+    // Idempotency-Key raised a raw duplicate-key 500 instead of both
+    // resolving to the one order that was actually created.
+    if (isDuplicateKeyError(err, "uq_orders_customer_idempotency")) {
       const winner = await Order.findByIdempotencyKey(userId, keyHash);
       if (winner) {
         if (winner.idempotencyRequestHash !== requestHash) {

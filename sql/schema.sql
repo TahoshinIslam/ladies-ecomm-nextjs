@@ -1906,3 +1906,25 @@ CREATE TABLE `wishlists` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
+
+-- ---------------------------------------------------------------------------
+-- This app's migrations, recorded as applied.
+--
+-- Every one of them is already reflected in the structure above: the shared
+-- schema was built with their effects in it. Without these rows a fresh
+-- install would start with an empty ledger, and scripts/runMigrations.mjs
+-- would try to replay all eight against tables that predate them — each one
+-- reaching for `settings`, `themes` or `events`, names this schema no longer
+-- uses. Recording them is what the dashboard's own migration 063 does for
+-- the shared database; this is the same statement for a new one.
+-- ---------------------------------------------------------------------------
+
+INSERT IGNORE INTO storefront_migrations (id, description) VALUES
+  ('0001_review_helpful_votes',                'Add review_helpful_votes table for per-user helpful-vote dedupe'),
+  ('0002_product_variants_sku_unique',         'Add UNIQUE constraint on product_variants.sku (blocked while duplicates exist)'),
+  ('0003_bdt_price_currency',                  'Add products.price_currency and convert the 13 approved USD-denominated rows to native BDT'),
+  ('0004_bdt_hijab_burqa',                     'Migrate Burqa (65/55 -> BDT) and merge/migrate Hijab (5000 BDT, newer record canonical) per explicit user decisions'),
+  ('0005_bdt_default_currency',                'Flip products.price_currency default to BDT'),
+  ('0006_image_framing',                       'Add nullable JSON framing columns for promotion and product images'),
+  ('0007_repair_variant_attribute_assignments','Remove dangling attribute→category assignments, restore Color/Size scope by slug, add shoe sizes'),
+  ('0008_deleted_products_log',                'Create deleted_products log table (snapshot of each hard-deleted product)');
