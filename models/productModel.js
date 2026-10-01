@@ -9,6 +9,7 @@ import { parseFramingListColumn } from "../lib/imageFraming.js";
 import Category from "./categoryModel.js";
 import AttributeDefinition from "./attributeDefinitionModel.js";
 import Brand from "./brandModel.js";
+import * as Inventory from "./inventoryModel.js";
 
 // SQL-backed replacement for the old Mongoose product model. See
 // models/README-migration.md for the general per-model pattern. This one
@@ -24,6 +25,12 @@ import Brand from "./brandModel.js";
 // expressions, full-text search) is too open-ended to usefully re-express
 // as a small fixed set of supported filter keys the way simpler models do.
 
+// "Published" on the shop: switched on AND with at least one variant offered
+// online (a variant can be point-of-sale only). Qualified with `products.` so it
+// works in any query whose FROM is the products table.
+const PUBLISHED_SQL =
+  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1)";
+
 function jsonArray(value) {
   return typeof value === "string" ? JSON.parse(value) : value || [];
 }
@@ -33,6 +40,7 @@ async function loadVariants(productIds) {
   const rows = await query(
     `SELECT * FROM product_variants
       WHERE organization_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})
+        AND sell_online = 1
       ORDER BY position ASC`,
     [getOrganizationId(), ...productIds],
   );
@@ -199,7 +207,7 @@ async function findByIdOrSlug(idOrSlug, isId) {
 
 async function findByIds(ids, { activeOnly = false } = {}) {
   if (!ids.length) return [];
-  const activeClause = activeOnly ? " AND is_active = 1" : "";
+  const activeClause = activeOnly ? ` AND ${PUBLISHED_SQL}` : "";
   const rows = await query(
     `SELECT * FROM products
       WHERE organization_id = ? AND deleted_at IS NULL
@@ -262,7 +270,7 @@ async function distinctBrandIds(whereSql, params) {
 /** Narrow projection for app/sitemap.js — only slug + updatedAt, active products only. */
 async function findSitemapEntries() {
   const rows = await query(
-    "SELECT id, slug, updated_at FROM products WHERE organization_id = ? AND deleted_at IS NULL AND is_active = 1",
+    "SELECT id, slug, updated_at FROM products WHERE organization_id = ? AND deleted_at IS NULL AND " + PUBLISHED_SQL,
     [getOrganizationId()],
   );
   return rows.map((r) => ({ _id: r.id, slug: r.slug, updatedAt: r.updated_at }));
@@ -376,12 +384,39 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
   const organizationId = getOrganizationId();
 
   let variantIds = (product.variants || []).map(() => generateObjectId());
+  // Stock is owned by the inventory model (stock_levels + ledger), not by
+  // this row: a variant that already existed keeps the stock figure it has,
+  // whatever the submitted payload says, and a new one starts at 0 and gets
+  // its opening quantity posted through the ledger below.
+  const keptStock = new Map();
   if (!isNew) {
     const [existingRows] = await conn.query(
-      "SELECT id, sku FROM product_variants WHERE organization_id = ? AND product_id = ?",
+      "SELECT id, sku, stock FROM product_variants WHERE organization_id = ? AND product_id = ?",
       [organizationId, productId],
     );
     variantIds = resolveVariantIds(existingRows, product.variants || []);
+    for (const row of existingRows) keptStock.set(row.id, row.stock);
+    const removed = existingRows.map((r) => r.id).filter((id) => !variantIds.includes(id));
+    if (removed.length) {
+      const [held] = await conn.query(
+        `SELECT variant_id FROM stock_levels
+          WHERE organization_id = ? AND variant_id IN (${removed.map(() => "?").join(",")})
+            AND (on_hand > 0 OR reserved > 0)
+          FOR UPDATE`,
+        [organizationId, ...removed],
+      );
+      if (held.length) {
+        // Not HttpError: this model is loaded by plain-Node seed scripts, which
+        // cannot import lib/http.js (see tests/plainNodeScriptImports.test.mjs).
+        throw new Inventory.InsufficientStockError(
+          "A variant being removed still has stock or reservations. Adjust it to zero first.",
+        );
+      }
+      await conn.query(
+        `DELETE FROM stock_levels WHERE organization_id = ? AND variant_id IN (${removed.map(() => "?").join(",")})`,
+        [organizationId, ...removed],
+      );
+    }
     if (existingRows.length) {
       await conn.query(
         `DELETE FROM product_variants
@@ -418,11 +453,19 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
         JSON.stringify(v.attributes || {}),
         v.price ?? null,
         v.discountPrice ?? null,
-        v.stock || 0,
+        keptStock.get(variantIds[i]) ?? 0,
         JSON.stringify(v.images || []),
         i,
       ],
     );
+    if (!keptStock.has(variantIds[i])) {
+      await Inventory.postOpeningStock(conn, {
+        productId,
+        productName: product.name,
+        variant: { id: variantIds[i], sku: v.sku, variantName: v.variantName },
+        quantity: v.stock,
+      });
+    }
   }
 
   let pos = 0;
@@ -564,29 +607,10 @@ async function create(data, { framingList } = {}) {
         draft.ogImage || "",
       ],
     );
-    await writeVariantsAndAttributes(conn, id, { variants: draft.variants, attributes: derived.attributes }, { isNew: true });
+    await writeVariantsAndAttributes(conn, id, { name: draft.name, variants: draft.variants, attributes: derived.attributes }, { isNew: true });
     await writeFramingInTx(conn, id, framingList);
   });
   return findById(id);
-}
-
-/** Atomic, guarded stock decrement inside an order-creation transaction — see services/orderService.js. Returns true if the row matched (enough stock) and was decremented. */
-async function decrementVariantStock(conn, productId, variantId, qty) {
-  const [result] = await conn.query(
-    `UPDATE product_variants SET stock = stock - ?
-      WHERE organization_id = ? AND id = ? AND product_id = ? AND stock >= ?`,
-    [qty, getOrganizationId(), variantId, productId, qty],
-  );
-  return result.affectedRows === 1;
-}
-
-/** Restores stock on order cancellation — non-guarded (always succeeds), mirrors the old $inc. */
-async function incrementVariantStock(conn, productId, variantId, qty) {
-  await conn.query(
-    `UPDATE product_variants SET stock = stock + ?
-      WHERE organization_id = ? AND id = ? AND product_id = ?`,
-    [qty, getOrganizationId(), variantId, productId],
-  );
 }
 
 /** Reads a single variant's current stock/name — used by the post-order low-stock check. */
@@ -666,8 +690,6 @@ const Product = {
   findSitemapEntries,
   findVariantClash,
   create,
-  decrementVariantStock,
-  incrementVariantStock,
   findVariantForLowStockCheck,
 };
 

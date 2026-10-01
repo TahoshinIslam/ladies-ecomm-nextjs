@@ -40,17 +40,6 @@ async function create({ order, user, method, amount, currency, status }, conn) {
 }
 
 /** Runs on the caller's transaction connection when `conn` is supplied, so this commits/rolls back atomically with the order-status write it always accompanies (see orderService.js's updateOrderStatus). Falls back to the shared pool for isolated/legacy callers. */
-async function markCompletedForCod(orderId, conn) {
-  const sql =
-    "UPDATE payments SET status = 'completed', paid_at = NOW(3) WHERE organization_id = ? AND order_id = ? AND method = 'cod' AND status = 'pending'";
-  const params = [getOrganizationId(), orderId];
-  if (conn) {
-    await conn.query(sql, params);
-  } else {
-    await query(sql, params);
-  }
-}
-
 /** Marks a completed payment refunded — guarded so it only ever moves 'completed' -> 'refunded', never re-refunds or refunds a payment that never completed. Always runs on the caller's transaction connection, alongside the order-status write. */
 async function markRefunded(conn, orderId, reason) {
   await conn.query(
@@ -60,6 +49,6 @@ async function markRefunded(conn, orderId, reason) {
   );
 }
 
-const Payment = { findByOrder, create, markCompletedForCod, markRefunded };
+const Payment = { findByOrder, create, markRefunded };
 
 export default Payment;

@@ -37,6 +37,12 @@ void PRODUCT_SELECT_FIELDS; // `fields=` is now accepted/validated but not appli
 
 // Structural fields — a fixed, known set of flat columns (plus the
 // storefront's category/style aliases below).
+// "Published" on the shop: switched on AND with at least one variant offered
+// online (a variant can be point-of-sale only). Qualified with `products.` so it
+// works in any query whose FROM is the products table.
+const PUBLISHED_SQL =
+  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1)";
+
 const ALLOWED_FILTER_FIELDS = new Set(["topCategory", "category", "brand", "ageGroup", "isFeatured", "isActive", "basePrice"]);
 const STRUCTURAL_COLUMN = {
   topCategory: "top_category_id",
@@ -237,6 +243,7 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
         if (key === "isFeatured" || key === "isActive") {
           clauses.push(`${column} = ?`);
           params.push(isTruthyParam(values[0]) ? 1 : 0);
+
         } else {
           clauses.push(`${column} IN (${values.map(() => "?").join(",")})`);
           params.push(...values);
@@ -284,6 +291,11 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
     const column = STRUCTURAL_COLUMN[key] || key;
     clauses.push(`${column} = ?`);
     params.push(typeof value === "boolean" ? (value ? 1 : 0) : value);
+    // A published product with no variant offered online has nothing to sell
+    // on the shop, so it is not listed (a variant can be point-of-sale only).
+    if (key === "isActive" && value === true) {
+      clauses.push("EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1)");
+    }
   }
 
   return { where: clauses.length ? clauses.join(" AND ") : "1=1", params };
@@ -638,7 +650,8 @@ void CARD_FIELDS_NOTE;
 export async function getProductByIdOrSlug(idOrSlug) {
   const isId = isObjectIdFormat(idOrSlug);
   const product = await Product.findByIdOrSlug(idOrSlug, isId);
-  if (!product) throw new HttpError(404, "Product not found");
+  // No variant offered online (every one is POS-only): nothing to show or sell here.
+  if (!product || !product.variants?.length) throw new HttpError(404, "Product not found");
   return product;
 }
 
@@ -699,10 +712,10 @@ export async function listGroupings(categoryId) {
 
   const [leafCounts, nonLeafCounts] = await Promise.all([
     leafIds.length
-      ? Product.groupCountByFilter("category_id", `is_active = 1 AND category_id IN (${leafIds.map(() => "?").join(",")})`, leafIds)
+      ? Product.groupCountByFilter("category_id", `${PUBLISHED_SQL} AND category_id IN (${leafIds.map(() => "?").join(",")})`, leafIds)
       : [],
     nonLeafIdsArr.length
-      ? Product.groupCountByFilter("top_category_id", `is_active = 1 AND top_category_id IN (${nonLeafIdsArr.map(() => "?").join(",")})`, nonLeafIdsArr)
+      ? Product.groupCountByFilter("top_category_id", `${PUBLISHED_SQL} AND top_category_id IN (${nonLeafIdsArr.map(() => "?").join(",")})`, nonLeafIdsArr)
       : [],
   ]);
 
@@ -729,7 +742,7 @@ export async function listBrandsForCategory(categoryId) {
   requireObjectIdFormat(categoryId, "category");
   const scopeIds = await expandCategoryScope(categoryId);
   const brandIds = scopeIds.length
-    ? await Product.distinctBrandIds(`is_active = 1 AND top_category_id IN (${scopeIds.map(() => "?").join(",")})`, scopeIds)
+    ? await Product.distinctBrandIds(`${PUBLISHED_SQL} AND top_category_id IN (${scopeIds.map(() => "?").join(",")})`, scopeIds)
     : [];
   if (!brandIds.length) return [];
   return Brand.findActiveByIds(brandIds);
@@ -740,7 +753,7 @@ export async function listRelated(idOrSlug, limit = 8) {
   const clampedLimit = Math.min(24, Math.max(1, Number(limit) || 8));
 
   const sameDept = await Product.findByFilter(
-    "id != ? AND top_category_id = ? AND is_active = 1",
+    `id != ? AND top_category_id = ? AND ${PUBLISHED_SQL}`,
     [current._id, current.topCategory],
     { sort: [{ column: "created_at", dir: "DESC" }], skip: 0, limit: 500 },
   );
@@ -767,7 +780,7 @@ export async function listRelated(idOrSlug, limit = 8) {
   if (ranked.length < clampedLimit) {
     const excludeIds = [current._id, ...ranked.map((p) => p._id)];
     const fillers = await Product.findByFilter(
-      `id NOT IN (${excludeIds.map(() => "?").join(",")}) AND is_active = 1`,
+      `id NOT IN (${excludeIds.map(() => "?").join(",")}) AND ${PUBLISHED_SQL}`,
       excludeIds,
       { sort: [{ column: "is_featured", dir: "DESC" }, { column: "rating", dir: "DESC" }, { column: "created_at", dir: "DESC" }], skip: 0, limit: clampedLimit - ranked.length },
     );

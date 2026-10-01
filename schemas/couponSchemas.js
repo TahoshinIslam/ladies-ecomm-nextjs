@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { nonNegativeFiniteNumber, objectIdSchema, requiredString } from "./commonSchemas.js";
+import { orderItemsSchema } from "./orderSchemas.js";
 
 // Exported standalone so the admin coupon form (views/admin/CouponsPage.jsx)
 // can build its own zod object from the same source instead of hand-copying
@@ -41,10 +42,13 @@ export const createCouponSchema = z
     path: ["discountValue"],
   });
 
+// `items` (the cart) lets the coupon be priced exactly as the order will be,
+// category limits included; `subtotal` alone is the older, cart-less form.
 export const validateCouponSchema = z
   .object({
     code: couponCodeSchema,
-    subtotal: nonNegativeFiniteNumber,
+    subtotal: nonNegativeFiniteNumber.optional().default(0),
+    items: orderItemsSchema.optional(),
   })
   .strict();
 

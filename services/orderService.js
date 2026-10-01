@@ -1,11 +1,14 @@
 import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
 import Coupon from "../models/couponModel.js";
+import Category from "../models/categoryModel.js";
 import CouponUsage from "../models/couponUsageModel.js";
 import Cart from "../models/cartModel.js";
 import Settings from "../models/settingsModel.js";
 import User from "../models/userModel.js";
 import Payment from "../models/paymentModel.js";
+import * as Inventory from "../models/inventoryModel.js";
+import { getOrganizationId } from "../lib/tenant.js";
 import { withTransaction } from "../lib/db/tx.js";
 import { createAdminNotification, createUserNotification } from "./notificationService.js";
 import { HttpError } from "../lib/http.js";
@@ -96,6 +99,42 @@ function chargePrice(product, variant, settings) {
   return roundMoney(chargeInProductCurrency * settings.currency.usdToBdt);
 }
 
+
+// ── Coupon eligibility and the discount it produces ────────────────────────
+//
+// A coupon limited to categories discounts only the lines whose product sits
+// in one of those categories OR BELOW one (the dashboard lets a coupon name a
+// parent such as "Women", and products live in leaf categories, so a parent
+// with no descendants would match nothing). No categories = every line.
+//
+// The discount is computed on the ELIGIBLE goods and can never exceed them:
+// a coupon is a price reduction on goods, so it can never eat into shipping
+// or tax, whatever its flat value or percentage. `maxDiscount` still caps it.
+async function couponCategoryScope(couponDoc) {
+  const roots = (couponDoc.applicableCategories || []).map(String);
+  if (!roots.length) return null;
+  const scope = new Set(roots);
+  let frontier = roots;
+  while (frontier.length) {
+    const children = await Category.findChildIdsByParents(frontier);
+    frontier = children.map((c) => String(c.id)).filter((id) => !scope.has(id));
+    for (const id of frontier) scope.add(id);
+  }
+  return scope;
+}
+
+export function couponDiscount(coupon, eligibleSubtotal) {
+  const base = Math.max(0, eligibleSubtotal);
+  let discount =
+    coupon.discountType === "percentage"
+      ? roundMoney((base * coupon.discountValue) / 100)
+      : roundMoney(coupon.discountValue);
+  if (coupon.maxDiscount) discount = Math.min(discount, roundMoney(coupon.maxDiscount));
+  return Math.max(0, Math.min(discount, base));
+}
+
+const productCategoryId = (product) => String(product.category?._id ?? product.category ?? "");
+
 const calcTotals = async (
   items,
   couponCode,
@@ -114,6 +153,7 @@ const calcTotals = async (
 
   let subtotal = 0;
   const lineItems = [];
+  const lineCategories = [];
 
   const productIds = [...new Set(items.map((it) => String(it.productId)))];
   const products = await Product.findByIds(productIds);
@@ -125,7 +165,10 @@ const calcTotals = async (
       throw new HttpError(400, `Product ${it.productId} unavailable`);
     }
     const variant = findVariant(product, it.variantId);
-    if (!variant || variant.stock < it.quantity) {
+    // Variants not offered online are not loaded at all (models/productModel.js),
+    // so one the shopper names that is missing here is simply not for sale.
+    if (!variant) throw new HttpError(400, `${product.name} is not available online`);
+    if (variant.stock < it.quantity) {
       throw new HttpError(
         400,
         `Insufficient stock for ${product.name}${variant ? ` (${variant.variantName})` : ""}`,
@@ -135,7 +178,9 @@ const calcTotals = async (
     // roundMoney() again after the multiply: `price` is already rounded,
     // but `price * it.quantity` can reintroduce float noise before it's
     // added into the running subtotal.
-    subtotal = roundMoney(subtotal + roundMoney(price * it.quantity));
+    const lineTotal = roundMoney(price * it.quantity);
+    subtotal = roundMoney(subtotal + lineTotal);
+    lineCategories.push({ categoryId: productCategoryId(product), lineTotal });
     lineItems.push({
       product: product._id,
       variantId: variant._id,
@@ -178,18 +223,23 @@ const calcTotals = async (
     // no currency ambiguity to resolve here (0 coupons existed at the
     // time of the BDT-only currency migration; any coupon created from
     // now on is entered directly in Taka).
-    discount =
-      couponDoc.discountType === "percentage"
-        ? roundMoney((subtotal * couponDoc.discountValue) / 100)
-        : roundMoney(couponDoc.discountValue);
-    if (couponDoc.maxDiscount) discount = Math.min(discount, roundMoney(couponDoc.maxDiscount));
-    // A flat discount is deliberately NOT capped to the subtotal here —
-    // see tests/coupons.test.mjs's "DOCUMENTED LIMITATION" test, an
-    // existing, intentional product/test decision this fix does not
-    // change. The final order total is still floored at 0 below.
+    const scope = await couponCategoryScope(couponDoc);
+    const eligibleSubtotal = scope
+      ? lineCategories.reduce((sum, l) => (scope.has(l.categoryId) ? roundMoney(sum + l.lineTotal) : sum), 0)
+      : subtotal;
+    if (eligibleSubtotal <= 0) {
+      throw new HttpError(400, "This coupon does not apply to any item in your cart");
+    }
+    discount = couponDiscount(couponDoc, eligibleSubtotal);
   }
 
-  const tax = calcTax(region, subtotal, settings);
+  // Tax is on what the goods actually sell for: the subtotal after the
+  // coupon. For inclusive VAT this is the VAT portion of the amount charged
+  // (the total itself is unchanged); for exclusive tax it is the tax added.
+  // Shipping is not in the tax base, and the free-shipping threshold is
+  // measured on the goods subtotal BEFORE any coupon (see docs/pricing.md).
+  const goodsAfterDiscount = roundMoney(subtotal - discount);
+  const tax = calcTax(region, goodsAfterDiscount, settings);
   const ship = calcShipping(region, subtotal, settings, shippingTier);
 
   let appliedFirstOrderPromo = false;
@@ -205,7 +255,7 @@ const calcTotals = async (
   }
 
   const taxToAdd = tax.inclusive ? 0 : tax.amount;
-  const total = roundMoney(Math.max(0, subtotal + taxToAdd + ship.cost - discount));
+  const total = roundMoney(goodsAfterDiscount + taxToAdd + ship.cost);
 
   return {
     lineItems,
@@ -223,6 +273,18 @@ const calcTotals = async (
     appliedFirstOrderPromo,
   };
 };
+
+/**
+ * What a coupon is worth for this cart — the coupon box's answer, computed by
+ * the same calcTotals() the preview and the saved order use, so the figure a
+ * shopper is told can never differ from what they are charged. The discount
+ * does not depend on the delivery zone, so any valid country will do here.
+ */
+export async function quoteCoupon(userId, { code, items }) {
+  if (!items?.length) throw new HttpError(400, "Items required");
+  const t = await calcTotals(items, code, { country: "BD" }, undefined, userId, null);
+  return { coupon: t.couponDoc, discount: t.discount, subtotal: t.subtotal };
+}
 
 export async function previewOrder(userId, { items, shippingAddress, shippingTier, couponCode }) {
   if (!items?.length) throw new HttpError(400, "Items required");
@@ -291,13 +353,6 @@ export async function createOrder(
         commitPromo: true,
       });
 
-      for (const it of t.lineItems) {
-        const decremented = await Product.decrementVariantStock(conn, it.product, it.variantId, it.quantity);
-        if (!decremented) {
-          throw new HttpError(409, `Insufficient stock for ${it.snapshot.sku || "an item"}`);
-        }
-      }
-
       if (t.couponDoc) {
         const claimedGlobal = await Coupon.claimGlobalUsage(conn, t.couponDoc._id);
         if (!claimedGlobal) {
@@ -331,6 +386,33 @@ export async function createOrder(
         },
         conn,
       );
+
+      // Stock is reserved, not removed: the goods stay on the shelf until
+      // the dashboard dispatches the order (see models/inventoryModel.js).
+      // Each reservation is a guarded single-row UPDATE, so a line that
+      // cannot be covered rolls the whole order back with a 409 — the same
+      // contract the old guarded decrement had.
+      const [orderLines] = await conn.query(
+        `SELECT id, product_id, variant_id, quantity, snapshot_sku
+           FROM order_items WHERE organization_id = ? AND order_id = ? ORDER BY position`,
+        [getOrganizationId(), order._id],
+      );
+      try {
+        await Inventory.reserveOrder(
+          conn,
+          order._id,
+          orderLines.map((l) => ({
+            orderItemId: l.id,
+            productId: l.product_id,
+            variantId: l.variant_id,
+            quantity: l.quantity,
+            sku: l.snapshot_sku,
+          })),
+        );
+      } catch (err) {
+        if (err instanceof Inventory.InsufficientStockError) throw new HttpError(409, err.message);
+        throw err;
+      }
 
       await Cart.clearByUser(userId, conn);
 
@@ -386,12 +468,17 @@ export async function createOrder(
 async function checkLowStock(items) {
   for (const it of items) {
     const row = await Product.findVariantForLowStockCheck(it.product, it.variantId);
-    if (!row || row.stock > LOW_STOCK_THRESHOLD) continue;
+    if (!row) continue;
+    // A reorder point set in the dashboard (Inventory → Low-stock Alerts)
+    // wins over the fixed default threshold.
+    const level = await Inventory.findOnlineLevel(it.variantId);
+    const threshold = level?.reorderPoint ?? LOW_STOCK_THRESHOLD;
+    if (row.stock > threshold) continue;
 
     const label = [row.product_name, row.variant_name].filter(Boolean).join(" — ");
     await createAdminNotification({
       message: row.stock <= 0 ? `Out of stock: ${label}` : `Low stock: ${label} — only ${row.stock} remaining`,
-      url: "/admin/products",
+      url: "/dashboard/inventory/alerts",
     }).catch(() => {});
     await emitBestEffort(
       emitAdminEvent({
@@ -438,9 +525,10 @@ export async function getOrder(userId, role, orderId) {
 // usage cancelOrder() restores — a confirmed correctness gap, not a
 // hypothetical race.
 async function restoreStockAndCoupon(conn, order) {
-  for (const it of order.items) {
-    await Product.incrementVariantStock(conn, it.product, it.variantId, it.quantity);
-  }
+  // Cancelling before dispatch: the goods never left, so the reservation is
+  // released and nothing is "put back". An order placed before inventory
+  // existed has no reservations and releases nothing.
+  await Inventory.releaseOrder(conn, order._id, "order cancelled");
   if (order.coupon) {
     // Symmetric with the global-usage rollback: cancelling an order
     // restores both the global usedCount AND the per-user usage count.
@@ -559,9 +647,9 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
 
     await Order.saveOrderOnConnection(conn, current);
 
-    if (!isSameStatus && status === "delivered") {
-      await Payment.markCompletedForCod(current._id, conn);
-    }
+    // Delivery does not mark the payment collected — the dashboard records
+    // collections explicitly (ecom_erp order-payment.service.js). A refund
+    // only touches a payment that was completed (Payment.markRefunded).
     if (!isSameStatus && status === "refunded") {
       await Payment.markRefunded(conn, current._id, "Marked refunded by admin status change");
     }

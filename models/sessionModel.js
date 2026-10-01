@@ -32,7 +32,18 @@ async function create({ user, tokenHash, csrfTokenHash, expiresAt, userAgent }) 
   return rowToSession({ id, customer_id: user, token_hash: tokenHash, csrf_token_hash: csrfTokenHash, expires_at: expiresAt, last_seen_at: new Date(), user_agent: userAgent || "" });
 }
 
-/** Active (not revoked, not expired) session ids for a user, newest first — pruneExcessSessions(). */
+/**
+ * Active (not revoked, not expired) session ids for a user, newest first — pruneExcessSessions().
+ *
+ * The order must be TOTAL. Concurrent logins land in the same millisecond, so
+ * `created_at` alone ties; tied rows then come back in whatever order each
+ * query happens to produce, and two logins pruning at the same moment can each
+ * revoke a DIFFERENT "oldest" set — together revoking more than the excess,
+ * including a session that was just handed to a user. With `id` as the
+ * tie-breaker every prune ranks the rows identically, so a session in the top
+ * MAX_ACTIVE is never revoked by any of them and the set converges to exactly
+ * the limit.
+ */
 async function findActiveIdsByUser(userId) {
   // A JS-computed cutoff, not SQL's NOW() — this app's DATETIME columns
   // are stored as UTC (config/db.js's pool sets timezone: "Z"), but a
@@ -45,7 +56,7 @@ async function findActiveIdsByUser(userId) {
   const rows = await query(
     `SELECT id FROM customer_sessions
       WHERE organization_id = ? AND customer_id = ? AND revoked_at IS NULL AND expires_at > ?
-      ORDER BY created_at DESC`,
+      ORDER BY created_at DESC, id DESC`,
     [getOrganizationId(), userId, new Date()],
   );
   return rows.map((r) => r.id);

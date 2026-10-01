@@ -318,6 +318,7 @@ export default function CheckoutPage() {
       const res = await validateCoupon({
         code: couponCode.trim(),
         subtotal: totals.subtotal,
+        items: items.map((i) => ({ productId: i.productId, variantId: i.variantId, quantity: i.quantity })),
       }).unwrap();
       setAppliedCoupon(res);
       toast.success(t("checkout.couponApplied", { amount: formatCurrency(res.discount, locale) }));

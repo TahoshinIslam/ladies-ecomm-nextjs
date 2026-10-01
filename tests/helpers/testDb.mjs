@@ -112,6 +112,14 @@ export async function rawQuery(sql, params) {
 // them by cascade and leave the next test inserting rows whose
 // organization_id references nothing.
 const TRUNCATE_ORDER = [
+  // Inventory (ecom_erp migrations 064–065). TRUNCATE does not fire the
+  // ledger's append-only DELETE trigger, which is what lets tests reset it.
+  "stock_reservations", "stock_movements", "stock_levels",
+  "customer_return_lines", "customer_returns", "supplier_return_lines", "supplier_returns",
+  "stock_receipt_lines", "stock_receipts", "purchase_order_lines", "purchase_orders",
+  "stock_adjustment_lines", "stock_adjustments", "stock_count_lines", "stock_counts",
+  "stock_transfer_lines", "stock_transfers", "suppliers", "document_sequences",
+  "inventory_settings", "stock_locations",
   "order_items", "orders", "cart_items", "carts", "coupon_usages", "coupon_categories", "coupons",
   "payments", "wishlist_items", "wishlists", "notifications", "reviews", "review_helpful_votes",
   "addresses", "customer_sessions", "rate_limit_counters", "storefront_events", "deleted_products",

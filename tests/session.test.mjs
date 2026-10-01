@@ -548,6 +548,42 @@ describe("Session cookies, CSRF, and SSE authentication", { skip: !canRun && rea
     }
   });
 
+  test("REGRESSION: sessions created in the same millisecond are ranked by a TOTAL order (created_at, then id), so concurrent prunes agree on which to keep", async () => {
+    // Root cause of the intermittent failure above: ranking by created_at
+    // alone left same-millisecond sessions in query-dependent order, so two
+    // logins pruning at once could each revoke a different "oldest" set —
+    // together revoking more than the excess (converging to 9, not 10), and
+    // possibly a session just handed to the user.
+    const { default: Session } = await import("../models/sessionModel.js");
+    const user = await createTestUser();
+    try {
+      for (let i = 0; i < 12; i++) await createTestSession(user._id);
+      await rawQuery("UPDATE customer_sessions SET created_at = '2030-01-01 00:00:00.000', revoked_at = NULL WHERE customer_id = ?", [user._id]);
+      const ranked = await Session.findActiveIdsByUser(user._id);
+      const byId = [...ranked].sort((x, y) => (x < y ? 1 : x > y ? -1 : 0));
+      assert.equal(ranked.length, 12);
+      assert.deepEqual(ranked, byId, "tied timestamps are broken by id, the same way in every query");
+    } finally {
+      await deleteRows("customers", "id", user._id);
+    }
+  });
+
+  test("REGRESSION: repeated bursts of concurrent logins always settle at exactly the limit", async () => {
+    for (let round = 0; round < 5; round++) {
+      const user = await createTestUser();
+      try {
+        await Promise.all(Array.from({ length: 15 }, () => createTestSession(user._id)));
+        const [{ n }] = await rawQuery(
+          "SELECT COUNT(*) AS n FROM customer_sessions WHERE customer_id = ? AND revoked_at IS NULL AND expires_at > NOW(3)",
+          [user._id],
+        );
+        assert.equal(n, 10, `round ${round + 1}: settled at ${n}, not the limit`);
+      } finally {
+        await deleteRows("customers", "id", user._id);
+      }
+    }
+  });
+
   // ===================== malformed / oversized cookie robustness =====================
 
   test("a malformed percent-encoded session cookie value returns 401, not a 500 — decodeURIComponent's URIError is caught, not left to propagate as an unhandled exception", async () => {

@@ -48,7 +48,7 @@ const orderItemSchema = z.object({
 // A real cart/order has no legitimate reason to carry hundreds of distinct
 // line items — bounded to stop a single request from forcing calcTotals()
 // to loop over an unbounded array of Product lookups.
-const orderItemsSchema = z.array(orderItemSchema).min(1, "at least one item is required").max(100, "too many items");
+export const orderItemsSchema = z.array(orderItemSchema).min(1, "at least one item is required").max(100, "too many items");
 
 export const createOrderSchema = z.object({
   items: orderItemsSchema,

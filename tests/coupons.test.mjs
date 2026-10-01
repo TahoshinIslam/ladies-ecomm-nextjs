@@ -604,17 +604,16 @@ describe("Coupon validation and claim behavior", { skip: !canRun && reason }, ()
     }
   });
 
-  test("DOCUMENTED LIMITATION: a flat discount is NOT capped to the subtotal — it can exceed the order total", async () => {
+  test("a flat discount is capped at the subtotal — a coupon reduces the price of goods, never below zero", async () => {
+    // Formerly a DOCUMENTED LIMITATION (the reported discount was unbounded).
+    // Capping it is required so a product coupon can never eat into shipping
+    // or tax; see tests/couponPricing.test.mjs for the cart-level cases.
     const user = await createTestUser();
     const coupon = await makeCoupon({ discountType: "flat", discountValue: 5000 });
     try {
       const { res, json } = await validateAs(user, coupon.code, 100);
-      assert.equal(res.status, 200, "no rejection occurs even though the discount vastly exceeds the subtotal");
-      assert.equal(
-        json.discount,
-        5000,
-        "confirmed: services/couponService.js's validateCoupon() only applies maxDiscount (if set) — there is no clamp against the subtotal itself, so a large flat-discount coupon on a small order can produce a negative effective total upstream in orderService.js's calcTotals() (which does floor the final order total at 0 via Math.max(0, ...), but the coupon's own reported `discount` value here is not itself bounded)",
-      );
+      assert.equal(res.status, 200);
+      assert.equal(json.discount, 100, "no more than the 100 of goods it is applied to");
     } finally {
       await deleteRows("coupons", "id", coupon._id);
       await deleteRows("customers", "id", user._id);
