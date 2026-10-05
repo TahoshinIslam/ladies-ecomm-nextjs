@@ -4,6 +4,7 @@ import { ArrowRight, Banknote, Gem, RefreshCw, Sparkles } from "lucide-react";
 
 import Button from "../components/ui/Button.jsx";
 import NewsletterForm from "../components/layout/NewsletterForm.jsx";
+import CategorySidebar from "../components/layout/CategorySidebar.jsx";
 import CategoryCard from "../components/product/CategoryCard.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
 import ProductShowcaseSection from "./home/ProductShowcaseSection.jsx";
@@ -211,20 +212,25 @@ export default async function HomePage() {
           without changing anything visible. */}
       <h1 className="sr-only">{t("seo.defaultTitle")}</h1>
 
-      {/* Hero — the always-expanded category sidebar that used to sit
-          beside this panel is gone (the header's "All Categories" trigger
-          now covers that everywhere), so the carousel spans the full
-          shared content width. A moderate landscape box (not the tall 9:12
-          crop the admin Promotions form previews for its own distinct
-          mobile creative) paired with HeroCarousel's own object-contain
-          (not object-cover) means the complete original image always
-          shows, on phones and desktop alike — nothing is cropped off,
-          only letterboxed against the panel's own background if its
-          aspect doesn't exactly match. Tight top padding keeps the banner
-          close under the header instead of floating in extra whitespace. */}
+      {/* Hero row — the category list is always open on the home page (desktop, lg+): every department is
+          visible on load, with the same hover drill-down (department -> style -> further style) the header's
+          "All Categories" trigger gives on other pages, and no hover is needed to reveal the list itself. It
+          sits beside the hero panel, which fills the width that remains. Below lg the sidebar is hidden and
+          the hamburger's drawer lists the departments, as before.
+          The hero is a landscape box (not the tall 9:12 crop the admin Promotions form previews for its own
+          distinct mobile creative) with HeroCarousel's own object-contain (not object-cover), so the complete
+          original image always shows — nothing is cropped off, only letterboxed against the panel's own
+          background if its aspect doesn't exactly match. At lg+ the row has a fixed height so the list and the
+          hero are the same height; the list scrolls inside it when there are many departments. Tight top
+          padding keeps the banner close under the header. */}
       <section aria-label={t("home.heroLabel")} className="container-x pt-3 sm:pt-5">
-        <div className="mx-auto aspect-[4/3] w-full sm:aspect-[16/7] sm:max-h-[560px]">
-          <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} heroFramingBySlug={heroFramingBySlug} promotions={carouselPromotions} />
+        <div className="mx-auto flex max-w-[1620px] items-stretch gap-6 lg:h-[460px]">
+          <CategorySidebar categories={categories} />
+          <div className="min-w-0 flex-1">
+            <div className="aspect-[4/3] w-full sm:aspect-[16/7] sm:max-h-[560px] lg:aspect-auto lg:h-full lg:max-h-none">
+              <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} heroFramingBySlug={heroFramingBySlug} promotions={carouselPromotions} />
+            </div>
+          </div>
         </div>
       </section>
 

@@ -208,14 +208,17 @@ async function create(data, conn) {
   for (let i = 0; i < data.items.length; i++) {
     const it = data.items[i];
     await conn.query(
-      `INSERT INTO order_items (organization_id, order_id, product_id, variant_id, quantity, snapshot_name,
+      `INSERT INTO order_items (organization_id, order_id, product_id, variant_id, batch_id, quantity, snapshot_name,
          snapshot_sku, snapshot_attributes, snapshot_price, snapshot_image, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         getOrganizationId(),
         id,
         it.product,
         it.variantId,
+        // The one batch behind this line, when it is only one (a line priced from several batches carries none here;
+        // its reservation lists them all).
+        it.segments?.length === 1 ? it.segments[0].batchId : null,
         it.quantity,
         it.snapshot.name,
         it.snapshot.sku || "",

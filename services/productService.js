@@ -41,7 +41,7 @@ void PRODUCT_SELECT_FIELDS; // `fields=` is now accepted/validated but not appli
 // online (a variant can be point-of-sale only). Qualified with `products.` so it
 // works in any query whose FROM is the products table.
 const PUBLISHED_SQL =
-  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1)";
+  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1 AND online_offered(pov.organization_id, pov.id) = 1)";
 
 const ALLOWED_FILTER_FIELDS = new Set(["topCategory", "category", "brand", "ageGroup", "isFeatured", "isActive", "basePrice"]);
 const STRUCTURAL_COLUMN = {
@@ -294,7 +294,7 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
     // A published product with no variant offered online has nothing to sell
     // on the shop, so it is not listed (a variant can be point-of-sale only).
     if (key === "isActive" && value === true) {
-      clauses.push("EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1)");
+      clauses.push("EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1 AND online_offered(pov.organization_id, pov.id) = 1)");
     }
   }
 

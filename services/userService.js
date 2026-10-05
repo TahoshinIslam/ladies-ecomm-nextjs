@@ -1,6 +1,7 @@
 import crypto from "crypto";
 
 import User from "../models/userModel.js";
+import { getStoreName } from "../lib/storeName.js";
 import { sendEmail, buildPasswordResetEmail } from "../utlis/sendEmail.js";
 import { HttpError } from "../lib/http.js";
 import { revokeAllSessionsForUser } from "../lib/session.js";
@@ -69,7 +70,7 @@ export async function forgotPassword(email) {
     // buildAppUrl throws on a missing/malformed CLIENT_URL — treated the
     // same as a send failure below, never surfaced to the caller.
     const resetUrl = buildAppUrl("reset-password", rawToken);
-    const tpl = buildPasswordResetEmail(user.name, resetUrl);
+    const tpl = buildPasswordResetEmail(user.name, resetUrl, await getStoreName());
     await sendEmail({ to: user.email, ...tpl });
   } catch (err) {
     user.resetPasswordToken = null;

@@ -1,10 +1,9 @@
 "use client";
 
 // The real 3-column hover drill-down (department -> style -> further
-// style) shared by CategorySidebar.jsx (unused on the homepage as of the
-// shop-category-tiles redesign, kept for any other caller) and
-// HeaderCategoryMenu.jsx (the header's "All Categories" trigger, now
-// rendered storefront-wide, not just on /shop) — extracted so every entry
+// style) shared by CategorySidebar.jsx (the home page's always-open list
+// beside the hero) and HeaderCategoryMenu.jsx (the header's "All
+// Categories" trigger, shown on every page except the home page) — extracted so every entry
 // point can never drift into two different navigation experiences. Owns
 // only the list + flyout markup and its hover/focus state; the caller
 // supplies its own outer chrome (border/rounded/width/visibility) and

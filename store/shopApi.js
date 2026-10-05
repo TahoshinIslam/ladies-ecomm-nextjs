@@ -43,6 +43,11 @@ const wishlistEndpoints = (b) => ({
 
 // ====== Orders ======
 const orderEndpoints = (b) => ({
+  // Is what is in the bag still offered and in stock? Read-only despite the
+  // POST: a guest's bag is sent in the body rather than read from an account.
+  checkCart: b.mutation({
+    query: (body) => ({ url: "/cart/check", method: "POST", body }),
+  }),
   previewOrder: b.mutation({
     query: (body) => ({ url: "/orders/preview", method: "POST", body }),
   }),
@@ -271,6 +276,7 @@ export const {
   useGetWishlistQuery,
   useToggleWishlistMutation,
   useClearWishlistMutation,
+  useCheckCartMutation,
   usePreviewOrderMutation,
   useCreateOrderMutation,
   useGetOrderQuery,

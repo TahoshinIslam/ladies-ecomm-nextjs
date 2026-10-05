@@ -59,6 +59,9 @@ export const createOrderSchema = z.object({
     .optional()
     .transform((v) => (v ? v.toUpperCase() : undefined)),
   notes: requiredString({ min: 0, max: 1000 }).optional().default(""),
+  // The preview's `quote` token: what the shopper was shown and agreed to. When it is sent, checkout prices
+  // again under lock and refuses (409, with the new quote) rather than charge something different.
+  quote: z.string().regex(/^[0-9a-f]{32}$/, "invalid quote").optional(),
 });
 
 // Preview only needs a country to compute region/shipping/tax — the full

@@ -26,10 +26,14 @@ import * as Inventory from "./inventoryModel.js";
 // as a small fixed set of supported filter keys the way simpler models do.
 
 // "Published" on the shop: switched on AND with at least one variant offered
-// online (a variant can be point-of-sale only). Qualified with `products.` so it
-// works in any query whose FROM is the products table.
+// online (a variant can be point-of-sale only) AND offered by the store that
+// supplies the website. `online_offered()` is the dashboard's own rule (ecom_erp
+// migration 083): always true until a Product Source Store is chosen, then that
+// store's switch for the variant, else its policy. Qualified with `products.` so
+// it works in any query whose FROM is the products table. Duplicated in
+// services/productService.js — keep the two identical.
 const PUBLISHED_SQL =
-  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1)";
+  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1 AND online_offered(pov.organization_id, pov.id) = 1)";
 
 function jsonArray(value) {
   return typeof value === "string" ? JSON.parse(value) : value || [];
@@ -37,11 +41,13 @@ function jsonArray(value) {
 
 async function loadVariants(productIds) {
   if (!productIds.length) return new Map();
+  // `online_next_price()` (ecom_erp migration 090) is the selling price of the batch an online order would be
+  // taken from first — what the shop should show, since that is a price checkout can actually make.
   const rows = await query(
-    `SELECT * FROM product_variants
-      WHERE organization_id = ? AND product_id IN (${productIds.map(() => "?").join(",")})
-        AND sell_online = 1
-      ORDER BY position ASC`,
+    `SELECT pv.*, online_next_price(pv.organization_id, pv.id) AS next_price FROM product_variants pv
+      WHERE pv.organization_id = ? AND pv.product_id IN (${productIds.map(() => "?").join(",")})
+        AND pv.sell_online = 1 AND online_offered(pv.organization_id, pv.id) = 1
+      ORDER BY pv.position ASC`,
     [getOrganizationId(), ...productIds],
   );
   const map = new Map();
@@ -52,9 +58,14 @@ async function loadVariants(productIds) {
       variantName: r.variant_name,
       sku: r.sku,
       attributes: typeof r.attributes === "string" ? JSON.parse(r.attributes) : r.attributes || {},
+      // The variant's own price is the default for a new batch; what is on sale now is the next batch's
+      // (null when none can be sold). `rowToProduct` puts the right one in `price`.
+      listPrice: r.price,
+      nextPrice: r.next_price == null ? null : Number(r.next_price),
       price: r.price,
       discountPrice: r.discount_price,
       stock: r.stock,
+      tracking: r.tracking,
       images: jsonArray(r.images),
     });
     map.set(r.product_id, list);
@@ -144,6 +155,13 @@ function rowToProduct(row, { variants, attributes, brand, category } = {}) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  // On its normal price an item shows the next batch's price. A promotional price applies to every batch and
+  // is left as it is, and a product still priced in USD has no batch price in taka to show.
+  if (product.priceCurrency === "BDT") {
+    for (const v of product.variants) {
+      if (v.nextPrice != null && (v.discountPrice ?? product.discountPrice) == null) v.price = v.nextPrice;
+    }
+  }
   product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
   attachInstanceMethods(product);
   return product;
@@ -451,7 +469,9 @@ async function writeVariantsAndAttributes(conn, productId, product, { isNew = fa
         v.variantName,
         v.sku,
         JSON.stringify(v.attributes || {}),
-        v.price ?? null,
+        // A variant loaded for display carries the next batch's price in `price`; saving it unchanged must not turn
+        // that into the variant's own (default) price.
+        (v.nextPrice != null && v.price === v.nextPrice && v.listPrice !== undefined ? v.listPrice : v.price) ?? null,
         v.discountPrice ?? null,
         keptStock.get(variantIds[i]) ?? 0,
         JSON.stringify(v.images || []),

@@ -29,6 +29,8 @@ import {
   createTestProduct,
   deleteRows,
   rawQuery,
+  seedBatch,
+  clearVariantStock,
 } from "./helpers/testDb.mjs";
 
 const ORG = process.env.STORE_ORGANIZATION_ID;
@@ -77,17 +79,15 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
 
   async function holdStock(location, product, quantity) {
     const v = product.variants[0]._id.toString();
-    await rawQuery(
-      `INSERT INTO stock_levels (organization_id, location_id, variant_id, product_id, on_hand, reserved) VALUES (?, ?, ?, ?, ?, 0)
-       ON DUPLICATE KEY UPDATE on_hand = VALUES(on_hand)`,
-      [ORG, location, v, product._id.toString(), quantity],
-    );
+    // What this location holds of the item is exactly `quantity`: its batches are replaced by one.
+    await rawQuery("DELETE FROM stock_batch_levels WHERE variant_id = ? AND location_id = ?", [v, location]);
+    await seedBatch({ location, variantId: v, productId: product._id.toString(), quantity });
   }
 
   async function newProduct() {
     const product = await createTestProduct({ stock: 0 });
     // The product helper opens at the store's default location; clear that so each test sets its own stock.
-    await rawQuery("DELETE FROM stock_levels WHERE variant_id = ?", [product.variants[0]._id.toString()]);
+    await clearVariantStock(product.variants[0]._id.toString());
     return product;
   }
 
@@ -219,15 +219,11 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
   test("units in a lot past their expiry date are not promised", async () => {
     const product = await newProduct();
     const location = await makeLocation();
-    await holdStock(location, product, 5);
+    // 5 on hand: 2 undated, and 3 in a lot whose printed date was yesterday.
     const lotId = `lot_f${uid()}`;
     const variantId = product.variants[0]._id.toString();
-    await rawQuery(
-      "INSERT INTO stock_lots (id, organization_id, variant_id, product_id, lot_ref, expiry_date) VALUES (?, ?, ?, ?, 'EXPIRED-1', DATE_SUB(UTC_DATE(), INTERVAL 1 DAY))",
-      [lotId, ORG, variantId, product._id.toString()],
-    );
-    await rawQuery("INSERT INTO stock_lot_levels (organization_id, location_id, lot_id, variant_id, on_hand) VALUES (?, ?, ?, ?, 3)", [ORG, location, lotId, variantId]);
-    await rawQuery("UPDATE stock_levels SET on_hand = on_hand WHERE location_id = ? AND variant_id = ?", [location, variantId]);
+    await holdStock(location, product, 2);
+    await seedBatch({ location, variantId, productId: product._id.toString(), quantity: 3, lot: { id: lotId, ref: "EXPIRED-1", expiryDate: new Date(Date.now() + 6 * 3600000 - 86400000).toISOString().slice(0, 10) } });
     await withShopper(async (buyer) => {
       const tooMany = await place(buyer, [[product, 3]]);
       assert.ok([400, 409].includes(tooMany.res.status), "5 on hand, 3 of them expired: only 2 can be promised");
@@ -235,6 +231,7 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
       const ok = await place(buyer, [[product, 2]]);
       assert.equal(ok.res.status, 201);
     });
+    await clearVariantStock(variantId);
     await rawQuery("DELETE FROM stock_lots WHERE id = ?", [lotId]);
     await deleteRows("products", "id", product._id);
   });

@@ -39,7 +39,7 @@ export default function GlobalError({ error, retry }) {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "clamp(24px,4vw,34px)", fontWeight: 600 }}>
-          TAHOS. is temporarily unavailable
+          This store is temporarily unavailable
         </h1>
         <p style={{ margin: 0, maxWidth: "44ch", fontSize: "15px", lineHeight: 1.6, color: "#626760" }}>
           Something went wrong loading the app. Please try again in a moment.

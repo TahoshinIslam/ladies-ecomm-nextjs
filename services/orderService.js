@@ -14,6 +14,7 @@ import { createAdminNotification, createUserNotification } from "./notificationS
 import { HttpError } from "../lib/http.js";
 import { emitOrderEvent, emitAdminEvent, emitBestEffort } from "../lib/events.js";
 import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
+import { groupSegmentsByPrice, publicQuoteLines, quoteHash } from "../lib/batchPricing.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
 import { enforceRateLimit } from "../lib/rateLimit.js";
 import { ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS } from "../lib/rateLimitConfig.js";
@@ -159,6 +160,10 @@ const calcTotals = async (
   const products = await Product.findByIds(productIds);
   const productById = new Map(products.map((p) => [String(p._id), p]));
 
+  // Resolve every line first (product, variant, the listing's quick stock check), then let the
+  // inventory model say which batches would fill them — in one call, so the prices below are the
+  // prices of stock that exists, taken in the order the till would take it.
+  const resolved = [];
   for (const it of items) {
     const product = productById.get(String(it.productId));
     if (!product || !product.isActive) {
@@ -174,26 +179,55 @@ const calcTotals = async (
         `Insufficient stock for ${product.name}${variant ? ` (${variant.variantName})` : ""}`,
       );
     }
-    const price = chargePrice(product, variant, settings);
-    // roundMoney() again after the multiply: `price` is already rounded,
-    // but `price * it.quantity` can reintroduce float noise before it's
-    // added into the running subtotal.
-    const lineTotal = roundMoney(price * it.quantity);
-    subtotal = roundMoney(subtotal + lineTotal);
-    lineCategories.push({ categoryId: productCategoryId(product), lineTotal });
-    lineItems.push({
-      product: product._id,
-      variantId: variant._id,
-      quantity: it.quantity,
-      snapshot: {
-        name: product.name,
-        sku: variant.sku || "",
-        attributes: { ...variant.attributes },
-        price,
-        image: variant.images?.[0] || product.images?.[0] || "",
-      },
-    });
+    resolved.push({ product, variant, quantity: it.quantity });
   }
+
+  let plan;
+  try {
+    plan = await Inventory.planOrder(
+      conn,
+      resolved.map((r) => ({ variantId: r.variant._id, productId: r.product._id, quantity: r.quantity, tracking: r.variant.tracking, sku: r.variant.sku || "" })),
+    );
+  } catch (err) {
+    if (err instanceof Inventory.InsufficientStockError) throw new HttpError(409, err.message);
+    throw err;
+  }
+
+  const quoteLines = [];
+  resolved.forEach((r, index) => {
+    const { product, variant } = r;
+    // A batch's own selling price applies when the item is on its normal price; a promotional price is one
+    // price for every batch (and so is a not-yet-migrated USD product's, which has no batch price in taka).
+    const promotional = (variant.discountPrice ?? product.discountPrice) != null;
+    const batchPriced = product.priceCurrency === "BDT" && !promotional;
+    const flat = chargePrice(product, variant, settings);
+    // The segments of this line, grouped by the price they sell at: one order line per price.
+    const groups = groupSegmentsByPrice(plan.lines[index].segments, (seg) => (batchPriced ? roundMoney(seg.sellingPrice) : flat));
+    for (const group of groups) {
+      const price = group.unitPrice;
+      // roundMoney() again after the multiply: `price` is already rounded,
+      // but `price * quantity` can reintroduce float noise before it's
+      // added into the running subtotal.
+      const lineTotal = roundMoney(price * group.quantity);
+      subtotal = roundMoney(subtotal + lineTotal);
+      lineCategories.push({ categoryId: productCategoryId(product), lineTotal });
+      quoteLines.push({ productId: String(product._id), variantId: String(variant._id), quantity: group.quantity, unitPrice: price, lineTotal });
+      lineItems.push({
+        product: product._id,
+        variantId: variant._id,
+        quantity: group.quantity,
+        // The batches behind this line, for the reservation (never returned to a client).
+        segments: group.segments,
+        snapshot: {
+          name: product.name,
+          sku: variant.sku || "",
+          attributes: { ...variant.attributes },
+          price,
+          image: variant.images?.[0] || product.images?.[0] || "",
+        },
+      });
+    }
+  });
 
   let discount = 0;
   let couponDoc = null;
@@ -259,6 +293,10 @@ const calcTotals = async (
 
   return {
     lineItems,
+    plan,
+    // What the shopper is agreeing to: the goods by price, and the total. A hash of it travels with the order
+    // request, so a price or a batch that changed under them is reported, never silently charged.
+    quote: { lines: quoteLines, hash: quoteHash(quoteLines, total) },
     subtotal,
     tax: tax.amount,
     taxLabel: tax.label,
@@ -286,11 +324,9 @@ export async function quoteCoupon(userId, { code, items }) {
   return { coupon: t.couponDoc, discount: t.discount, subtotal: t.subtotal };
 }
 
-export async function previewOrder(userId, { items, shippingAddress, shippingTier, couponCode }) {
-  if (!items?.length) throw new HttpError(400, "Items required");
-  if (!shippingAddress?.country) throw new HttpError(400, "Shipping address required (at least country)");
-
-  const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, null);
+// What a preview (and a "the quote changed" answer) tells the browser: every figure, the goods line by line
+// at the prices checkout would charge, and the quote token to send back with the order.
+function previewShape(t) {
   return {
     subtotal: t.subtotal,
     tax: t.tax,
@@ -303,7 +339,17 @@ export async function previewOrder(userId, { items, shippingAddress, shippingTie
     currency: t.currency,
     region: t.region,
     appliedFirstOrderPromo: t.appliedFirstOrderPromo,
+    lines: publicQuoteLines(t.quote.lines),
+    quote: t.quote.hash,
   };
+}
+
+export async function previewOrder(userId, { items, shippingAddress, shippingTier, couponCode }) {
+  if (!items?.length) throw new HttpError(400, "Items required");
+  if (!shippingAddress?.country) throw new HttpError(400, "Shipping address required (at least country)");
+
+  const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, null);
+  return previewShape(t);
 }
 
 function redactIdempotencyFields(order) {
@@ -314,7 +360,7 @@ function redactIdempotencyFields(order) {
 
 export async function createOrder(
   userId,
-  { items, shippingAddress, shippingTier, couponCode, notes },
+  { items, shippingAddress, shippingTier, couponCode, notes, quote },
   idempotencyKey,
 ) {
   if (!items?.length) throw new HttpError(400, "Order must contain items");
@@ -352,6 +398,18 @@ export async function createOrder(
       const t = await calcTotals(items, couponCode, shippingAddress, shippingTier, userId, conn, {
         commitPromo: true,
       });
+
+      // The shopper agreed to a quote (the preview's `quote`). Priced again here, inside the transaction and with
+      // the batch rows locked: if what checkout would charge is not what they were shown — a price moved, a
+      // batch ran out, another store was chosen — nothing is created, and the new quote comes back for them
+      // to review. Never a silent difference.
+      if (quote && quote !== t.quote.hash) {
+        throw new HttpError(
+          409,
+          "The price or availability of something in your order changed while you were checking out. Review the updated total, then place the order again.",
+          { code: "QUOTE_CHANGED", preview: previewShape(t) },
+        );
+      }
 
       if (t.couponDoc) {
         const claimedGlobal = await Coupon.claimGlobalUsage(conn, t.couponDoc._id);
@@ -398,17 +456,18 @@ export async function createOrder(
         [getOrganizationId(), order._id],
       );
       try {
-        await Inventory.reserveOrder(
-          conn,
-          order._id,
-          orderLines.map((l) => ({
+        // Exactly the batches the quote was made from, line by line (order lines are in the order they were priced).
+        await Inventory.reserveOrder(conn, order._id, {
+          locationId: t.plan.locationId,
+          lines: orderLines.map((l, i) => ({
             orderItemId: l.id,
             productId: l.product_id,
             variantId: l.variant_id,
             quantity: l.quantity,
             sku: l.snapshot_sku,
+            segments: t.lineItems[i].segments,
           })),
-        );
+        });
       } catch (err) {
         if (err instanceof Inventory.InsufficientStockError) throw new HttpError(409, err.message);
         throw err;

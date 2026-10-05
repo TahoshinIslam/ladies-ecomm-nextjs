@@ -22,3 +22,22 @@ export const updateCartItemSchema = z
     quantity: z.number().int().min(0).max(999),
   })
   .strict();
+
+// POST /api/cart/check — "is what is in my bag still for sale?". Public: a guest's
+// bag lives in their browser, so it is sent rather than read from an account.
+export const cartCheckSchema = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            productId: objectIdSchema,
+            variantId: objectIdSchema,
+            quantity: z.number().int().min(1).max(999),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(50),
+  })
+  .strict();

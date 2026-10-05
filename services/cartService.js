@@ -1,6 +1,8 @@
 import Cart from "../models/cartModel.js";
 import Product from "../models/productModel.js";
+import * as Inventory from "../models/inventoryModel.js";
 import { HttpError } from "../lib/http.js";
+import { groupSegmentsByPrice } from "../lib/batchPricing.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
 
 function findVariant(product, variantId) {
@@ -137,4 +139,64 @@ export async function clearCart(userId) {
   cart.items = [];
   await cart.save();
   return serializeCart(cart);
+}
+
+/**
+ * Is each item in a bag still for sale, in the quantity asked for?
+ *
+ * The website shows the products the dashboard's Product Source Store offers,
+ * with that store's availability, so a bag that was filled before the store was
+ * switched (or before stock moved) can hold things that are no longer offered or
+ * no longer there. This answers per item, with a sentence a shopper can act on:
+ *
+ *   ok            nothing to say
+ *   limited       fewer available than the bag holds — says how many
+ *   out_of_stock  offered, but none available right now
+ *   unavailable   not offered online any more
+ *
+ * It reads the same catalog the shop pages do (variants the source store does
+ * not offer are not loaded at all), so what a shopper is told here and what
+ * checkout enforces cannot disagree. Prices are the products' own and do not
+ * depend on the source store, so a switch never changes a price.
+ */
+export async function checkItems(items) {
+  const productIds = [...new Set(items.map((i) => String(i.productId)))];
+  const products = await Product.findByIds(productIds);
+  const byId = new Map(products.map((p) => [String(p._id), p]));
+  const out = [];
+  for (const item of items) {
+    const base = { productId: item.productId, variantId: item.variantId, quantity: item.quantity };
+    const product = byId.get(String(item.productId));
+    if (!product || !product.isActive) { out.push({ ...base, status: "unavailable", available: 0, message: "This item is no longer available." }); continue; }
+    const variant = findVariant(product, item.variantId);
+    if (!variant) { out.push({ ...base, status: "unavailable", available: 0, message: "This item is no longer available from our online store." }); continue; }
+    const available = Math.max(0, Number(variant.stock) || 0);
+    if (available <= 0) { out.push({ ...base, status: "out_of_stock", available, message: "Out of stock right now." }); continue; }
+    if (available < item.quantity) { out.push({ ...base, status: "limited", available, message: `Only ${available} available — lower the quantity to continue.` }); continue; }
+    out.push({ ...base, status: "ok", available, ...(await priceBreakdown(product, variant, item.quantity)) });
+  }
+  return out;
+}
+
+/**
+ * What this quantity would cost, by price: the units checkout would take, batch by batch, grouped by the price
+ * they sell at — [{ quantity, unitPrice }] and the line total. A shopper whose quantity spans two prices sees
+ * "5 × ৳500 + 3 × ৳550" here, before they confirm anything. A plain read: nothing is reserved, and no batch,
+ * lot or cost is returned. Absent when the quantity cannot be priced from stock right now (checkout will say so).
+ */
+async function priceBreakdown(product, variant, quantity) {
+  // A product still priced in USD is converted at checkout, not shown in taka here.
+  if (product.priceCurrency !== "BDT") return {};
+  try {
+    const plan = await Inventory.planOrder(null, [{ variantId: variant._id, productId: product._id, quantity, tracking: variant.tracking, sku: variant.sku || "" }]);
+    const promotional = (variant.discountPrice ?? product.discountPrice) != null;
+    const batchPriced = product.priceCurrency === "BDT" && !promotional;
+    const flat = Math.round((variant.discountPrice ?? product.discountPrice ?? variant.listPrice ?? variant.price ?? product.basePrice) + Number.EPSILON);
+    const groups = groupSegmentsByPrice(plan.lines[0].segments, (seg) => (batchPriced ? Math.round(seg.sellingPrice + Number.EPSILON) : flat));
+    const segments = groups.map((g) => ({ quantity: g.quantity, unitPrice: g.unitPrice }));
+    return { segments, lineTotal: segments.reduce((sum, g) => sum + Math.round(g.unitPrice * g.quantity + Number.EPSILON), 0) };
+  } catch (err) {
+    if (err instanceof Inventory.InsufficientStockError) return {};
+    throw err;
+  }
 }

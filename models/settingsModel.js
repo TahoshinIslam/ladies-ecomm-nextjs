@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { getOrganizationId } from "../lib/tenant.js";
+import { PLACEHOLDER_STORE_NAME, getOrganizationName, resolveStoreName } from "../lib/storeName.js";
 
 const DEFAULT_HOMEPAGE = {
   carouselImages: { burqa: "", abaya: "", hijab: "", khimar: "" },
@@ -95,17 +96,25 @@ async function getSingleton() {
   const organizationId = getOrganizationId();
 
   const rows = await query("SELECT * FROM store_settings WHERE organization_id = ?", [organizationId]);
-  if (rows.length) return rowToSettings(rows[0]);
+  if (rows.length) {
+    const settings = rowToSettings(rows[0]);
+    // Still the column's placeholder: the shop has not named itself, so it is called what the organization is.
+    if (!settings.store.name || settings.store.name === PLACEHOLDER_STORE_NAME) {
+      settings.store.name = resolveStoreName(settings.store.name, await getOrganizationName());
+    }
+    return settings;
+  }
 
   // A store with no settings row yet gets the defaults written for it. The
   // dashboard may be creating the same row at the same moment, so this
   // tolerates losing that race rather than failing the request.
   await query(
     `INSERT IGNORE INTO store_settings
-       (organization_id, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (organization_id, store_name, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       organizationId,
+      resolveStoreName("", await getOrganizationName()) || PLACEHOLDER_STORE_NAME,
       JSON.stringify(DEFAULT_HOMEPAGE),
       JSON.stringify(DEFAULT_CURRENCY),
       JSON.stringify(DEFAULT_PROMOTIONS),

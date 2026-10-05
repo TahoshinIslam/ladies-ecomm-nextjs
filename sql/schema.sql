@@ -25,9 +25,6 @@
 -- ---------------------------------------------------------------------------
 
 
-
-
-
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
@@ -202,6 +199,42 @@ CREATE TABLE `branch_module_grants` (
   KEY `fk_branch_grants_module` (`module_id`),
   CONSTRAINT `fk_branch_grants_branch` FOREIGN KEY (`branch_id`) REFERENCES `branches` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_branch_grants_module` FOREIGN KEY (`module_id`) REFERENCES `modules` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `branch_requests`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `branch_requests` (
+  `id` varchar(32) NOT NULL,
+  `organization_id` varchar(32) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `code` varchar(64) NOT NULL,
+  `address` varchar(255) DEFAULT NULL,
+  `city` varchar(128) DEFAULT NULL,
+  `mobile` varchar(32) DEFAULT NULL,
+  `email` varchar(255) DEFAULT NULL,
+  `contact_person` varchar(255) DEFAULT NULL,
+  `reason` varchar(500) NOT NULL DEFAULT '',
+  `status` enum('pending','approved','rejected','withdrawn') NOT NULL DEFAULT 'pending',
+  `requested_by_id` varchar(32) DEFAULT NULL,
+  `requested_by_name` varchar(255) DEFAULT NULL,
+  `requested_by_email` varchar(255) DEFAULT NULL,
+  `plan_name` varchar(128) DEFAULT NULL,
+  `plan_max_branches` int(11) DEFAULT NULL,
+  `decided_by_id` varchar(32) DEFAULT NULL,
+  `decided_by_name` varchar(255) DEFAULT NULL,
+  `decided_by_email` varchar(255) DEFAULT NULL,
+  `decided_at` datetime(3) DEFAULT NULL,
+  `decision_note` varchar(500) NOT NULL DEFAULT '',
+  `branch_id` varchar(32) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_branch_requests_org` (`organization_id`,`status`,`created_at`),
+  KEY `idx_branch_requests_status` (`status`,`created_at`),
+  KEY `fk_branch_requests_branch` (`branch_id`),
+  CONSTRAINT `fk_branch_requests_branch` FOREIGN KEY (`branch_id`) REFERENCES `branches` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_branch_requests_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `branch_themes`;
@@ -468,6 +501,7 @@ CREATE TABLE `customer_return_lines` (
   `return_id` varchar(32) NOT NULL,
   `order_item_id` bigint(20) unsigned DEFAULT NULL,
   `variant_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) DEFAULT NULL,
   `product_id` varchar(32) NOT NULL,
   `sku` varchar(255) NOT NULL DEFAULT '',
   `item_name` varchar(500) NOT NULL DEFAULT '',
@@ -662,12 +696,92 @@ DROP TABLE IF EXISTS `inventory_settings`;
 CREATE TABLE `inventory_settings` (
   `organization_id` varchar(32) NOT NULL,
   `default_location_id` varchar(32) DEFAULT NULL,
+  `online_source_location_id` varchar(32) DEFAULT NULL,
+  `online_assortment_version` int(10) unsigned NOT NULL DEFAULT 0,
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
   PRIMARY KEY (`organization_id`),
   KEY `fk_inventory_settings_location` (`default_location_id`),
+  KEY `idx_inventory_settings_online_source` (`online_source_location_id`),
   CONSTRAINT `fk_inventory_settings_location` FOREIGN KEY (`default_location_id`) REFERENCES `stock_locations` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT `fk_inventory_settings_online_source` FOREIGN KEY (`online_source_location_id`) REFERENCES `stock_locations` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_settings_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_inventory_settings_bump_version BEFORE UPDATE ON inventory_settings
+FOR EACH ROW
+  IF NOT (NEW.online_source_location_id <=> OLD.online_source_location_id) AND NEW.online_assortment_version = OLD.online_assortment_version THEN
+    SET NEW.online_assortment_version = OLD.online_assortment_version + 1;
+  END IF */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_inventory_settings_sync_projection AFTER UPDATE ON inventory_settings
+FOR EACH ROW
+  IF NOT (NEW.online_source_location_id <=> OLD.online_source_location_id) THEN
+    UPDATE product_variants pv
+       SET pv.stock = online_available(pv.organization_id, pv.id)
+     WHERE pv.organization_id = NEW.organization_id;
+  END IF */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+DROP TABLE IF EXISTS `legacy_stock_condition_levels`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `legacy_stock_condition_levels` (
+  `organization_id` varchar(32) NOT NULL,
+  `location_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `lot_id` varchar(32) NOT NULL DEFAULT '',
+  `item_condition` enum('quarantine','damaged','expired') NOT NULL,
+  `on_hand` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`location_id`,`variant_id`,`lot_id`,`item_condition`),
+  KEY `idx_stock_condition_levels_org` (`organization_id`,`item_condition`),
+  KEY `fk_stock_condition_levels_location` (`organization_id`,`location_id`),
+  CONSTRAINT `fk_stock_condition_levels_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `chk_stock_condition_levels_on_hand` CHECK (`on_hand` >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `legacy_stock_lot_levels`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `legacy_stock_lot_levels` (
+  `organization_id` varchar(32) NOT NULL,
+  `location_id` varchar(32) NOT NULL,
+  `lot_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `on_hand` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`location_id`,`lot_id`),
+  KEY `idx_stock_lot_levels_variant` (`organization_id`,`location_id`,`variant_id`),
+  KEY `fk_stock_lot_levels_lot` (`organization_id`,`lot_id`),
+  CONSTRAINT `fk_stock_lot_levels_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_stock_lot_levels_lot` FOREIGN KEY (`organization_id`, `lot_id`) REFERENCES `stock_lots` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `chk_stock_lot_levels_on_hand` CHECK (`on_hand` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `locales`;
@@ -830,6 +944,82 @@ CREATE TABLE `notifications` (
   CONSTRAINT `fk_notifications_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `online_offer_policies`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `online_offer_policies` (
+  `organization_id` varchar(32) NOT NULL,
+  `location_id` varchar(32) NOT NULL,
+  `policy` enum('all','selected') NOT NULL DEFAULT 'all',
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`,`location_id`),
+  CONSTRAINT `fk_online_offer_policies_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `online_price_versions`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `online_price_versions` (
+  `organization_id` varchar(32) NOT NULL,
+  `version` bigint(20) unsigned NOT NULL DEFAULT 0,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`),
+  CONSTRAINT `fk_online_price_versions_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `online_source_changes`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `online_source_changes` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `organization_id` varchar(32) NOT NULL,
+  `previous_location_id` varchar(32) DEFAULT NULL,
+  `previous_location_name` varchar(120) DEFAULT NULL,
+  `new_location_id` varchar(32) DEFAULT NULL,
+  `new_location_name` varchar(120) DEFAULT NULL,
+  `reason` varchar(255) NOT NULL DEFAULT '',
+  `changed_by_id` varchar(32) DEFAULT NULL,
+  `changed_by_name` varchar(255) DEFAULT NULL,
+  `changed_by_email` varchar(255) DEFAULT NULL,
+  `changed_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_online_source_changes_org` (`organization_id`,`id`),
+  CONSTRAINT `fk_online_source_changes_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_online_source_changes_no_update BEFORE UPDATE ON online_source_changes
+FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'online_source_changes is append-only: record the next change instead' */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_online_source_changes_no_delete BEFORE DELETE ON online_source_changes
+FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'online_source_changes is append-only: record the next change instead' */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
 DROP TABLE IF EXISTS `order_items`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -839,6 +1029,7 @@ CREATE TABLE `order_items` (
   `order_id` varchar(32) NOT NULL,
   `product_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) DEFAULT NULL,
   `quantity` int(11) NOT NULL,
   `snapshot_name` varchar(500) NOT NULL,
   `snapshot_sku` varchar(255) NOT NULL DEFAULT '',
@@ -850,6 +1041,7 @@ CREATE TABLE `order_items` (
   KEY `idx_order_items_order` (`order_id`,`position`),
   KEY `idx_order_items_org_product` (`organization_id`,`product_id`),
   KEY `fk_order_items_order` (`organization_id`,`order_id`),
+  KEY `idx_order_items_batch` (`organization_id`,`batch_id`),
   CONSTRAINT `fk_order_items_order` FOREIGN KEY (`organization_id`, `order_id`) REFERENCES `orders` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -1138,6 +1330,8 @@ CREATE TABLE `organizations` (
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `deleted_at` datetime DEFAULT NULL,
+  `business_timezone` varchar(64) NOT NULL DEFAULT 'Asia/Dhaka',
+  `business_utc_offset_minutes` smallint(6) NOT NULL DEFAULT 360,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_organizations_code` (`code`),
   KEY `idx_organizations_status` (`status`),
@@ -1459,6 +1653,7 @@ CREATE TABLE `pos_return_lines` (
   `return_id` varchar(32) NOT NULL,
   `sale_line_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) DEFAULT NULL,
   `product_id` varchar(32) NOT NULL,
   `sku` varchar(255) NOT NULL DEFAULT '',
   `item_name` varchar(500) NOT NULL DEFAULT '',
@@ -1514,7 +1709,9 @@ CREATE TABLE `pos_sale_lines` (
   `organization_id` varchar(32) NOT NULL,
   `sale_id` varchar(32) NOT NULL,
   `position` int(11) NOT NULL DEFAULT 0,
+  `bill_line` int(11) NOT NULL DEFAULT 0,
   `variant_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) DEFAULT NULL,
   `product_id` varchar(32) NOT NULL,
   `sku` varchar(255) NOT NULL DEFAULT '',
   `item_name` varchar(500) NOT NULL DEFAULT '',
@@ -1535,14 +1732,19 @@ CREATE TABLE `pos_sale_lines` (
   `line_total` decimal(12,2) NOT NULL,
   `returned_quantity` decimal(14,3) NOT NULL DEFAULT 0.000,
   `refunded_amount` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `unit_cost_snapshot` decimal(14,4) DEFAULT NULL,
+  `cost_total` decimal(14,4) DEFAULT NULL,
+  `cost_basis` enum('last_receipt','batch') DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_pos_sale_lines_org_id` (`organization_id`,`id`),
   KEY `idx_pos_sale_lines_sale` (`organization_id`,`sale_id`,`position`),
   KEY `idx_pos_sale_lines_variant` (`organization_id`,`variant_id`),
+  KEY `idx_pos_sale_lines_batch` (`organization_id`,`batch_id`),
   CONSTRAINT `fk_pos_sale_lines_sale` FOREIGN KEY (`organization_id`, `sale_id`) REFERENCES `pos_sales` (`organization_id`, `id`) ON UPDATE CASCADE,
   CONSTRAINT `chk_pos_sale_lines_qty` CHECK (`quantity` > 0 and `base_quantity` > 0),
   CONSTRAINT `chk_pos_sale_lines_returned` CHECK (`returned_quantity` >= 0 and `returned_quantity` <= `quantity`),
-  CONSTRAINT `chk_pos_sale_lines_refunded` CHECK (`refunded_amount` >= 0 and `refunded_amount` <= `line_total`)
+  CONSTRAINT `chk_pos_sale_lines_refunded` CHECK (`refunded_amount` >= 0 and `refunded_amount` <= `line_total`),
+  CONSTRAINT `chk_pos_sale_lines_cost` CHECK (`unit_cost_snapshot` is null or `unit_cost_snapshot` >= 0 and `cost_basis` is not null)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `pos_sales`;
@@ -1837,6 +2039,7 @@ CREATE TABLE `products` (
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
   `deleted_at` datetime(3) DEFAULT NULL,
+  `department_id` varchar(32) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_products_org_id` (`organization_id`,`id`),
   UNIQUE KEY `uq_products_org_slug` (`organization_id`,`slug`),
@@ -1849,9 +2052,11 @@ CREATE TABLE `products` (
   KEY `idx_products_org_brand` (`organization_id`,`brand_id`),
   KEY `idx_products_deleted_at` (`deleted_at`),
   KEY `fk_products_top_category` (`organization_id`,`top_category_id`),
+  KEY `idx_products_org_department` (`organization_id`,`department_id`),
   FULLTEXT KEY `ftx_products_search` (`name`,`description`,`tags_text`),
   CONSTRAINT `fk_products_brand` FOREIGN KEY (`organization_id`, `brand_id`) REFERENCES `brands` (`organization_id`, `id`) ON UPDATE CASCADE,
   CONSTRAINT `fk_products_category` FOREIGN KEY (`organization_id`, `category_id`) REFERENCES `categories` (`organization_id`, `id`) ON UPDATE CASCADE,
+  CONSTRAINT `fk_products_department` FOREIGN KEY (`organization_id`, `department_id`) REFERENCES `retail_departments` (`organization_id`, `id`) ON UPDATE CASCADE,
   CONSTRAINT `fk_products_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_products_top_category` FOREIGN KEY (`organization_id`, `top_category_id`) REFERENCES `categories` (`organization_id`, `id`) ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2005,6 +2210,33 @@ CREATE TABLE `rate_limit_counters` (
   PRIMARY KEY (`organization_id`,`key_hash`,`action`,`window_start`),
   KEY `idx_rate_limit_expires_at` (`expires_at`),
   CONSTRAINT `fk_rate_limit_organization` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `retail_departments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `retail_departments` (
+  `id` varchar(32) NOT NULL,
+  `organization_id` varchar(32) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `code` varchar(32) NOT NULL,
+  `description` varchar(500) NOT NULL DEFAULT '',
+  `status` enum('Active','Archived') NOT NULL DEFAULT 'Active',
+  `position` int(11) NOT NULL DEFAULT 0,
+  `created_by_id` varchar(32) DEFAULT NULL,
+  `created_by_name` varchar(255) DEFAULT NULL,
+  `created_by_email` varchar(255) DEFAULT NULL,
+  `updated_by_id` varchar(32) DEFAULT NULL,
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `updated_by_email` varchar(255) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_retail_departments_org_id` (`organization_id`,`id`),
+  UNIQUE KEY `uq_retail_departments_org_code` (`organization_id`,`code`),
+  UNIQUE KEY `uq_retail_departments_org_name` (`organization_id`,`name`),
+  KEY `idx_retail_departments_org_status` (`organization_id`,`status`,`position`),
+  CONSTRAINT `fk_retail_departments_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `review_helpful_votes`;
@@ -2201,6 +2433,19 @@ CREATE TABLE `sessions` (
   CONSTRAINT `fk_sessions_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shop_offer_policies`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `shop_offer_policies` (
+  `organization_id` varchar(32) NOT NULL,
+  `branch_id` varchar(32) NOT NULL,
+  `policy` enum('all','selected') NOT NULL DEFAULT 'all',
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`,`branch_id`),
+  CONSTRAINT `fk_shop_offer_policies_branch` FOREIGN KEY (`organization_id`, `branch_id`) REFERENCES `branches` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `stock_adjustment_lines`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -2209,6 +2454,7 @@ CREATE TABLE `stock_adjustment_lines` (
   `organization_id` varchar(32) NOT NULL,
   `adjustment_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) DEFAULT NULL,
   `product_id` varchar(32) NOT NULL,
   `sku` varchar(255) NOT NULL DEFAULT '',
   `item_name` varchar(500) NOT NULL DEFAULT '',
@@ -2254,6 +2500,18 @@ CREATE TABLE `stock_adjustments` (
   CONSTRAINT `fk_stock_adjustments_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `stock_allocation_breaks`;
+/*!50001 DROP VIEW IF EXISTS `stock_allocation_breaks`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE VIEW `stock_allocation_breaks` AS SELECT
+ 1 AS `organization_id`,
+  1 AS `location_id`,
+  1 AS `batch_id`,
+  1 AS `reserved`,
+  1 AS `allocated`,
+  1 AS `on_transfers` */;
+SET character_set_client = @saved_cs_client;
 DROP TABLE IF EXISTS `stock_availability`;
 /*!50001 DROP VIEW IF EXISTS `stock_availability`*/;
 SET @saved_cs_client     = @@character_set_client;
@@ -2268,24 +2526,220 @@ SET character_set_client = utf8;
   1 AS `expired_unswept`,
   1 AS `available` */;
 SET character_set_client = @saved_cs_client;
-DROP TABLE IF EXISTS `stock_condition_levels`;
+DROP TABLE IF EXISTS `stock_batch_allocations`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `stock_condition_levels` (
+CREATE TABLE `stock_batch_allocations` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `organization_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) NOT NULL,
   `location_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
-  `lot_id` varchar(32) NOT NULL DEFAULT '',
-  `item_condition` enum('quarantine','damaged','expired') NOT NULL,
-  `on_hand` decimal(14,3) NOT NULL DEFAULT 0.000,
-  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
-  PRIMARY KEY (`location_id`,`variant_id`,`lot_id`,`item_condition`),
-  KEY `idx_stock_condition_levels_org` (`organization_id`,`item_condition`),
-  KEY `fk_stock_condition_levels_location` (`organization_id`,`location_id`),
-  CONSTRAINT `fk_stock_condition_levels_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `chk_stock_condition_levels_on_hand` CHECK (`on_hand` >= 0)
+  `holder_type` enum('order_reservation','held_bill_line','pos_sale_line') NOT NULL,
+  `holder_id` varchar(40) NOT NULL,
+  `quantity` decimal(14,3) NOT NULL,
+  `returned_quantity` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `status` enum('active','consumed','released') NOT NULL DEFAULT 'active',
+  `unit_price` decimal(12,2) DEFAULT NULL,
+  `unit_cost` decimal(14,4) DEFAULT NULL,
+  `cost_state` enum('provisional','actual') NOT NULL DEFAULT 'provisional',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `resolved_at` datetime(3) DEFAULT NULL,
+  `resolved_reason` varchar(120) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_stock_batch_allocations_holder` (`organization_id`,`holder_type`,`holder_id`,`status`),
+  KEY `idx_stock_batch_allocations_batch` (`organization_id`,`batch_id`,`status`),
+  KEY `fk_stock_batch_allocations_location` (`organization_id`,`location_id`),
+  CONSTRAINT `fk_stock_batch_allocations_batch` FOREIGN KEY (`organization_id`, `batch_id`) REFERENCES `stock_batches` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_stock_batch_allocations_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `chk_stock_batch_allocations_qty` CHECK (`quantity` > 0 and `returned_quantity` >= 0 and `returned_quantity` <= `quantity`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `stock_batch_in_transit`;
+/*!50001 DROP VIEW IF EXISTS `stock_batch_in_transit`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE VIEW `stock_batch_in_transit` AS SELECT
+ 1 AS `organization_id`,
+  1 AS `location_id`,
+  1 AS `batch_id`,
+  1 AS `variant_id`,
+  1 AS `quantity` */;
+SET character_set_client = @saved_cs_client;
+DROP TABLE IF EXISTS `stock_batch_levels`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_batch_levels` (
+  `organization_id` varchar(32) NOT NULL,
+  `location_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) NOT NULL,
+  `item_condition` enum('sellable','quarantine','damaged','expired') NOT NULL DEFAULT 'sellable',
+  `variant_id` varchar(32) NOT NULL,
+  `product_id` varchar(32) NOT NULL,
+  `quantity` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `reserved` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`location_id`,`batch_id`,`item_condition`),
+  KEY `idx_stock_batch_levels_variant` (`organization_id`,`location_id`,`variant_id`,`item_condition`),
+  KEY `idx_stock_batch_levels_batch` (`organization_id`,`batch_id`),
+  CONSTRAINT `fk_stock_batch_levels_batch` FOREIGN KEY (`organization_id`, `batch_id`) REFERENCES `stock_batches` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_stock_batch_levels_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `chk_stock_batch_levels_qty` CHECK (`quantity` >= 0 and `reserved` >= 0 and `reserved` <= `quantity` and (`item_condition` = 'sellable' or `reserved` = 0))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_batch_levels_project_insert AFTER INSERT ON stock_batch_levels
+FOR EACH ROW
+  IF NEW.item_condition = 'sellable' THEN
+    INSERT INTO stock_levels (organization_id, location_id, variant_id, product_id, on_hand, reserved)
+    VALUES (NEW.organization_id, NEW.location_id, NEW.variant_id, NEW.product_id, NEW.quantity, NEW.reserved)
+    ON DUPLICATE KEY UPDATE on_hand = on_hand + NEW.quantity, reserved = reserved + NEW.reserved;
+  END IF */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_batch_levels_project_update AFTER UPDATE ON stock_batch_levels
+FOR EACH ROW
+BEGIN
+  IF NEW.item_condition = 'sellable' AND (NEW.quantity <> OLD.quantity OR NEW.reserved <> OLD.reserved) THEN
+    UPDATE stock_levels
+       SET on_hand = on_hand + (NEW.quantity - OLD.quantity), reserved = reserved + (NEW.reserved - OLD.reserved)
+     WHERE location_id = NEW.location_id AND variant_id = NEW.variant_id;
+  END IF;
+  IF NEW.item_condition = 'sellable' AND OLD.quantity > 0 AND NEW.quantity - NEW.reserved <= 0 AND OLD.quantity - OLD.reserved > 0 THEN
+    INSERT INTO online_price_versions (organization_id, version) VALUES (NEW.organization_id, 1)
+    ON DUPLICATE KEY UPDATE version = version + 1;
+  END IF;
+END */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_batch_levels_project_delete AFTER DELETE ON stock_batch_levels
+FOR EACH ROW
+  IF OLD.item_condition = 'sellable' THEN
+    UPDATE stock_levels SET on_hand = on_hand - OLD.quantity, reserved = reserved - OLD.reserved
+     WHERE location_id = OLD.location_id AND variant_id = OLD.variant_id;
+  END IF */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+DROP TABLE IF EXISTS `stock_batch_price_changes`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_batch_price_changes` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `organization_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `old_price` decimal(12,2) NOT NULL,
+  `new_price` decimal(12,2) NOT NULL,
+  `reason` varchar(255) NOT NULL,
+  `changed_by_id` varchar(32) DEFAULT NULL,
+  `changed_by_name` varchar(255) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_stock_batch_price_changes_batch` (`organization_id`,`batch_id`,`id`),
+  CONSTRAINT `fk_stock_batch_price_changes_batch` FOREIGN KEY (`organization_id`, `batch_id`) REFERENCES `stock_batches` (`organization_id`, `id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_stock_batch_price_changes` CHECK (`old_price` >= 0 and `new_price` >= 0 and char_length(`reason`) >= 3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `stock_batches`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_batches` (
+  `id` varchar(32) NOT NULL,
+  `organization_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `product_id` varchar(32) NOT NULL,
+  `origin` enum('receipt','opening','adjustment','count','return','legacy') NOT NULL,
+  `source_type` varchar(32) NOT NULL DEFAULT '',
+  `source_id` varchar(40) NOT NULL DEFAULT '',
+  `source_line_id` varchar(40) NOT NULL DEFAULT '',
+  `parent_batch_id` varchar(32) DEFAULT NULL,
+  `supplier_id` varchar(32) DEFAULT NULL,
+  `lot_id` varchar(32) DEFAULT NULL,
+  `received_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `unit_cost` decimal(14,4) DEFAULT NULL,
+  `cost_source` enum('entered','unknown') NOT NULL DEFAULT 'unknown',
+  `selling_price` decimal(12,2) NOT NULL,
+  `price_source` enum('entered','variant_default','legacy_variant_price','repriced') NOT NULL DEFAULT 'entered',
+  `quantity_received` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `created_by_id` varchar(32) DEFAULT NULL,
+  `created_by_name` varchar(255) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_stock_batches_org_id` (`organization_id`,`id`),
+  KEY `idx_stock_batches_variant` (`organization_id`,`variant_id`,`received_at`,`id`),
+  KEY `idx_stock_batches_lot` (`organization_id`,`lot_id`),
+  KEY `idx_stock_batches_source` (`organization_id`,`source_type`,`source_id`,`source_line_id`),
+  CONSTRAINT `fk_stock_batches_lot` FOREIGN KEY (`organization_id`, `lot_id`) REFERENCES `stock_lots` (`organization_id`, `id`) ON UPDATE CASCADE,
+  CONSTRAINT `fk_stock_batches_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_stock_batches_money` CHECK (`selling_price` >= 0 and (`unit_cost` is null or `unit_cost` >= 0) and `cost_source` = 'unknown' = (`unit_cost` is null))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_stock_batches_bump_price_version AFTER INSERT ON stock_batches
+FOR EACH ROW
+  INSERT INTO online_price_versions (organization_id, version) VALUES (NEW.organization_id, 1)
+  ON DUPLICATE KEY UPDATE version = version + 1 */;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+DROP TABLE IF EXISTS `stock_condition_levels`;
+/*!50001 DROP VIEW IF EXISTS `stock_condition_levels`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE VIEW `stock_condition_levels` AS SELECT
+ 1 AS `organization_id`,
+  1 AS `location_id`,
+  1 AS `variant_id`,
+  1 AS `lot_id`,
+  1 AS `item_condition`,
+  1 AS `on_hand`,
+  1 AS `updated_at` */;
+SET character_set_client = @saved_cs_client;
 DROP TABLE IF EXISTS `stock_count_lines`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -2420,6 +2874,10 @@ CREATE TABLE `stock_locations` (
   `fulfils_online` tinyint(1) NOT NULL DEFAULT 0,
   `fulfilment_priority` int(11) DEFAULT NULL,
   `notes` varchar(500) NOT NULL DEFAULT '',
+  `address` varchar(500) NOT NULL DEFAULT '',
+  `contact_phone` varchar(64) NOT NULL DEFAULT '',
+  `contact_email` varchar(255) NOT NULL DEFAULT '',
+  `manager_user_id` varchar(32) DEFAULT NULL,
   `created_by_id` varchar(32) DEFAULT NULL,
   `created_by_name` varchar(255) DEFAULT NULL,
   `created_by_email` varchar(255) DEFAULT NULL,
@@ -2472,7 +2930,9 @@ CREATE TABLE `stock_lot_events` (
   `location_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
   `lot_id` varchar(32) NOT NULL DEFAULT '',
+  `batch_id` varchar(32) NOT NULL DEFAULT '',
   `item_condition` enum('sellable','quarantine','damaged','expired') NOT NULL,
+  `kind` varchar(16) NOT NULL DEFAULT '',
   `quantity` decimal(14,3) NOT NULL,
   `source_type` varchar(32) NOT NULL,
   `source_id` varchar(40) NOT NULL,
@@ -2482,9 +2942,10 @@ CREATE TABLE `stock_lot_events` (
   `actor_name` varchar(255) NOT NULL DEFAULT 'System',
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_stock_lot_events_source` (`organization_id`,`source_type`,`source_id`,`source_line_id`,`location_id`,`variant_id`,`lot_id`,`item_condition`),
+  UNIQUE KEY `uq_stock_lot_events_source` (`organization_id`,`source_type`,`source_id`,`source_line_id`,`location_id`,`variant_id`,`lot_id`,`batch_id`,`item_condition`),
   KEY `idx_stock_lot_events_lot` (`organization_id`,`lot_id`,`id`),
   KEY `idx_stock_lot_events_level` (`organization_id`,`location_id`,`variant_id`,`id`),
+  KEY `idx_stock_lot_events_batch` (`organization_id`,`batch_id`,`id`),
   CONSTRAINT `fk_stock_lot_events_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
   CONSTRAINT `chk_stock_lot_events_quantity` CHECK (`quantity` <> 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -2524,23 +2985,17 @@ DELIMITER ;
 /*!50003 SET character_set_results = @saved_cs_results */ ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
 DROP TABLE IF EXISTS `stock_lot_levels`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `stock_lot_levels` (
-  `organization_id` varchar(32) NOT NULL,
-  `location_id` varchar(32) NOT NULL,
-  `lot_id` varchar(32) NOT NULL,
-  `variant_id` varchar(32) NOT NULL,
-  `on_hand` decimal(14,3) NOT NULL DEFAULT 0.000,
-  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
-  PRIMARY KEY (`location_id`,`lot_id`),
-  KEY `idx_stock_lot_levels_variant` (`organization_id`,`location_id`,`variant_id`),
-  KEY `fk_stock_lot_levels_lot` (`organization_id`,`lot_id`),
-  CONSTRAINT `fk_stock_lot_levels_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `fk_stock_lot_levels_lot` FOREIGN KEY (`organization_id`, `lot_id`) REFERENCES `stock_lots` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `chk_stock_lot_levels_on_hand` CHECK (`on_hand` >= 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
+/*!50001 DROP VIEW IF EXISTS `stock_lot_levels`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE VIEW `stock_lot_levels` AS SELECT
+ 1 AS `organization_id`,
+  1 AS `location_id`,
+  1 AS `lot_id`,
+  1 AS `variant_id`,
+  1 AS `on_hand`,
+  1 AS `updated_at` */;
+SET character_set_client = @saved_cs_client;
 DROP TABLE IF EXISTS `stock_lots`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -2569,6 +3024,7 @@ CREATE TABLE `stock_movements` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `organization_id` varchar(32) NOT NULL,
   `location_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) NOT NULL DEFAULT '',
   `variant_id` varchar(32) NOT NULL,
   `product_id` varchar(32) NOT NULL,
   `sku` varchar(255) NOT NULL DEFAULT '',
@@ -2588,10 +3044,11 @@ CREATE TABLE `stock_movements` (
   `actor_email` varchar(255) DEFAULT NULL,
   `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_stock_movements_source` (`organization_id`,`source_type`,`source_id`,`source_line_id`,`movement_type`,`location_id`),
+  UNIQUE KEY `uq_stock_movements_source` (`organization_id`,`source_type`,`source_id`,`source_line_id`,`movement_type`,`location_id`,`batch_id`),
   KEY `idx_stock_movements_org_created` (`organization_id`,`created_at`),
   KEY `idx_stock_movements_level` (`organization_id`,`location_id`,`variant_id`,`id`),
   KEY `idx_stock_movements_org_type` (`organization_id`,`movement_type`,`created_at`),
+  KEY `idx_stock_movements_batch` (`organization_id`,`batch_id`,`id`),
   CONSTRAINT `fk_stock_movements_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
   CONSTRAINT `chk_stock_movements_quantity` CHECK (`quantity` <> 0),
   CONSTRAINT `chk_stock_movements_after` CHECK (`on_hand_after` >= 0)
@@ -2631,6 +3088,19 @@ DELIMITER ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
 /*!50003 SET character_set_results = @saved_cs_results */ ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
+DROP TABLE IF EXISTS `stock_projection_breaks`;
+/*!50001 DROP VIEW IF EXISTS `stock_projection_breaks`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE VIEW `stock_projection_breaks` AS SELECT
+ 1 AS `organization_id`,
+  1 AS `location_id`,
+  1 AS `variant_id`,
+  1 AS `on_hand`,
+  1 AS `reserved`,
+  1 AS `batch_sellable`,
+  1 AS `batch_reserved` */;
+SET character_set_client = @saved_cs_client;
 DROP TABLE IF EXISTS `stock_receipt_lines`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -2651,9 +3121,11 @@ CREATE TABLE `stock_receipt_lines` (
   `base_unit` varchar(8) NOT NULL DEFAULT 'pc',
   `quantity` decimal(14,3) NOT NULL,
   `unit_cost` decimal(12,2) DEFAULT NULL,
+  `selling_price` decimal(12,2) DEFAULT NULL,
   `line_total` decimal(14,2) DEFAULT NULL,
   `lot_id` varchar(32) DEFAULT NULL,
   `lot_ref` varchar(80) NOT NULL DEFAULT '',
+  `batch_id` varchar(32) DEFAULT NULL,
   `expiry_date` date DEFAULT NULL,
   `item_condition` enum('sellable','quarantine','damaged') NOT NULL DEFAULT 'sellable',
   `discrepancy` varchar(500) NOT NULL DEFAULT '',
@@ -2662,6 +3134,7 @@ CREATE TABLE `stock_receipt_lines` (
   KEY `idx_stock_receipt_lines_receipt` (`receipt_id`,`position`),
   KEY `idx_stock_receipt_lines_po_line` (`organization_id`,`purchase_order_line_id`),
   KEY `fk_stock_receipt_lines_receipt` (`organization_id`,`receipt_id`),
+  KEY `idx_stock_receipt_lines_batch` (`organization_id`,`batch_id`),
   CONSTRAINT `fk_stock_receipt_lines_receipt` FOREIGN KEY (`organization_id`, `receipt_id`) REFERENCES `stock_receipts` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `chk_stock_receipt_lines_qty` CHECK (`quantity` > 0),
   CONSTRAINT `chk_stock_receipt_lines_cost` CHECK (`unit_cost` is null or `unit_cost` >= 0),
@@ -2742,6 +3215,9 @@ CREATE TABLE `stock_transfer_events` (
   `event_type` enum('created','updated','approved','rejected','cancelled','dispatched','received','shortage_resolved') NOT NULL,
   `actor_id` varchar(32) DEFAULT NULL,
   `actor_name` varchar(255) NOT NULL DEFAULT 'System',
+  `actor_role` varchar(120) DEFAULT NULL,
+  `actor_branch` varchar(255) DEFAULT NULL,
+  `actor_location` varchar(255) DEFAULT NULL,
   `note` varchar(500) NOT NULL DEFAULT '',
   `details` longtext DEFAULT NULL,
   `client_key` varchar(64) DEFAULT NULL,
@@ -2786,6 +3262,30 @@ DELIMITER ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
 /*!50003 SET character_set_results = @saved_cs_results */ ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
+DROP TABLE IF EXISTS `stock_transfer_line_batches`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_transfer_line_batches` (
+  `id` varchar(32) NOT NULL,
+  `organization_id` varchar(32) NOT NULL,
+  `transfer_id` varchar(32) NOT NULL,
+  `line_id` varchar(32) NOT NULL,
+  `batch_id` varchar(32) NOT NULL,
+  `quantity_reserved` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `quantity_dispatched` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `quantity_received` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `quantity_damaged` decimal(14,3) NOT NULL DEFAULT 0.000,
+  `quantity_lost` decimal(14,3) NOT NULL DEFAULT 0.000,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_stock_transfer_line_batches` (`line_id`,`batch_id`),
+  KEY `idx_stock_transfer_line_batches_transfer` (`organization_id`,`transfer_id`),
+  KEY `idx_stock_transfer_line_batches_batch` (`organization_id`,`batch_id`),
+  CONSTRAINT `fk_stock_transfer_line_batches_batch` FOREIGN KEY (`organization_id`, `batch_id`) REFERENCES `stock_batches` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_stock_transfer_line_batches_line` FOREIGN KEY (`line_id`) REFERENCES `stock_transfer_lines` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_stock_transfer_line_batches_transfer` FOREIGN KEY (`organization_id`, `transfer_id`) REFERENCES `stock_transfers` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `chk_stock_transfer_line_batches` CHECK (`quantity_reserved` >= 0 and `quantity_dispatched` >= 0 and `quantity_received` >= 0 and `quantity_damaged` >= 0 and `quantity_lost` >= 0 and `quantity_received` + `quantity_damaged` + `quantity_lost` <= `quantity_dispatched`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `stock_transfer_line_lots`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -3253,6 +3753,24 @@ CREATE TABLE `users` (
   CONSTRAINT `fk_users_locale` FOREIGN KEY (`locale`) REFERENCES `locales` (`code`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `variant_online_offers`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `variant_online_offers` (
+  `organization_id` varchar(32) NOT NULL,
+  `location_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `offered` tinyint(1) NOT NULL,
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`,`location_id`,`variant_id`),
+  KEY `idx_variant_online_offers_variant` (`organization_id`,`variant_id`),
+  KEY `fk_variant_online_offers_variant` (`variant_id`),
+  CONSTRAINT `fk_variant_online_offers_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_variant_online_offers_variant` FOREIGN KEY (`variant_id`) REFERENCES `product_variants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `variant_packagings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -3301,6 +3819,24 @@ CREATE TABLE `variant_price_overrides` (
   CONSTRAINT `chk_variant_price_overrides_price` CHECK (`price` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `variant_shop_offers`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `variant_shop_offers` (
+  `organization_id` varchar(32) NOT NULL,
+  `branch_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `offered` tinyint(1) NOT NULL,
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`,`branch_id`,`variant_id`),
+  KEY `idx_variant_shop_offers_variant` (`organization_id`,`variant_id`),
+  KEY `fk_variant_shop_offers_variant` (`variant_id`),
+  CONSTRAINT `fk_variant_shop_offers_branch` FOREIGN KEY (`organization_id`, `branch_id`) REFERENCES `branches` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_variant_shop_offers_variant` FOREIGN KEY (`variant_id`) REFERENCES `product_variants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `wishlist_items`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -3333,6 +3869,24 @@ CREATE TABLE `wishlists` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
 /*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+/*!50003 DROP FUNCTION IF EXISTS `business_today` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` FUNCTION `business_today`(p_org VARCHAR(32) COLLATE utf8mb4_unicode_ci) RETURNS date
+    READS SQL DATA
+RETURN DATE(DATE_ADD(UTC_TIMESTAMP(), INTERVAL COALESCE((SELECT o.business_utc_offset_minutes FROM organizations o WHERE o.id = p_org), 360) MINUTE)) ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
 /*!50003 DROP FUNCTION IF EXISTS `online_available` */;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
 /*!50003 SET @saved_cs_results     = @@character_set_results */ ;
@@ -3347,22 +3901,103 @@ RETURN COALESCE((
   SELECT MAX(FLOOR(GREATEST(sl.on_hand - sl.reserved - COALESCE(x.expired_qty, 0), 0)))
     FROM stock_levels sl
     JOIN stock_locations l ON l.id = sl.location_id AND l.organization_id = sl.organization_id
+    LEFT JOIN inventory_settings src ON src.organization_id = p_org
     LEFT JOIN (
       SELECT ll.location_id, SUM(ll.on_hand) AS expired_qty
         FROM stock_lot_levels ll
         JOIN stock_lots lt ON lt.id = ll.lot_id AND lt.organization_id = ll.organization_id
        WHERE ll.organization_id = p_org AND ll.variant_id = p_variant
-         AND lt.expiry_date IS NOT NULL AND lt.expiry_date < UTC_DATE()
+         AND lt.expiry_date IS NOT NULL AND lt.expiry_date < business_today(p_org)
        GROUP BY ll.location_id
     ) x ON x.location_id = sl.location_id
    WHERE sl.organization_id = p_org AND sl.variant_id = p_variant
      AND l.status = 'Active' AND l.fulfils_online = 1
+     AND (src.online_source_location_id IS NULL OR l.id = src.online_source_location_id)
 ), 0) ;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
 /*!50003 SET character_set_results = @saved_cs_results */ ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+/*!50003 DROP FUNCTION IF EXISTS `online_next_price` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` FUNCTION `online_next_price`(p_org VARCHAR(32) COLLATE utf8mb4_unicode_ci, p_variant VARCHAR(32) COLLATE utf8mb4_unicode_ci) RETURNS decimal(12,2)
+    READS SQL DATA
+RETURN (
+  SELECT b.selling_price
+    FROM stock_batch_levels bl
+    JOIN stock_batches b ON b.id = bl.batch_id AND b.organization_id = bl.organization_id
+    JOIN stock_locations l ON l.id = bl.location_id AND l.organization_id = bl.organization_id
+    JOIN product_variants pv ON pv.id = bl.variant_id AND pv.organization_id = bl.organization_id
+    LEFT JOIN stock_lots lt ON lt.id = b.lot_id AND lt.organization_id = b.organization_id
+    LEFT JOIN inventory_settings src ON src.organization_id = p_org
+   WHERE bl.organization_id = p_org AND bl.variant_id = p_variant
+     AND bl.item_condition = 'sellable' AND bl.quantity - bl.reserved > 0
+     AND l.status = 'Active' AND l.fulfils_online = 1
+     AND (src.online_source_location_id IS NULL OR l.id = src.online_source_location_id)
+     AND (lt.expiry_date IS NULL OR lt.expiry_date >= business_today(p_org))
+   ORDER BY (l.fulfilment_priority IS NULL), l.fulfilment_priority, l.name, l.id,
+            CASE WHEN pv.tracking IN ('lot', 'expiry') THEN (lt.expiry_date IS NULL) ELSE 0 END,
+            CASE WHEN pv.tracking IN ('lot', 'expiry') THEN lt.expiry_date END,
+            b.received_at, b.created_at, b.id
+   LIMIT 1
+) ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+/*!50003 DROP FUNCTION IF EXISTS `online_offered` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` FUNCTION `online_offered`(p_org VARCHAR(32) COLLATE utf8mb4_unicode_ci, p_variant VARCHAR(32) COLLATE utf8mb4_unicode_ci) RETURNS tinyint(1)
+    READS SQL DATA
+RETURN COALESCE((
+  SELECT CASE
+           WHEN s.online_source_location_id IS NULL THEN 1
+           ELSE COALESCE(
+             (SELECT o.offered FROM variant_online_offers o
+               WHERE o.organization_id = s.organization_id AND o.location_id = s.online_source_location_id AND o.variant_id = p_variant),
+             (SELECT CASE po.policy WHEN 'selected' THEN 0 ELSE 1 END FROM online_offer_policies po
+               WHERE po.organization_id = s.organization_id AND po.location_id = s.online_source_location_id),
+             1)
+         END
+    FROM inventory_settings s
+   WHERE s.organization_id = p_org
+), 1) ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50001 DROP VIEW IF EXISTS `stock_allocation_breaks`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `stock_allocation_breaks` AS select `bl`.`organization_id` AS `organization_id`,`bl`.`location_id` AS `location_id`,`bl`.`batch_id` AS `batch_id`,`bl`.`reserved` AS `reserved`,coalesce(`a`.`q`,0) AS `allocated`,coalesce(`t`.`q`,0) AS `on_transfers` from ((`stock_batch_levels` `bl` left join (select `stock_batch_allocations`.`organization_id` AS `organization_id`,`stock_batch_allocations`.`location_id` AS `location_id`,`stock_batch_allocations`.`batch_id` AS `batch_id`,sum(`stock_batch_allocations`.`quantity`) AS `q` from `stock_batch_allocations` where `stock_batch_allocations`.`status` = 'active' group by `stock_batch_allocations`.`organization_id`,`stock_batch_allocations`.`location_id`,`stock_batch_allocations`.`batch_id`) `a` on(`a`.`organization_id` = `bl`.`organization_id` and `a`.`location_id` = `bl`.`location_id` and `a`.`batch_id` = `bl`.`batch_id`)) left join (select `tl`.`organization_id` AS `organization_id`,`t`.`from_location_id` AS `location_id`,`tb`.`batch_id` AS `batch_id`,sum(`tb`.`quantity_reserved`) AS `q` from ((`stock_transfer_line_batches` `tb` join `stock_transfer_lines` `tl` on(`tl`.`id` = `tb`.`line_id`)) join `stock_transfers` `t` on(`t`.`id` = `tl`.`transfer_id` and `t`.`organization_id` = `tl`.`organization_id`)) where `tb`.`quantity_reserved` > 0 group by `tl`.`organization_id`,`t`.`from_location_id`,`tb`.`batch_id`) `t` on(`t`.`organization_id` = `bl`.`organization_id` and `t`.`location_id` = `bl`.`location_id` and `t`.`batch_id` = `bl`.`batch_id`)) where `bl`.`item_condition` = 'sellable' and `bl`.`reserved` <> coalesce(`a`.`q`,0) + coalesce(`t`.`q`,0) */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
 /*!50001 DROP VIEW IF EXISTS `stock_availability`*/;
 /*!50001 SET @saved_cs_client          = @@character_set_client */;
 /*!50001 SET @saved_cs_results         = @@character_set_results */;
@@ -3372,7 +4007,59 @@ DELIMITER ;
 /*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
 /*!50001 CREATE ALGORITHM=UNDEFINED */
 /*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
-/*!50001 VIEW `stock_availability` AS select `sl`.`organization_id` AS `organization_id`,`sl`.`location_id` AS `location_id`,`sl`.`variant_id` AS `variant_id`,`sl`.`product_id` AS `product_id`,`sl`.`on_hand` AS `on_hand`,`sl`.`reserved` AS `reserved`,coalesce(`x`.`expired_qty`,0) AS `expired_unswept`,greatest(`sl`.`on_hand` - `sl`.`reserved` - coalesce(`x`.`expired_qty`,0),0) AS `available` from (`stock_levels` `sl` left join (select `ll`.`organization_id` AS `organization_id`,`ll`.`location_id` AS `location_id`,`ll`.`variant_id` AS `variant_id`,sum(`ll`.`on_hand`) AS `expired_qty` from (`stock_lot_levels` `ll` join `stock_lots` `lt` on(`lt`.`id` = `ll`.`lot_id` and `lt`.`organization_id` = `ll`.`organization_id`)) where `lt`.`expiry_date` is not null and `lt`.`expiry_date` < utc_date() group by `ll`.`organization_id`,`ll`.`location_id`,`ll`.`variant_id`) `x` on(`x`.`organization_id` = `sl`.`organization_id` and `x`.`location_id` = `sl`.`location_id` and `x`.`variant_id` = `sl`.`variant_id`)) */;
+/*!50001 VIEW `stock_availability` AS select `sl`.`organization_id` AS `organization_id`,`sl`.`location_id` AS `location_id`,`sl`.`variant_id` AS `variant_id`,`sl`.`product_id` AS `product_id`,`sl`.`on_hand` AS `on_hand`,`sl`.`reserved` AS `reserved`,coalesce(`x`.`expired_qty`,0) AS `expired_unswept`,greatest(`sl`.`on_hand` - `sl`.`reserved` - coalesce(`x`.`expired_qty`,0),0) AS `available` from (`stock_levels` `sl` left join (select `ll`.`organization_id` AS `organization_id`,`ll`.`location_id` AS `location_id`,`ll`.`variant_id` AS `variant_id`,sum(`ll`.`on_hand`) AS `expired_qty` from (`stock_lot_levels` `ll` join `stock_lots` `lt` on(`lt`.`id` = `ll`.`lot_id` and `lt`.`organization_id` = `ll`.`organization_id`)) where `lt`.`expiry_date` is not null and `lt`.`expiry_date` < `business_today`(`ll`.`organization_id`) group by `ll`.`organization_id`,`ll`.`location_id`,`ll`.`variant_id`) `x` on(`x`.`organization_id` = `sl`.`organization_id` and `x`.`location_id` = `sl`.`location_id` and `x`.`variant_id` = `sl`.`variant_id`)) */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
+/*!50001 DROP VIEW IF EXISTS `stock_batch_in_transit`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `stock_batch_in_transit` AS select `tb`.`organization_id` AS `organization_id`,`t`.`to_location_id` AS `location_id`,`tb`.`batch_id` AS `batch_id`,`tl`.`variant_id` AS `variant_id`,sum(`tb`.`quantity_dispatched` - `tb`.`quantity_received` - `tb`.`quantity_damaged` - `tb`.`quantity_lost`) AS `quantity` from ((`stock_transfer_line_batches` `tb` join `stock_transfer_lines` `tl` on(`tl`.`id` = `tb`.`line_id`)) join `stock_transfers` `t` on(`t`.`id` = `tl`.`transfer_id` and `t`.`organization_id` = `tl`.`organization_id`)) where `tb`.`quantity_dispatched` > `tb`.`quantity_received` + `tb`.`quantity_damaged` + `tb`.`quantity_lost` group by `tb`.`organization_id`,`t`.`to_location_id`,`tb`.`batch_id`,`tl`.`variant_id` */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
+/*!50001 DROP VIEW IF EXISTS `stock_condition_levels`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `stock_condition_levels` AS select `bl`.`organization_id` AS `organization_id`,`bl`.`location_id` AS `location_id`,`bl`.`variant_id` AS `variant_id`,coalesce(`b`.`lot_id`,'') AS `lot_id`,`bl`.`item_condition` AS `item_condition`,sum(`bl`.`quantity`) AS `on_hand`,max(`bl`.`updated_at`) AS `updated_at` from (`stock_batch_levels` `bl` join `stock_batches` `b` on(`b`.`id` = `bl`.`batch_id` and `b`.`organization_id` = `bl`.`organization_id`)) where `bl`.`item_condition` <> 'sellable' group by `bl`.`organization_id`,`bl`.`location_id`,`bl`.`variant_id`,coalesce(`b`.`lot_id`,''),`bl`.`item_condition` */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
+/*!50001 DROP VIEW IF EXISTS `stock_lot_levels`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `stock_lot_levels` AS select `bl`.`organization_id` AS `organization_id`,`bl`.`location_id` AS `location_id`,`b`.`lot_id` AS `lot_id`,`bl`.`variant_id` AS `variant_id`,sum(`bl`.`quantity`) AS `on_hand`,max(`bl`.`updated_at`) AS `updated_at` from (`stock_batch_levels` `bl` join `stock_batches` `b` on(`b`.`id` = `bl`.`batch_id` and `b`.`organization_id` = `bl`.`organization_id`)) where `bl`.`item_condition` = 'sellable' and `b`.`lot_id` is not null group by `bl`.`organization_id`,`bl`.`location_id`,`b`.`lot_id`,`bl`.`variant_id` */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
+/*!50001 DROP VIEW IF EXISTS `stock_projection_breaks`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `stock_projection_breaks` AS select `x`.`organization_id` AS `organization_id`,`x`.`location_id` AS `location_id`,`x`.`variant_id` AS `variant_id`,`x`.`on_hand` AS `on_hand`,`x`.`reserved` AS `reserved`,`x`.`batch_sellable` AS `batch_sellable`,`x`.`batch_reserved` AS `batch_reserved` from (select `sl`.`organization_id` AS `organization_id`,`sl`.`location_id` AS `location_id`,`sl`.`variant_id` AS `variant_id`,`sl`.`on_hand` AS `on_hand`,`sl`.`reserved` AS `reserved`,coalesce(`b`.`q`,0) AS `batch_sellable`,coalesce(`b`.`r`,0) AS `batch_reserved` from (`stock_levels` `sl` left join (select `stock_batch_levels`.`organization_id` AS `organization_id`,`stock_batch_levels`.`location_id` AS `location_id`,`stock_batch_levels`.`variant_id` AS `variant_id`,sum(`stock_batch_levels`.`quantity`) AS `q`,sum(`stock_batch_levels`.`reserved`) AS `r` from `stock_batch_levels` where `stock_batch_levels`.`item_condition` = 'sellable' group by `stock_batch_levels`.`organization_id`,`stock_batch_levels`.`location_id`,`stock_batch_levels`.`variant_id`) `b` on(`b`.`organization_id` = `sl`.`organization_id` and `b`.`location_id` = `sl`.`location_id` and `b`.`variant_id` = `sl`.`variant_id`)) union all select `b`.`organization_id` AS `organization_id`,`b`.`location_id` AS `location_id`,`b`.`variant_id` AS `variant_id`,0 AS `0`,0 AS `0`,`b`.`q` AS `q`,`b`.`r` AS `r` from (select `stock_batch_levels`.`organization_id` AS `organization_id`,`stock_batch_levels`.`location_id` AS `location_id`,`stock_batch_levels`.`variant_id` AS `variant_id`,sum(`stock_batch_levels`.`quantity`) AS `q`,sum(`stock_batch_levels`.`reserved`) AS `r` from `stock_batch_levels` where `stock_batch_levels`.`item_condition` = 'sellable' group by `stock_batch_levels`.`organization_id`,`stock_batch_levels`.`location_id`,`stock_batch_levels`.`variant_id`) `b` where !exists(select 1 from `stock_levels` `sl` where `sl`.`location_id` = `b`.`location_id` and `sl`.`variant_id` = `b`.`variant_id` limit 1)) `x` where `x`.`on_hand` <> `x`.`batch_sellable` or `x`.`reserved` <> `x`.`batch_reserved` */;
 /*!50001 SET character_set_client      = @saved_cs_client */;
 /*!50001 SET character_set_results     = @saved_cs_results */;
 /*!50001 SET collation_connection      = @saved_col_connection */;

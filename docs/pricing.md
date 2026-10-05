@@ -8,9 +8,18 @@ All amounts are whole taka; each step is rounded before it is added.
 
 ## Steps
 
+0. **Which stock fills the line** — stock is held in receipt *batches*, each
+   with its own selling price (see `ecom_erp/docs/inventory-foundation.md`).
+   `planOrder()` (`models/inventoryModel.js`) lays each line's quantity over the
+   batches at the store that supplies the website, oldest received first
+   (earliest expiry first for dated goods, never an expired lot), under lock
+   at checkout. A line whose units sell at more than one price becomes one
+   order line per price — "50 × ৳500 and 10 × ৳550", never an average.
 1. **Goods subtotal** — each line's charge price × quantity, summed. The
-   charge price is the variant's (or product's) discount price if set,
-   otherwise its price.
+   charge price is the variant's (or product's) discount price if set (one
+   price for every batch), otherwise the **batch's own selling price**
+   (rounded to whole taka, as every price here is). A product still priced in
+   USD keeps its single converted price.
 2. **Coupon** (optional):
    - it must be active, unexpired, under its usage limits, and the goods
      subtotal must reach its minimum order amount (measured on the whole
@@ -59,3 +68,20 @@ eat into shipping and tax (the order total was only floored at 0); tax was
 computed on the pre-discount subtotal, so every discounted order recorded
 more VAT than its goods carried. Historical orders keep the figures they
 were saved with.
+
+## Quotes: what the shopper is shown is what checkout can charge
+
+`POST /api/orders/preview` returns, besides every figure, the goods line by line at
+the prices checkout would charge (`lines`) and a `quote` token (a hash of items,
+quantities, prices and the total — no batch, lot or cost ever leaves the server).
+The bag (`POST /api/cart/check`) shows the same breakdown per item.
+
+`POST /api/orders` takes that token. Checkout prices again **inside the order's
+transaction with the batch rows locked**; if the result differs — a price moved,
+a batch ran out, another store was chosen — nothing is created and the response
+is `409` with `errors: { code: "QUOTE_CHANGED", preview }`, the new quote for the
+shopper to review. An order with no token is priced at the server's current
+price (the token is the shopper's protection). An accepted order keeps the price
+it was agreed at, whatever later happens to its batch (`order_items.snapshot_price`
+and the reservation's allocations); the batches it holds are reserved exactly as
+priced (`stock_batch_allocations`), released batch by batch on cancel.
