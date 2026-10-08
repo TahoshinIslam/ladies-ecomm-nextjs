@@ -39,13 +39,13 @@ import {
 } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
 import {
-  useGetWishlistQuery,
   useGetCategoriesQuery,
   useGetNotificationsQuery,
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
 } from "../../store/shopApi.js";
 import { toggleMobileMenu, setMobileMenuOpen } from "../../store/uiSlice.js";
+import { useWishlist } from "../../hooks/useWishlist.js";
 import useDialogFocus from "../../hooks/useDialogFocus.js";
 import { useUserEventStream } from "../../hooks/useUserEventStream.js";
 
@@ -90,8 +90,7 @@ export default function Header({ initialDepartments = [] }) {
 
   const shopName = settings?.store?.name || "";
 
-  const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
-  const wlCount = wlData?.wishlist?.products?.length || 0;
+  const wlCount = useWishlist().count;
 
   // Real departments for the "Shop by Category" header menu and the mobile
   // drawer — same query ShopPage.jsx's category filter already uses.

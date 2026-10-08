@@ -15,8 +15,10 @@ import Input from "../components/ui/Input.jsx";
 import Button from "../components/ui/Button.jsx";
 import { useLoginMutation } from "../store/userApi.js";
 import { setCredentials, selectCurrentUser } from "../store/authSlice.js";
-import { useAddToCartMutation } from "../store/shopApi.js";
+import { useAddToCartMutation, useAddToWishlistMutation } from "../store/shopApi.js";
+import { storage } from "../lib/utils.js";
 import { mergeGuestCartAfterLogin } from "../hooks/useCart.js";
+import { mergeGuestWishlistAfterLogin } from "../hooks/useWishlist.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
 
 export default function LoginPage() {
@@ -27,6 +29,7 @@ export default function LoginPage() {
   const redirectParam = sp.get("redirect");
   const [login, { isLoading }] = useLoginMutation();
   const [addToCart] = useAddToCartMutation();
+  const [addToWishlist] = useAddToWishlistMutation();
   const user = useSelector(selectCurrentUser);
 
   // A session already exists — send them on rather than showing a sign-in
@@ -69,6 +72,7 @@ export default function LoginPage() {
       // cookie automatically.
       dispatch(setCredentials(res.user));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
+      await mergeGuestWishlistAfterLogin(dispatch, addToWishlist, storage.getJSON("ss:guestWishlist", []));
       // A successful sign-in gets its own color (blue, via toast.info) —
       // distinct from toast.success's green, which this app reserves for
       // "something was created" (see context/ThemeProvider.jsx's Toaster).

@@ -21,7 +21,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Flame,
-  Headset,
   Heart,
   Home,
   Lock,
@@ -44,7 +43,7 @@ import ProductRail from "../../components/product/ProductRail.jsx";
 import RecentlyViewedRail from "../../components/product/RecentlyViewedRail.jsx";
 import ReviewList from "../../components/review/ReviewList.jsx";
 
-import { useToggleWishlistMutation, useGetWishlistQuery } from "../../store/shopApi.js";
+import { useWishlist } from "../../hooks/useWishlist.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { setCartOpen } from "../../store/uiSlice.js";
 import { useCart } from "../../hooks/useCart.js";
@@ -92,8 +91,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const dispatch = useDispatch();
   const cart = useCart();
   const [adding, setAdding] = useState(false);
-  const [toggleWishlist] = useToggleWishlistMutation();
-  const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
+  const wishlist = useWishlist();
 
   const [selectedImage, setSelectedImage] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
@@ -158,9 +156,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
     });
   };
 
-  const isWished = !!wlData?.wishlist?.products?.some(
-    (p) => (p._id || p) === product._id
-  );
+  const isWished = wishlist.has(product._id);
   // Every variant sold out — distinct from "this specific combination is
   // sold out while others are available."
   const isProductUnavailable = variants.every((v) => (v.stock ?? 0) <= 0);
@@ -210,12 +206,9 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   };
 
   const handleWishlist = async () => {
-    if (!user) {
-      toast.error(t("product.pleaseSignIn"));
-      return;
-    }
+    // No sign-in needed: a visitor's saved products stay on this device and join their account when they sign in.
     try {
-      const r = await toggleWishlist(product._id).unwrap();
+      const r = await wishlist.toggle(product);
       toast.success(r.added ? t("product.addedToWishlist") : t("product.removedFromWishlist"));
     } catch {
       toast.error(t("product.wishlistUpdateFailed"));
@@ -629,14 +622,6 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
         </div>
       </section>
 
-      {/* The shop's promises, once more, as a strip. */}
-      <div className="mt-6 grid grid-cols-2 gap-y-5 rounded-2xl border border-line bg-surface px-4 py-5 shadow-card sm:px-6 lg:grid-cols-4 lg:divide-x lg:divide-line">
-        <StripItem icon={Truck} title={t("product.freeDelivery")} desc={freeShipAmount ? t("product.freeShippingOver", { amount: freeShipAmount }) : t("product.onQualifyingOrders")} />
-        <StripItem icon={ShieldCheck} title={t("product.easyReturns")} desc={exchangeDays ? t("product.exchangePolicyDays", { days: exchangeDays }) : t("product.exchanges14Day")} />
-        <StripItem icon={Lock} title={t("product.securePayment")} desc={t("checkout.cashOnDelivery")} />
-        <StripItem icon={Headset} title={t("product.customerSupport")} desc={t("product.supportDesc")} href="/contact" />
-      </div>
-
       {/* You may also like — ranked server-side by category/attribute overlap; renders nothing with zero results. */}
       <div className="mt-12">
         <ProductRail id="related-products-heading" title={t("product.relatedHeading")} products={relatedProducts} isLoading={false} />
@@ -802,22 +787,5 @@ function TrustCard({ icon: Icon, title, desc }) {
         <p className="mt-0.5 text-[11px] leading-tight text-stone">{desc}</p>
       </div>
     </div>
-  );
-}
-
-function StripItem({ icon: Icon, title, desc, href }) {
-  const body = (
-    <div className="flex items-center gap-3 lg:px-6 lg:first:pl-0">
-      <Icon className="h-8 w-8 flex-none text-ink" strokeWidth={1.4} aria-hidden="true" />
-      <div className="min-w-0">
-        <p className="text-[14px] font-bold text-ink">{title}</p>
-        <p className="text-[12.5px] text-stone">{desc}</p>
-      </div>
-    </div>
-  );
-  return href ? (
-    <Link href={href} className="block focus-ring">{body}</Link>
-  ) : (
-    body
   );
 }

@@ -7,7 +7,7 @@ import { Heart, Home, LayoutGrid, ShoppingBag, User } from "lucide-react";
 
 import { toggleMobileMenu } from "../../store/uiSlice.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
-import { useGetWishlistQuery } from "../../store/shopApi.js";
+import { useWishlist } from "../../hooks/useWishlist.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { cn } from "../../lib/utils.js";
 
@@ -29,9 +29,7 @@ export default function MobileNav() {
   const dispatch = useDispatch();
   const { t } = useLocale();
   const user = useSelector(selectCurrentUser);
-  // Wishlist has no guest/localStorage fallback (unlike cart) — same as Header.
-  const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
-  const wlCount = wlData?.wishlist?.products?.length || 0;
+  const wlCount = useWishlist().count;
 
   const isActive = (path) =>
     path === "/" ? pathname === "/" : pathname.startsWith(path);

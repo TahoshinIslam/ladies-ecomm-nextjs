@@ -7,14 +7,13 @@ import EmptyState from "../components/ui/EmptyState.jsx";
 import Button from "../components/ui/Button.jsx";
 import Skeleton from "../components/ui/Skeleton.jsx";
 import Breadcrumb from "../components/ui/Breadcrumb.jsx";
-import { useGetWishlistQuery } from "../store/shopApi.js";
+import { useWishlist } from "../hooks/useWishlist.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
 import Link from "next/link";
 
 export default function WishlistPage() {
   const { t } = useLocale();
-  const { data, isLoading } = useGetWishlistQuery();
-  const products = data?.wishlist?.products || [];
+  const { products, isLoading } = useWishlist();
 
   return (
     <div className="container-x py-10">

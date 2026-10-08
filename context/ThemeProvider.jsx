@@ -16,6 +16,7 @@ import store from "../store/index.js";
 import { useGetActiveThemeQuery } from "../store/themeApi.js";
 import { hydrateUi } from "../store/uiSlice.js";
 import { hydrateGuestCart } from "../store/guestCartSlice.js";
+import { hydrateGuestWishlist } from "../store/guestWishlistSlice.js";
 import { SettingsProvider } from "./SettingsContext.jsx";
 import { LocaleProvider } from "./LocaleProvider.jsx";
 import { storage } from "../lib/utils.js";
@@ -133,6 +134,7 @@ function StorageHydrator() {
   useEffect(() => {
     store.dispatch(hydrateUi());
     store.dispatch(hydrateGuestCart());
+    store.dispatch(hydrateGuestWishlist());
   }, []);
   return null;
 }

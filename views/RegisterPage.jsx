@@ -14,9 +14,11 @@ import { toast } from "sonner";
 import Input from "../components/ui/Input.jsx";
 import Button from "../components/ui/Button.jsx";
 import { useRegisterMutation } from "../store/userApi.js";
-import { useAddToCartMutation } from "../store/shopApi.js";
+import { useAddToCartMutation, useAddToWishlistMutation } from "../store/shopApi.js";
+import { storage } from "../lib/utils.js";
 import { setCredentials, selectCurrentUser } from "../store/authSlice.js";
 import { mergeGuestCartAfterLogin } from "../hooks/useCart.js";
+import { mergeGuestWishlistAfterLogin } from "../hooks/useWishlist.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
 // Shared boundary values (not the full server schema — this form needs its
 // own translated messages) so the client can never silently drift out of
@@ -32,6 +34,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const [registerUser, { isLoading }] = useRegisterMutation();
   const [addToCart] = useAddToCartMutation();
+  const [addToWishlist] = useAddToWishlistMutation();
   const sp = useSearchParams();
   const redirectParam = sp.get("redirect");
   const user = useSelector(selectCurrentUser);
@@ -78,6 +81,7 @@ export default function RegisterPage() {
       // cookie automatically.
       dispatch(setCredentials(res.user));
       await mergeGuestCartAfterLogin(dispatch, addToCart);
+      await mergeGuestWishlistAfterLogin(dispatch, addToWishlist, storage.getJSON("ss:guestWishlist", []));
       toast.success(t("auth.accountCreated"));
       router.push(redirectParam || "/");
     } catch (err) {

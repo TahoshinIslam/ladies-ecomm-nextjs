@@ -8,12 +8,8 @@ import { BellRing, Eye, Heart, ImageOff, Scale, ShoppingCart, Star } from "lucid
 import { useSelector, useDispatch } from "react-redux";
 import { toast } from "sonner";
 
-import {
-  useToggleWishlistMutation,
-  useGetWishlistQuery,
-  usePrefetch,
-} from "../../store/shopApi.js";
-import { selectCurrentUser } from "../../store/authSlice.js";
+import { usePrefetch } from "../../store/shopApi.js";
+import { useWishlist } from "../../hooks/useWishlist.js";
 import { addToCompare, removeFromCompare, openQuickAdd } from "../../store/uiSlice.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
@@ -31,15 +27,14 @@ import { cn, resolveImage, effectivePrice, isRealDiscount } from "../../lib/util
  * being dropped.
  */
 export default function ProductCard({ product, className, index = 0, onQuickAdd, attributeMeta, priority = false }) {
-  const user = useSelector(selectCurrentUser);
   const dispatch = useDispatch();
   const settings = useSettings();
   const { t, locale } = useLocale();
   const [hovered, setHovered] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
 
-  const [toggleWishlist, { isLoading: wlLoading }] = useToggleWishlistMutation();
-  const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
+  const wishlist = useWishlist();
+  const wlLoading = wishlist.busy;
   // Warms QuickAddSheet's own attributes query (the same whole-collection
   // cache entry, undefined args — see QuickAddSheet.jsx) on hover/focus, so
   // by the time a shopper actually clicks Quick Add the data is already
@@ -49,9 +44,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
 
   const isCompared = compareList.includes(product._id);
   const compareFull = !isCompared && compareList.length >= 4;
-  const isWished = !!wlData?.wishlist?.products?.some(
-    (p) => (p._id || p) === product._id,
-  );
+  const isWished = wishlist.has(product._id);
 
   // Unavailable when every variant/size is out of stock. `variants` is the
   // modest-fashion schema; `sizes` is the legacy mock-catalog shape — check
@@ -101,12 +94,9 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
 
   const handleWishlist = async (e) => {
     e.preventDefault();
-    if (!user) {
-      toast.error(t("product.signInToSave"));
-      return;
-    }
+    // Works without signing in: a visitor's saved products stay on this device and join their account when they sign in.
     try {
-      const res = await toggleWishlist(product._id).unwrap();
+      const res = await wishlist.toggle(product);
       toast.success(res.added ? t("product.saved") : t("product.removedFromSaved"));
     } catch {
       toast.error(t("product.saveFailed"));
