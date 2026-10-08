@@ -150,6 +150,9 @@ export const updateSettingsSchema = z
         // Per-placement crop/fit for the images above, keyed
         // "<placement>[:<slug>]" (lib/imageFraming.js PLACEMENTS).
         imageFraming: homepageFramingMapSchema,
+        miniBanners: z
+          .array(z.object({ imageUrl: z.string().trim().max(2000), href: z.string().trim().max(500) }).strict())
+          .max(3),
         banner: z
           .object({
             enabled: z.boolean(),

@@ -139,7 +139,7 @@ describe("ShopPageClient.jsx — pending-transition disabling and responsive lay
 
   test("mobile scroll rail bleeds to the true viewport edge (negative margin cancels container-x's own padding) exactly like the homepage's row", () => {
     const fn = shopSrc.match(/function CategoryTileFilter\([\s\S]*?\n\}/)[0];
-    assert.match(fn, /-mx-5[^"]*px-5[^"]*sm:mx-0[^"]*sm:px-0/, "expected the same edge-bleed-then-cancel pattern as HomePage.jsx's favourites row");
+    assert.match(fn, /-mx-2\.5[^"]*px-2\.5[^"]*sm:mx-0[^"]*sm:px-0/, "expected the same edge-bleed-then-cancel pattern as HomePage.jsx's favourites row");
   });
 
   test("the desktop grid uses a column count that evenly divides the row's real tile count (1 All + FAVOURITE_DEPARTMENTS_COUNT = 9), avoiding an orphaned trailing tile", () => {

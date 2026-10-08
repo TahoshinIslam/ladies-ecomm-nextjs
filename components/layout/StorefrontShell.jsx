@@ -7,6 +7,7 @@ import { WifiOff } from "lucide-react";
 import Header from "@/components/layout/Header.jsx";
 import Footer from "@/components/layout/Footer.jsx";
 import MobileNav from "@/components/layout/MobileNav.jsx";
+import FloatingCart from "@/components/layout/FloatingCart.jsx";
 import ScrollToTop from "@/components/layout/ScrollToTop.jsx";
 import { useLocale } from "@/context/LocaleProvider.jsx";
 
@@ -68,6 +69,7 @@ export default function StorefrontLayout({ children, initialDepartments }) {
       <CompareTray />
       <CampaignPopup />
       <MobileNav />
+      <FloatingCart />
       <Suspense fallback={null}>
         <ScrollToTop />
       </Suspense>

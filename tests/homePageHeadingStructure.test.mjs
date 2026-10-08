@@ -36,6 +36,6 @@ describe("views/HomePage.jsx — page has exactly one <h1>, visually hidden, not
 
   test("existing section headings are untouched (still h2/h3, no visual hierarchy change)", () => {
     assert.match(source, /<h2 id="favourites-h"/);
-    assert.match(source, /<h3 className="mt-4 text-\[17px\] font-semibold">\{deptName\}<\/h3>/);
+    assert.match(source, /<h3 className="mt-2\.5 text-\[14px\] font-semibold sm:mt-4 sm:text-\[17px\]">\{deptName\}<\/h3>/);
   });
 });

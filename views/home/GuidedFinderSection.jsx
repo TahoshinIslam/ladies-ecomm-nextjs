@@ -22,12 +22,12 @@ export default function GuidedFinderSection({ image, framing = null }) {
   const dispatch = useDispatch();
 
   return (
-    <section aria-labelledby="finder-h" className="container-x pt-32">
+    <section aria-labelledby="finder-h" className="container-x pt-10 sm:pt-20 lg:pt-32">
       <div
         data-reveal
         className="relative grid overflow-hidden rounded-[26px] border border-line bg-surface lg:grid-cols-[1.1fr_1fr]"
       >
-        <div className="p-8 sm:p-14">
+        <div className="p-5 sm:p-14">
           <div className="eyebrow">{t("home.guidedDiscoveryEyebrow")}</div>
           <h2
             id="finder-h"
@@ -56,7 +56,7 @@ export default function GuidedFinderSection({ image, framing = null }) {
             side (dividing the two columns at lg:) to the top (dividing
             the stacked panels below lg:), since its job is separating
             this panel from the text above/beside it either way. */}
-        <div className="relative grid min-h-[340px] place-items-center overflow-hidden border-t border-line bg-media lg:border-l lg:border-t-0">
+        <div className="relative grid min-h-[180px] place-items-center sm:min-h-[340px] overflow-hidden border-t border-line bg-media lg:border-l lg:border-t-0">
           {image && framing ? (
             // Saved crop (Admin → Shop Config → Guided Discovery → Adjust framing).
             <FramedImage src={image} framing={framing} placement="guided.panel" sizes="(max-width: 1024px) 100vw, 50vw" />

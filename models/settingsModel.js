@@ -10,6 +10,11 @@ const DEFAULT_HOMEPAGE = {
   guidedFinderImage: "",
   occasionMenuImage: "",
   banner: { enabled: false, imageUrl: "", href: "" },
+  miniBanners: [
+    { imageUrl: "", href: "" },
+    { imageUrl: "", href: "" },
+    { imageUrl: "", href: "" },
+  ],
   campaign: { enabled: false, title: "", message: "", ctaLabel: "", ctaHref: "" },
 };
 const DEFAULT_CURRENCY = { defaultDisplay: "BDT", usdToBdt: 120 };

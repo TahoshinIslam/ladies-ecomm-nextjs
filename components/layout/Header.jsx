@@ -21,7 +21,6 @@ import {
   Moon,
   Package,
   Scale,
-  ShoppingCart,
   Sun,
   User as UserIcon,
   X,
@@ -40,14 +39,13 @@ import {
 } from "../../store/authSlice.js";
 import { useLogoutMutation } from "../../store/userApi.js";
 import {
-  useGetCartQuery,
   useGetWishlistQuery,
   useGetCategoriesQuery,
   useGetNotificationsQuery,
   useMarkNotificationReadMutation,
   useMarkAllNotificationsReadMutation,
 } from "../../store/shopApi.js";
-import { toggleCart, toggleMobileMenu, setMobileMenuOpen } from "../../store/uiSlice.js";
+import { toggleMobileMenu, setMobileMenuOpen } from "../../store/uiSlice.js";
 import useDialogFocus from "../../hooks/useDialogFocus.js";
 import { useUserEventStream } from "../../hooks/useUserEventStream.js";
 
@@ -92,14 +90,7 @@ export default function Header({ initialDepartments = [] }) {
 
   const shopName = settings?.store?.name || "";
 
-  const { data: cartData } = useGetCartQuery(undefined, { skip: !user });
   const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
-  const guestCount = useSelector((s) =>
-    s.guestCart.items.reduce((n, i) => n + i.quantity, 0),
-  );
-  const cartCount = user
-    ? cartData?.cart?.items?.reduce((s, i) => s + i.quantity, 0) || 0
-    : guestCount;
   const wlCount = wlData?.wishlist?.products?.length || 0;
 
   // Real departments for the "Shop by Category" header menu and the mobile
@@ -145,33 +136,6 @@ export default function Header({ initialDepartments = [] }) {
 
   return (
     <>
-      {/* Utility topbar — EShopper's slim FAQ/Help/Support strip, wired to
-          the real pages that exist here (FAQ, Contact) instead of empty
-          anchors, with the language/theme controls taking the place of
-          social links this store doesn't have. Desktop/tablet only.
-          Default (non-green) styling — of the header's 3 stacked rows, only
-          the main logo/search/actions row below is brand-green. */}
-      <div className="hidden border-b border-line bg-media md:block">
-        <div className="container-x flex h-9 items-center justify-between text-[12.5px] text-stone">
-          <div className="flex items-center gap-3">
-            <Link href="/faq" className="hover:text-ink">{t("footer.faq")}</Link>
-            <span className="text-line">|</span>
-            <Link href="/contact" className="hover:text-ink">{t("footer.contact")}</Link>
-          </div>
-          <div className="flex items-center gap-1">
-            <LanguageSwitcher />
-            <button
-              onClick={toggleTheme}
-              aria-label={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
-              title={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
-              className="grid h-8 w-8 place-items-center rounded-md text-ink transition-colors hover:bg-wash focus-ring"
-            >
-              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
-          </div>
-        </div>
-      </div>
-
       <header className="sticky top-0 z-[90] border-b border-line bg-surface">
         {/* Mobile app-shell bar (<768px): logo, theme toggle, cart — search
             gets its own full-width row below. This is mobile's one
@@ -190,6 +154,7 @@ export default function Header({ initialDepartments = [] }) {
             <Wordmark name={shopName} onAccent className="text-[20px]" />
           </Link>
           <div className="flex-1" />
+          <LanguageSwitcher showLabel="never" className="w-11 justify-center px-0 text-accent-foreground hover:bg-white/10" />
           <button
             onClick={toggleTheme}
             aria-label={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
@@ -198,16 +163,16 @@ export default function Header({ initialDepartments = [] }) {
             {isDark ? <Sun className="h-[20px] w-[20px]" /> : <Moon className="h-[20px] w-[20px]" />}
           </button>
           {user && <NotificationBell />}
-          <button
-            onClick={() => dispatch(toggleCart())}
-            aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
-            className="relative grid h-11 w-11 place-items-center rounded-lg text-accent-foreground transition-colors hover:bg-white/10 focus-ring"
-          >
-            <ShoppingCart className="h-[21px] w-[21px]" strokeWidth={1.6} />
-            {cartCount > 0 && <Badge count={cartCount} />}
-          </button>
         </div>
-        {/* Confirmed bug, fixed: this inline field and the mobile bottom
+        {/* Search sits under the logo bar, full width, like a grocery app: a real inline field with the live results
+            dropdown (the same one the desktop row uses). The bottom bar's old Search tab is now "Categories", so
+            there is a single search entry point. */}
+        <div className="bg-verm pb-3 md:hidden">
+          <div className="container-x">
+            <HeaderSearchField />
+          </div>
+        </div>
+        {/* Note on search entry points: this inline field and the mobile bottom
             nav's own "Search" tab (which opens SearchModal.jsx, a
             full-screen overlay with the same search) were two separate
             search entry points stacked on small screens — this one has
@@ -225,16 +190,27 @@ export default function Header({ initialDepartments = [] }) {
             reaches both edges of the viewport instead of leaving default-
             colored gutters on screens wider than the 1480px content max. */}
         <div className="hidden bg-verm text-accent-foreground md:block">
-          <div className="container-x flex items-center gap-6 py-4">
-            <Link href="/" className="flex-none focus-ring" aria-label={shopName}>
+          {/* Three columns with equal outer tracks, so the search field is on the page's centre line (the logo sits left, the
+              actions right) instead of centred in whatever space the two leave over. */}
+          <div className="container-x grid grid-cols-[1fr_minmax(220px,520px)_1fr] items-center gap-6 py-4">
+            <Link href="/" className="flex-none justify-self-start focus-ring" aria-label={shopName}>
               <Wordmark name={shopName} onAccent className="text-[25px]" />
             </Link>
 
-          <div className="flex-1">
+          <div className="min-w-0">
             <HeaderSearchField />
           </div>
 
-          <div className="flex flex-none items-center gap-2">
+          <div className="flex flex-none items-center gap-2 justify-self-end">
+            <LanguageSwitcher className="border border-white/25 text-accent-foreground hover:border-white/60 hover:bg-transparent" />
+            <button
+              onClick={toggleTheme}
+              aria-label={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
+              title={isDark ? t("header.switchLightTheme") : t("header.switchDarkTheme")}
+              className="grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
+            >
+              {isDark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+            </button>
             {compareCount > 0 && (
               <Link
                 href="/compare"
@@ -253,14 +229,6 @@ export default function Header({ initialDepartments = [] }) {
               <Heart className="h-[18px] w-[18px]" />
               {wlCount > 0 && <Badge count={wlCount} />}
             </Link>
-            <button
-              onClick={() => dispatch(toggleCart())}
-              aria-label={cartCount ? t("header.cartLabel", { count: cartCount }) : t("header.cartEmpty")}
-              className="relative grid h-11 w-11 place-items-center rounded-lg border border-white/25 text-accent-foreground transition-colors hover:border-white/60 focus-ring"
-            >
-              <ShoppingCart className="h-[18px] w-[18px]" />
-              {cartCount > 0 && <Badge count={cartCount} />}
-            </button>
             {user && <NotificationBell />}
 
             <div className="relative">
@@ -324,12 +292,10 @@ export default function Header({ initialDepartments = [] }) {
             the always-open CategorySidebar beside the hero is the category list (showing the trigger there too
             would be a second, redundant entry point). Everywhere else it is the one category entry point above
             the mobile drawer's own breakpoint.
-            A plain flex row (not the old 3-column grid built to keep the
-            center nav mathematically centered around a page-dependent left
-            column) — the nav links now sit immediately beside the trigger,
-            left-aligned, matching this row's left-anchored composition. */}
+            The primary links are centred on the page: a 3-column grid whose outer columns are equal (1fr), so the
+            middle column stays on the page's centre whether or not the left column holds the trigger. */}
         <div className="hidden border-t border-line md:block">
-          <div className="container-x flex items-center gap-6">
+          <div className="container-x grid grid-cols-[1fr_auto_1fr] items-center gap-6">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => dispatch(toggleMobileMenu())}
@@ -345,7 +311,7 @@ export default function Header({ initialDepartments = [] }) {
               {pathname !== "/" ? <HeaderCategoryMenu categories={allCategories} className="hidden lg:flex" /> : null}
             </div>
 
-            <nav aria-label="Primary" className="flex h-11 items-center gap-5 text-[14.5px] font-medium">
+            <nav aria-label="Primary" className="col-start-2 flex h-11 items-center justify-center gap-6 text-[14.5px] font-medium">
               <HeaderNavLink href="/" pathname={pathname} searchParams={searchParams}>
                 {t("navigation.home")}
               </HeaderNavLink>

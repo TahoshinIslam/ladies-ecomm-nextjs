@@ -52,7 +52,7 @@ export default function NewsletterForm({ theme = "dark", className }) {
           aria-invalid={state === "invalid"}
           placeholder={t("home.emailPlaceholder")}
           className={cn(
-            "h-11 min-w-0 flex-1 rounded-lg border px-3.5 text-[14px] focus-ring",
+            "h-11 w-full min-w-0 rounded-lg sm:w-auto sm:flex-1 border px-3.5 text-[14px] focus-ring",
             isDark
               ? "bg-[rgba(250,250,247,0.08)] text-accent-foreground placeholder:text-accent-foreground/50"
               : "bg-surface text-ink placeholder:text-stone",
