@@ -2937,7 +2937,6 @@ CREATE TABLE `stock_locations` (
   CONSTRAINT `fk_stock_locations_branch` FOREIGN KEY (`branch_id`) REFERENCES `branches` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT `fk_stock_locations_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_stock_locations_parent` FOREIGN KEY (`organization_id`, `parent_location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON UPDATE CASCADE,
-  CONSTRAINT `chk_stock_locations_not_own_parent` CHECK (`parent_location_id` is null or `parent_location_id` <> `id`),
   CONSTRAINT `chk_stock_locations_priority` CHECK (`fulfilment_priority` is null or `fulfilment_priority` >= 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -3488,8 +3487,7 @@ CREATE TABLE `stock_transfers` (
   KEY `fk_stock_transfers_to` (`organization_id`,`to_location_id`),
   CONSTRAINT `fk_stock_transfers_from` FOREIGN KEY (`organization_id`, `from_location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_stock_transfers_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_stock_transfers_to` FOREIGN KEY (`organization_id`, `to_location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
-  CONSTRAINT `chk_stock_transfers_locations` CHECK (`from_location_id` <> `to_location_id`)
+  CONSTRAINT `fk_stock_transfers_to` FOREIGN KEY (`organization_id`, `to_location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `store_settings`;
