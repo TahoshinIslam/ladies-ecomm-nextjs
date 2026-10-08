@@ -41,7 +41,7 @@ describe("Online checkout uses the store's business day, with no sweep", { skip:
     await connectTestDb();
     await truncateAll();
     ({ POST: createOrderPOST } = await import("../app/api/orders/route.js"));
-    [{ offset: originalOffset }] = await rawQuery("SELECT business_utc_offset_minutes AS offset FROM organizations WHERE id = ?", [ORG]);
+    [{ originalOffset }] = await rawQuery("SELECT business_utc_offset_minutes AS originalOffset FROM organizations WHERE id = ?", [ORG]); // not "AS offset": OFFSET is reserved in MariaDB 10.6+
   });
 
   after(async () => {
