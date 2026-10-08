@@ -67,14 +67,14 @@ describe("Website orders are assigned to their fulfilment branch", { skip: !dbRe
   async function makeDefaultLocation(branchId) {
     const id = `loc_t${Date.now().toString(36)}${(counter += 1)}`;
     await rawQuery(
-      `INSERT INTO stock_locations (id, organization_id, branch_id, name, code, location_type, status, fulfils_online, fulfilment_priority, created_by_name)
-       VALUES (?, ?, ?, ?, ?, 'store', 'Active', 1, 1, 'test')`,
+      `INSERT INTO stock_locations (id, organization_id, branch_id, name, code, location_type, status, fulfils_online, fulfilment_priority, channel, created_by_name)
+       VALUES (?, ?, ?, ?, ?, 'store', 'Active', 1, 1, 'online', 'test')`,
       [id, ORG, branchId, `Loc ${id}`, id.toUpperCase().slice(0, 30)],
     );
     await rawQuery(
-      `INSERT INTO inventory_settings (organization_id, default_location_id) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE default_location_id = VALUES(default_location_id)`,
-      [ORG, id],
+      `INSERT INTO inventory_settings (organization_id, default_location_id, online_source_location_id) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE default_location_id = VALUES(default_location_id), online_source_location_id = VALUES(online_source_location_id)`,
+      [ORG, id, id],
     );
     return id;
   }

@@ -58,8 +58,14 @@ describe("Online checkout uses the store's business day, with no sweep", { skip:
   async function makeLocation() {
     const id = `loc_x${uid()}`;
     await rawQuery(
-      `INSERT INTO stock_locations (id, organization_id, name, code, location_type, status, fulfils_online, fulfilment_priority, created_by_name) VALUES (?, ?, ?, ?, 'warehouse', 'Active', 1, 1, 'test')`,
+      `INSERT INTO stock_locations (id, organization_id, name, code, location_type, status, fulfils_online, fulfilment_priority, channel, created_by_name) VALUES (?, ?, ?, ?, 'warehouse', 'Active', 1, 1, 'online', 'test')`,
       [id, ORG, `Loc ${id}`, id.toUpperCase().slice(0, 30)],
+    );
+    // The online store sells from ONE dedicated Online-only warehouse: this is it.
+    await rawQuery(
+      `INSERT INTO inventory_settings (organization_id, online_source_location_id) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE online_source_location_id = VALUES(online_source_location_id)`,
+      [ORG, id],
     );
     locationIds.push(id);
     return id;

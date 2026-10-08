@@ -3,15 +3,18 @@
 //
 // The policy under test (documented in ecom_erp/docs/retail-plan.md):
 //
-//   - an online order is filled from ONE location: the first eligible one, by
-//     priority, that can cover the WHOLE order. Split fulfilment is not
-//     supported, so an order no single location can cover is refused and
-//     nothing is reserved anywhere;
-//   - eligible = active, marked fulfils_online, at no branch or an active one;
-//     a disabled, archived or suspended-branch location is never used;
+//   - an online order is filled from ONE place: the store's dedicated online
+//     warehouse (inventory_settings.online_source_location_id), and only while
+//     it is active and classified Online only (migration 108). If it cannot
+//     cover the WHOLE order the order is refused and nothing is reserved
+//     anywhere — never moved to another location, however much that holds;
+//   - a shared, shop-only or archived warehouse is never used, and with no
+//     valid dedicated warehouse nothing can be ordered at all;
+//   - a location at a suspended branch can still be the source (the order is
+//     saved unassigned);
 //   - units sitting in a lot past its expiry date are never promised;
-//   - what the shop shows (product_variants.stock) is the most ONE eligible
-//     location can supply, and follows eligibility changes at once;
+//   - what the shop shows (product_variants.stock) is the dedicated
+//     warehouse's stock and nobody else's, and follows its state at once;
 //   - a variant not offered online cannot be bought here.
 
 import { test, describe, before, after } from "node:test";
@@ -52,6 +55,7 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
   after(async () => {
     // Orders first (a branch with orders cannot be deleted), then the locations this suite made.
     await truncateAll();
+    await rawQuery("UPDATE inventory_settings SET online_source_location_id = NULL WHERE organization_id = ?", [ORG]).catch(() => {});
     if (locationIds.length) await rawQuery("DELETE FROM stock_locations WHERE organization_id = ? AND id IN (?)", [ORG, locationIds]);
     for (const id of branchIds) await rawQuery("DELETE FROM branches WHERE id = ?", [id]);
     await disconnectTestDb();
@@ -66,15 +70,25 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
     return id;
   }
 
-  async function makeLocation({ priority = 1, fulfils = 1, branch = null, status = "Active" } = {}) {
+  async function makeLocation({ priority = 1, fulfils = 1, branch = null, status = "Active", channel = "both", dedicate = false } = {}) {
     const id = `loc_f${uid()}`;
     await rawQuery(
-      `INSERT INTO stock_locations (id, organization_id, branch_id, name, code, location_type, status, fulfils_online, fulfilment_priority, created_by_name)
-       VALUES (?, ?, ?, ?, ?, 'warehouse', ?, ?, ?, 'test')`,
-      [id, ORG, branch, `Loc ${id}`, id.toUpperCase().slice(0, 30), status, fulfils, fulfils ? priority : null],
+      `INSERT INTO stock_locations (id, organization_id, branch_id, name, code, location_type, status, fulfils_online, fulfilment_priority, channel, created_by_name)
+       VALUES (?, ?, ?, ?, ?, 'warehouse', ?, ?, ?, ?, 'test')`,
+      [id, ORG, branch, `Loc ${id}`, id.toUpperCase().slice(0, 30), status, fulfils, fulfils ? priority : null, dedicate ? "online" : channel],
     );
     locationIds.push(id);
+    if (dedicate) await setSource(id);
     return id;
+  }
+
+  // Exactly what the dashboard's changeOnlineSource does to the database.
+  async function setSource(locationId) {
+    await rawQuery(
+      `INSERT INTO inventory_settings (organization_id, online_source_location_id) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE online_source_location_id = VALUES(online_source_location_id)`,
+      [ORG, locationId],
+    );
   }
 
   async function holdStock(location, product, quantity) {
@@ -85,6 +99,9 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
   }
 
   async function newProduct() {
+    // A fresh product is only visible to the shop while the store has a valid dedicated warehouse: start each test from
+    // the fixture default (the test then points the source wherever it needs).
+    await rawQuery("UPDATE inventory_settings SET online_source_location_id = NULL WHERE organization_id = ?", [ORG]);
     const product = await createTestProduct({ stock: 0 });
     // The product helper opens at the store's default location; clear that so each test sets its own stock.
     await clearVariantStock(product.variants[0]._id.toString());
@@ -118,49 +135,50 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
     }
   }
 
-  test("the first eligible location, by priority, that can cover the order is used", async () => {
+  test("the dedicated warehouse fills the order, even when another location holds more and has a better priority", async () => {
     const product = await newProduct();
-    const low = await makeLocation({ priority: 2 });
-    const high = await makeLocation({ priority: 1 });
-    await holdStock(low, product, 10);
-    await holdStock(high, product, 10);
+    const other = await makeLocation({ priority: 1 });
+    const dedicated = await makeLocation({ priority: 2, dedicate: true });
+    await holdStock(other, product, 50);
+    await holdStock(dedicated, product, 10);
     await withShopper(async (buyer) => {
       const { res, body } = await place(buyer, [[product, 3]]);
       assert.equal(res.status, 201);
-      assert.deepEqual((await reservations(body.order._id)).map((r) => r.locationId), [high], "priority 1 fills it");
-      assert.equal(await reservedAt(high, product), 3);
-      assert.equal(await reservedAt(low, product), 0);
+      assert.deepEqual((await reservations(body.order._id)).map((r) => r.locationId), [dedicated], "only the dedicated warehouse");
+      assert.equal(await reservedAt(dedicated, product), 3);
+      assert.equal(await reservedAt(other, product), 0);
     });
     await deleteRows("products", "id", product._id);
   });
 
-  test("when the best location cannot cover it, the next one that can does", async () => {
+  test("when the dedicated warehouse cannot cover it, the order is refused — never moved to another location", async () => {
     const product = await newProduct();
-    const high = await makeLocation({ priority: 1 });
-    const low = await makeLocation({ priority: 2 });
-    await holdStock(high, product, 2);
-    await holdStock(low, product, 10);
+    const dedicated = await makeLocation({ dedicate: true });
+    const other = await makeLocation({ priority: 1 });
+    await holdStock(dedicated, product, 2);
+    await holdStock(other, product, 100);
     await withShopper(async (buyer) => {
       const { res, body } = await place(buyer, [[product, 5]]);
-      assert.equal(res.status, 201);
-      assert.deepEqual((await reservations(body.order._id)).map((r) => r.locationId), [low]);
-      assert.equal(await reservedAt(high, product), 0, "the location that fell short holds nothing");
+      assert.ok([400, 409].includes(res.status), JSON.stringify(body));
+      assert.equal(await reservedAt(other, product), 0, "the other warehouse is never touched");
+      assert.equal(await reservedAt(dedicated, product), 0);
+      assert.equal((await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [buyer._id]))[0].n, 0, "no order was left behind");
     });
     await deleteRows("products", "id", product._id);
   });
 
-  test("a whole order comes from one location: items spread across two locations are refused, and nothing is reserved", async () => {
+  test("a whole order comes from the dedicated warehouse: an item it lacks is refused whole, even if another warehouse has it", async () => {
     const a = await newProduct();
     const b = await newProduct();
-    const first = await makeLocation({ priority: 1 });
+    const dedicated = await makeLocation({ dedicate: true });
     const second = await makeLocation({ priority: 2 });
-    await holdStock(first, a, 5);
+    await holdStock(dedicated, a, 5);
     await holdStock(second, b, 5);
     await withShopper(async (buyer) => {
       const { res, body } = await place(buyer, [[a, 1], [b, 1]]);
-      assert.equal(res.status, 409, JSON.stringify(body));
-      assert.match(body.error ?? body.message ?? JSON.stringify(body), /no single location|Insufficient stock/i);
-      assert.equal(await reservedAt(first, a), 0, "the first location was abandoned cleanly");
+      assert.ok([400, 409].includes(res.status), JSON.stringify(body));
+      assert.match(body.error ?? body.message ?? JSON.stringify(body), /Insufficient stock/i);
+      assert.equal(await reservedAt(dedicated, a), 0, "the line it could cover was abandoned cleanly");
       assert.equal(await reservedAt(second, b), 0);
       assert.equal((await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [buyer._id]))[0].n, 0, "no order was left behind");
     });
@@ -168,29 +186,50 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
     await deleteRows("products", "id", b._id);
   });
 
-  test("a location not marked for online orders is never used, however much it holds", async () => {
+  test("a warehouse that is not Online only is never used — even marked for online orders as the source", async () => {
     const product = await newProduct();
-    const closed = await makeLocation({ fulfils: 0 });
-    await holdStock(closed, product, 100);
-    await withShopper(async (buyer) => {
-      const { res } = await place(buyer, [[product, 1]]);
-      assert.ok([400, 409].includes(res.status), `refused (${res.status})`);
-      assert.equal(await reservedAt(closed, product), 0);
-    });
+    const shared = await makeLocation({ channel: "both" });
+    const shopOnly = await makeLocation({ channel: "shop", fulfils: 0 });
+    await holdStock(shared, product, 100);
+    await holdStock(shopOnly, product, 100);
+    for (const legacy of [shared, shopOnly]) {
+      await setSource(legacy);
+      await withShopper(async (buyer) => {
+        const { res } = await place(buyer, [[product, 1]]);
+        assert.ok([400, 409].includes(res.status), `refused (${res.status})`);
+        assert.equal(await reservedAt(legacy, product), 0);
+      });
+    }
+    assert.equal(await projected(product), 0, "and the shop shows nothing from them");
     await deleteRows("products", "id", product._id);
   });
 
-  test("an archived location is skipped", async () => {
+  test("with no source at all, nothing can be ordered and nothing falls back to a warehouse that fills online orders", async () => {
     const product = await newProduct();
-    const archived = await makeLocation({ priority: 1, status: "Archived" });
+    const eligibleLooking = await makeLocation({ priority: 1 });
+    await holdStock(eligibleLooking, product, 100);
+    await rawQuery("UPDATE inventory_settings SET online_source_location_id = NULL WHERE organization_id = ?", [ORG]);
+    await withShopper(async (buyer) => {
+      const { res, body } = await place(buyer, [[product, 1]]);
+      assert.ok([400, 409].includes(res.status), JSON.stringify(body));
+      assert.match(JSON.stringify(body), /no online warehouse|not available online/i);
+      assert.equal(await reservedAt(eligibleLooking, product), 0);
+    });
+    assert.equal(await projected(product), 0);
+    await deleteRows("products", "id", product._id);
+  });
+
+  test("an archived dedicated warehouse is never used, and no other location takes over", async () => {
+    const product = await newProduct();
+    const archived = await makeLocation({ status: "Archived", dedicate: true });
     const fine = await makeLocation({ priority: 2 });
     await holdStock(archived, product, 10);
     await holdStock(fine, product, 10);
     await withShopper(async (buyer) => {
-      const { res, body } = await place(buyer, [[product, 2]]);
-      assert.equal(res.status, 201);
-      assert.deepEqual((await reservations(body.order._id)).map((r) => r.locationId), [fine]);
+      const { res } = await place(buyer, [[product, 2]]);
+      assert.ok([400, 409].includes(res.status), `refused (${res.status})`);
       assert.equal(await reservedAt(archived, product), 0);
+      assert.equal(await reservedAt(fine, product), 0);
     });
     await deleteRows("products", "id", product._id);
   });
@@ -198,7 +237,7 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
   test("a location at a suspended branch still fills the order — which is saved unassigned; at an active branch it is assigned", async () => {
     const product = await newProduct();
     const suspendedBranch = await makeBranch("Suspended");
-    const suspended = await makeLocation({ priority: 1, branch: suspendedBranch });
+    const suspended = await makeLocation({ priority: 1, branch: suspendedBranch, dedicate: true });
     await holdStock(suspended, product, 10);
     await withShopper(async (buyer) => {
       const first = await place(buyer, [[product, 1]]);
@@ -218,7 +257,7 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
 
   test("units in a lot past their expiry date are not promised", async () => {
     const product = await newProduct();
-    const location = await makeLocation();
+    const location = await makeLocation({ dedicate: true });
     // 5 on hand: 2 undated, and 3 in a lot whose printed date was yesterday.
     const lotId = `lot_f${uid()}`;
     const variantId = product.variants[0]._id.toString();
@@ -238,7 +277,7 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
 
   test("two shoppers racing for the last unit: exactly one wins", async () => {
     const product = await newProduct();
-    const location = await makeLocation();
+    const location = await makeLocation({ dedicate: true });
     await holdStock(location, product, 1);
     const buyers = [await createTestUser({ role: "customer" }), await createTestUser({ role: "customer" }), await createTestUser({ role: "customer" })];
     try {
@@ -255,45 +294,44 @@ describe("Online orders are filled from one eligible location", { skip: !dbReady
     await deleteRows("products", "id", product._id);
   });
 
-  test("cancelling gives the units back at the location that held them", async () => {
+  test("cancelling gives the units back at the dedicated warehouse that held them", async () => {
     const product = await newProduct();
-    const high = await makeLocation({ priority: 1 });
-    const low = await makeLocation({ priority: 2 });
-    await holdStock(high, product, 1);
-    await holdStock(low, product, 8);
+    const dedicated = await makeLocation({ dedicate: true });
+    await holdStock(dedicated, product, 8);
     await withShopper(async (buyer) => {
       const { body } = await place(buyer, [[product, 4]]);
-      assert.deepEqual((await reservations(body.order._id)).map((r) => r.locationId), [low]);
+      assert.deepEqual((await reservations(body.order._id)).map((r) => r.locationId), [dedicated]);
       const res = await cancelOrderPOST(
         requestAs({ method: "POST", url: `http://test/api/orders/${body.order._id}/cancel`, session: await createTestSession(buyer._id), body: {} }),
         { params: Promise.resolve({ id: body.order._id }) },
       );
       assert.equal(res.status, 200);
-      assert.equal(await reservedAt(low, product), 0);
+      assert.equal(await reservedAt(dedicated, product), 0);
       assert.equal((await reservations(body.order._id))[0].status, "released");
     });
     await deleteRows("products", "id", product._id);
   });
 
-  test("the figure the shop shows is the most ONE eligible location can supply, and follows eligibility", async () => {
+  test("the figure the shop shows is the dedicated warehouse's stock — nobody else's — and follows its state at once", async () => {
     const product = await newProduct();
-    const a = await makeLocation({ priority: 1 });
+    const dedicated = await makeLocation({ priority: 1, dedicate: true });
     const b = await makeLocation({ priority: 2 });
-    await holdStock(a, product, 4);
+    await holdStock(dedicated, product, 4);
     await holdStock(b, product, 7);
-    assert.equal(await projected(product), 7, "not 11: an order is filled from one location");
-    await rawQuery("UPDATE stock_locations SET fulfils_online = 0, fulfilment_priority = NULL WHERE id = ?", [b]);
-    assert.equal(await projected(product), 4, "taking a location off online orders lowers it at once");
-    await rawQuery("UPDATE stock_locations SET fulfils_online = 1, fulfilment_priority = 5 WHERE id = ?", [b]);
-    assert.equal(await projected(product), 7, "and putting it back raises it");
-    await rawQuery("UPDATE stock_locations SET status = 'Archived' WHERE id = ?", [b]);
-    assert.equal(await projected(product), 4, "archiving removes it");
+    assert.equal(await projected(product), 4, "not 11 and not 7: only the dedicated warehouse counts");
+    await rawQuery("UPDATE stock_locations SET channel = 'both' WHERE id = ?", [dedicated]);
+    assert.equal(await projected(product), 0, "a source that is no longer Online only offers nothing");
+    await rawQuery("UPDATE stock_locations SET channel = 'online' WHERE id = ?", [dedicated]);
+    assert.equal(await projected(product), 4, "and returns when it is again");
+    await rawQuery("UPDATE stock_locations SET status = 'Archived' WHERE id = ?", [dedicated]);
+    assert.equal(await projected(product), 0, "archiving removes it — and the 7 elsewhere never take over");
+    await rawQuery("UPDATE stock_locations SET status = 'Active' WHERE id = ?", [dedicated]);
     await deleteRows("products", "id", product._id);
   });
 
   test("a variant not offered online cannot be bought here, and a product with none is not listed", async () => {
     const product = await newProduct();
-    const location = await makeLocation();
+    const location = await makeLocation({ dedicate: true });
     await holdStock(location, product, 5);
     const { listProducts, getProductByIdOrSlug } = await import("../services/productService.js");
     const listed = async () => (await listProducts({ limit: "100" })).products?.some((p) => String(p._id) === String(product._id)) ?? false;

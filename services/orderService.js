@@ -8,6 +8,7 @@ import Settings from "../models/settingsModel.js";
 import User from "../models/userModel.js";
 import Payment from "../models/paymentModel.js";
 import * as Inventory from "../models/inventoryModel.js";
+import { isModuleEntitled, STOREFRONT_MODULE } from "../models/entitlementModel.js";
 import { getOrganizationId } from "../lib/tenant.js";
 import { withTransaction } from "../lib/db/tx.js";
 import { createAdminNotification, createUserNotification } from "./notificationService.js";
@@ -379,6 +380,13 @@ export async function createOrder(
       throw new HttpError(422, "Idempotency-Key was already used with a different request");
     }
     return { order: redactIdempotencyFields(priorOrder), replayed: true };
+  }
+
+  // The merchant's plan, before anything is counted or written. A store whose plan does not include online sales cannot take an
+  // order whatever its stock and configuration say. Placed AFTER the replay path above: an order already made still answers its own
+  // retry. The shopper's own standing is irrelevant here — this is the selling organization's entitlement, read fresh every time.
+  if (!(await isModuleEntitled(STOREFRONT_MODULE))) {
+    throw new HttpError(403, "Online sales are not available for this store.", { code: "not-in-plan" });
   }
 
   // Confirmed audit finding, fixed: order creation had no rate limit at

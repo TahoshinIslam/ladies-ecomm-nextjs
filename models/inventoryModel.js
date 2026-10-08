@@ -101,10 +101,18 @@ export async function getOnlineSource(conn) {
  * fixtures): a store that has never had a location gets the same default the
  * dashboard's migration and provisioning would have given it.
  */
-async function ensureDefaultLocation(conn) {
+export async function ensureDefaultLocation(conn) {
   const organizationId = getOrganizationId();
   const existing = await getDefaultLocationId(conn);
-  if (existing) return existing;
+  if (existing) {
+    // Fixture path only: a store that has a default location but no dedicated online warehouse yet gets one — the default.
+    const [settings] = await run(conn, "SELECT online_source_location_id AS id FROM inventory_settings WHERE organization_id = ?", [organizationId]);
+    if (!settings?.id) {
+      await run(conn, "UPDATE stock_locations SET fulfils_online = 1, fulfilment_priority = COALESCE(fulfilment_priority, 1), channel = 'online' WHERE organization_id = ? AND id = ?", [organizationId, existing]);
+      await run(conn, "UPDATE inventory_settings SET online_source_location_id = ? WHERE organization_id = ?", [existing, organizationId]);
+    }
+    return existing;
+  }
 
   // Same choice as the dashboard's ensureDefaultLocation: the primary
   // branch's location, else the first active one by name, else a new one
@@ -128,8 +136,8 @@ async function ensureDefaultLocation(conn) {
     locationId = newId("loc");
     await run(
       conn,
-      `INSERT INTO stock_locations (id, organization_id, branch_id, name, code, location_type, status, fulfils_online, fulfilment_priority, created_by_name)
-       VALUES (?, ?, ?, ?, ?, ?, 'Active', 1, 1, 'Storefront')`,
+      `INSERT INTO stock_locations (id, organization_id, branch_id, name, code, location_type, status, fulfils_online, fulfilment_priority, channel, created_by_name)
+       VALUES (?, ?, ?, ?, ?, ?, 'Active', 1, 1, 'online', 'Storefront')`,
       [
         locationId,
         organizationId,
@@ -146,13 +154,20 @@ async function ensureDefaultLocation(conn) {
      ON DUPLICATE KEY UPDATE default_location_id = COALESCE(default_location_id, VALUES(default_location_id))`,
     [organizationId, locationId],
   );
-  // The default is where online orders are filled from, so it is always an
-  // eligible location (a priority already chosen is kept).
+  // The default fills online orders (as ever). A location this path just CREATED is the dedicated online warehouse; one it
+  // merely picked keeps the channel it has, and becomes the source only if it already is Online only.
   await run(
     conn,
     `UPDATE stock_locations SET fulfils_online = 1, fulfilment_priority = COALESCE(fulfilment_priority, 1)
       WHERE organization_id = ? AND id = ?`,
     [organizationId, locationId],
+  );
+  await run(
+    conn,
+    `UPDATE inventory_settings s JOIN stock_locations l ON l.id = ? AND l.organization_id = s.organization_id AND l.channel = 'online'
+        SET s.online_source_location_id = COALESCE(s.online_source_location_id, l.id)
+      WHERE s.organization_id = ?`,
+    [locationId, organizationId],
   );
   return getDefaultLocationId(conn);
 }
@@ -260,24 +275,16 @@ const EXPIRED_UNSWEPT = `COALESCE((
  * name, so the choice is repeatable.
  */
 async function eligibleLocations(conn, source) {
-  if (source.locationId) {
-    // The chosen source, and only if it can still take orders. Never a fallback
-    // to another store: the website promised this one's stock.
-    return exec(
-      conn,
-      `SELECT l.id, l.name, l.branch_id AS branchId
-         FROM stock_locations l
-        WHERE l.organization_id = ? AND l.id = ? AND l.status = 'Active' AND l.fulfils_online = 1 AND l.parent_location_id IS NULL`,
-      [getOrganizationId(), source.locationId],
-    );
-  }
+  // The online store sells from ONE dedicated warehouse: the chosen source, and only while it is active, is not an
+  // area and is classified Online only. With no source, or a source that is no longer valid (a shared warehouse, an
+  // archived one), nothing is eligible — never a fallback to another site, and never a customer-supplied one.
+  if (!source.locationId) return [];
   return exec(
     conn,
     `SELECT l.id, l.name, l.branch_id AS branchId
        FROM stock_locations l
-      WHERE l.organization_id = ? AND l.status = 'Active' AND l.fulfils_online = 1
-      ORDER BY l.fulfilment_priority IS NULL, l.fulfilment_priority, l.name, l.id`,
-    [getOrganizationId()],
+      WHERE l.organization_id = ? AND l.id = ? AND l.status = 'Active' AND l.parent_location_id IS NULL AND l.channel = 'online'`,
+    [getOrganizationId(), source.locationId],
   );
 }
 
@@ -285,7 +292,7 @@ async function eligibleLocations(conn, source) {
 const exec = (conn, sql, params) => (conn ? run(conn, sql, params) : query(sql, params));
 
 /**
- * A variant's sellable, unexpired batches at one location with something available, in
+ * A variant's sellable, unexpired batches (with the item's online minimum shelf life left) at one location with something available, in
  * ALLOCATION ORDER: oldest received first; for an item tracked by lot or expiry, earliest
  * expiry first (no expiry last) then oldest received; ties by batch id. With a connection the rows
  * are read FOR UPDATE, so a checkout that plans from them and then reserves cannot be
@@ -297,7 +304,9 @@ async function loadBatches(conn, locationId, variantId, tracking, { lock = false
     conn,
     `SELECT bl.batch_id AS batchId, bl.quantity - bl.reserved AS available, b.selling_price AS sellingPrice, b.unit_cost AS unitCost,
             b.lot_id AS lotId, lt.expiry_date AS expiryDate,
-            (lt.expiry_date IS NOT NULL AND lt.expiry_date < business_today(b.organization_id)) AS expired
+            (lt.expiry_date IS NOT NULL AND lt.expiry_date < business_today(b.organization_id)) AS expired,
+            CASE WHEN lt.expiry_date IS NULL THEN NULL ELSE DATEDIFF(lt.expiry_date, business_today(b.organization_id)) END AS daysLeft,
+            (SELECT pv.online_min_shelf_days FROM product_variants pv WHERE pv.organization_id = bl.organization_id AND pv.id = bl.variant_id) AS minShelfDays
        FROM stock_batch_levels bl
        JOIN stock_batches b ON b.id = bl.batch_id AND b.organization_id = bl.organization_id
        LEFT JOIN stock_lots lt ON lt.id = b.lot_id AND lt.organization_id = b.organization_id
@@ -306,7 +315,8 @@ async function loadBatches(conn, locationId, variantId, tracking, { lock = false
       ${lock ? "FOR UPDATE" : ""}`,
     [getOrganizationId(), locationId, variantId],
   );
-  return rows.filter((r) => !Number(r.expired) && Number(r.available) > 0);
+  // A web order is given only stock with at least the item's minimum shelf life left (0 = no minimum).
+  return rows.filter((r) => !Number(r.expired) && !(Number(r.minShelfDays) > 0 && r.daysLeft != null && Number(r.daysLeft) < Number(r.minShelfDays)) && Number(r.available) > 0);
 }
 
 /**
@@ -349,7 +359,7 @@ export async function planOrder(conn, lines) {
     throw new InsufficientStockError(
       source.locationId
         ? "The store that supplies this website cannot take orders right now. Please try again shortly."
-        : "This store has no location set up to fill online orders yet, so it cannot take orders.",
+        : "This store has no online warehouse set up yet, so it cannot take orders.",
     );
   }
   // If the store switched sources or dropped an item since the shopper's items were checked, say so rather
@@ -439,6 +449,8 @@ export async function reserveOrder(conn, orderId, plan) {
     }
   }
 
+  // The order's immutable source snapshot: the warehouse it was reserved at, written once and never changed.
+  await run(conn, "UPDATE orders SET source_location_id = ? WHERE organization_id = ? AND id = ? AND source_location_id IS NULL", [plan.locationId, organizationId, orderId]);
   const branchId = await branchOfLocation(conn, plan.locationId);
   if (branchId) {
     await run(conn, "UPDATE orders SET branch_id = ? WHERE organization_id = ? AND id = ? AND branch_id IS NULL", [branchId, organizationId, orderId]);

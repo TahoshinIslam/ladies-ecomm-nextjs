@@ -316,6 +316,11 @@ export async function createTestCategory() {
 
 export async function createTestProduct({ stock = 10, basePrice = 1000 } = {}) {
   const { default: Product } = await import("../../models/productModel.js");
+  // The website offers nothing until the store has a dedicated online warehouse (ecom_erp migration 108): a store with
+  // none yet gets one — the fixture default — before its first product, so a fresh product is visible to the shop.
+  const { ensureDefaultLocation } = await import("../../models/inventoryModel.js");
+  const { withTransaction } = await import("../../lib/db/tx.js");
+  await withTransaction((conn) => ensureDefaultLocation(conn));
   const category = await createTestCategory();
   const suffix = unique();
   return Product.create({

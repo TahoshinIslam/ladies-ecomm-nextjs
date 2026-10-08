@@ -50,6 +50,7 @@ describe("Online orders are priced and reserved batch by batch", { skip: !dbRead
   });
 
   after(async () => {
+    await rawQuery("UPDATE inventory_settings SET online_source_location_id = NULL WHERE organization_id = ?", [ORG]).catch(() => {});
     for (const id of locations) await rawQuery("DELETE FROM stock_locations WHERE id = ?", [id]).catch(() => {});
     await disconnectTestDb();
   });
@@ -59,8 +60,14 @@ describe("Online orders are priced and reserved batch by batch", { skip: !dbRead
   async function makeLocation() {
     const id = `loc_b${Math.random().toString(16).slice(2, 12)}`;
     await rawQuery(
-      `INSERT INTO stock_locations (id, organization_id, name, code, location_type, status, fulfils_online, fulfilment_priority, created_by_name) VALUES (?, ?, ?, ?, 'warehouse', 'Active', 1, 1, 'test')`,
+      `INSERT INTO stock_locations (id, organization_id, name, code, location_type, status, fulfils_online, fulfilment_priority, channel, created_by_name) VALUES (?, ?, ?, ?, 'warehouse', 'Active', 1, 1, 'online', 'test')`,
       [id, ORG, `Loc ${id}`, id.toUpperCase().slice(0, 30)],
+    );
+    // The online store sells from ONE dedicated Online-only warehouse: this is it.
+    await rawQuery(
+      `INSERT INTO inventory_settings (organization_id, online_source_location_id) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE online_source_location_id = VALUES(online_source_location_id)`,
+      [ORG, id],
     );
     locations.push(id);
     return id;

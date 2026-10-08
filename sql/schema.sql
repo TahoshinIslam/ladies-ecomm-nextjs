@@ -25,6 +25,7 @@
 -- ---------------------------------------------------------------------------
 
 
+
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
@@ -119,7 +120,8 @@ CREATE TABLE `attribute_definitions` (
   `attr_key` varchar(100) NOT NULL,
   `label` varchar(255) NOT NULL,
   `label_bn` varchar(255) NOT NULL DEFAULT '',
-  `type` enum('select','swatch','boolean','text') NOT NULL,
+  `type` enum('select','swatch','boolean','text','number') NOT NULL,
+  `unit` varchar(16) NOT NULL DEFAULT '',
   `derived_from_variant` tinyint(1) NOT NULL DEFAULT 0,
   `filterable` tinyint(1) NOT NULL DEFAULT 1,
   `required` tinyint(1) NOT NULL DEFAULT 0,
@@ -1052,6 +1054,7 @@ CREATE TABLE `orders` (
   `id` varchar(32) NOT NULL,
   `organization_id` varchar(32) NOT NULL,
   `branch_id` varchar(32) DEFAULT NULL,
+  `source_location_id` varchar(32) DEFAULT NULL,
   `customer_id` varchar(32) NOT NULL,
   `coupon_id` varchar(32) DEFAULT NULL,
   `shipping_full_name` varchar(255) NOT NULL,
@@ -1393,8 +1396,8 @@ CREATE TABLE `payments` (
   `organization_id` varchar(32) NOT NULL,
   `order_id` varchar(32) NOT NULL,
   `customer_id` varchar(32) NOT NULL,
-  `method` enum('cod') NOT NULL,
-  `status` enum('pending','completed','failed','refunded') NOT NULL DEFAULT 'pending',
+  `method` enum('cod','online') NOT NULL,
+  `status` enum('pending','completed','failed','partially_refunded','refunded') NOT NULL DEFAULT 'pending',
   `transaction_id` varchar(255) NOT NULL DEFAULT '',
   `gateway_response` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`gateway_response`)),
   `amount` decimal(12,2) NOT NULL,
@@ -1952,7 +1955,9 @@ CREATE TABLE `product_variants` (
   `quantity_scale` tinyint(3) unsigned NOT NULL DEFAULT 0,
   `sold_by` enum('unit','weight') NOT NULL DEFAULT 'unit',
   `barcode` varchar(64) DEFAULT NULL,
-  `tracking` enum('none','lot','expiry') NOT NULL DEFAULT 'none',
+  `tracking` enum('none','lot','expiry','serial') NOT NULL DEFAULT 'none',
+  `online_min_shelf_days` smallint(5) unsigned NOT NULL DEFAULT 0,
+  `warranty_months` smallint(5) unsigned DEFAULT NULL,
   `sell_online` tinyint(1) NOT NULL DEFAULT 1,
   `sell_pos` tinyint(1) NOT NULL DEFAULT 1,
   `images` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`images`)),
@@ -2210,6 +2215,27 @@ CREATE TABLE `rate_limit_counters` (
   PRIMARY KEY (`organization_id`,`key_hash`,`action`,`window_start`),
   KEY `idx_rate_limit_expires_at` (`expires_at`),
   CONSTRAINT `fk_rate_limit_organization` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `replenishment_settings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `replenishment_settings` (
+  `organization_id` varchar(32) NOT NULL,
+  `lookback_days` smallint(5) unsigned NOT NULL DEFAULT 90,
+  `service_level` decimal(4,1) NOT NULL DEFAULT 95.0,
+  `order_cycle_days` smallint(5) unsigned NOT NULL DEFAULT 14,
+  `default_lead_time_days` smallint(5) unsigned NOT NULL DEFAULT 7,
+  `dead_stock_days` smallint(5) unsigned NOT NULL DEFAULT 90,
+  `count_days_a` smallint(5) unsigned NOT NULL DEFAULT 30,
+  `count_days_b` smallint(5) unsigned NOT NULL DEFAULT 90,
+  `count_days_c` smallint(5) unsigned NOT NULL DEFAULT 180,
+  `count_days_n` smallint(5) unsigned NOT NULL DEFAULT 365,
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`),
+  CONSTRAINT `fk_replenishment_settings_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_replenishment_settings` CHECK (`lookback_days` between 7 and 730 and `service_level` between 50 and 99.9 and `order_cycle_days` between 1 and 365 and `default_lead_time_days` between 0 and 365 and `dead_stock_days` between 7 and 1095 and `count_days_a` between 1 and 730 and `count_days_b` between 1 and 730 and `count_days_c` between 1 and 730 and `count_days_n` between 1 and 730)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `retail_departments`;
@@ -2859,6 +2885,21 @@ DELIMITER ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
 /*!50003 SET character_set_results = @saved_cs_results */ ;
 /*!50003 SET collation_connection  = @saved_col_connection */ ;
+DROP TABLE IF EXISTS `stock_location_departments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_location_departments` (
+  `organization_id` varchar(32) NOT NULL,
+  `location_id` varchar(32) NOT NULL,
+  `department_id` varchar(32) NOT NULL,
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`location_id`,`department_id`),
+  KEY `idx_sld_org_department` (`organization_id`,`department_id`),
+  KEY `fk_sld_location` (`organization_id`,`location_id`),
+  CONSTRAINT `fk_sld_department` FOREIGN KEY (`organization_id`, `department_id`) REFERENCES `retail_departments` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_sld_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `stock_locations`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -2873,6 +2914,7 @@ CREATE TABLE `stock_locations` (
   `status` enum('Active','Archived') NOT NULL DEFAULT 'Active',
   `fulfils_online` tinyint(1) NOT NULL DEFAULT 0,
   `fulfilment_priority` int(11) DEFAULT NULL,
+  `channel` enum('online','shop','both') NOT NULL DEFAULT 'both',
   `notes` varchar(500) NOT NULL DEFAULT '',
   `address` varchar(500) NOT NULL DEFAULT '',
   `contact_phone` varchar(64) NOT NULL DEFAULT '',
@@ -2910,7 +2952,7 @@ CREATE TABLE `stock_locations` (
 DELIMITER ;;
 /*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_stock_locations_sync_projection AFTER UPDATE ON stock_locations
 FOR EACH ROW
-  IF NEW.fulfils_online <> OLD.fulfils_online OR NEW.status <> OLD.status THEN
+  IF NEW.fulfils_online <> OLD.fulfils_online OR NEW.status <> OLD.status OR NEW.channel <> OLD.channel THEN
     UPDATE product_variants pv
       JOIN stock_levels sl ON sl.organization_id = pv.organization_id AND sl.variant_id = pv.id
        SET pv.stock = online_available(pv.organization_id, pv.id)
@@ -3203,6 +3245,69 @@ CREATE TABLE `stock_reservations` (
   CONSTRAINT `fk_stock_reservations_location` FOREIGN KEY (`organization_id`, `location_id`) REFERENCES `stock_locations` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_stock_reservations_order` FOREIGN KEY (`organization_id`, `order_id`) REFERENCES `orders` (`organization_id`, `id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `chk_stock_reservations_quantity` CHECK (`quantity` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `stock_serial_events`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_serial_events` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `organization_id` varchar(32) NOT NULL,
+  `serial_id` varchar(32) NOT NULL,
+  `event_type` enum('received','sold','returned','transfer_out','transfer_in','damaged','quarantined','released','lost','found','written_off','returned_to_supplier','warranty') NOT NULL,
+  `from_status` varchar(24) DEFAULT NULL,
+  `to_status` varchar(24) DEFAULT NULL,
+  `location_id` varchar(32) DEFAULT NULL,
+  `source_type` varchar(32) NOT NULL DEFAULT '',
+  `source_id` varchar(40) NOT NULL DEFAULT '',
+  `source_number` varchar(40) NOT NULL DEFAULT '',
+  `note` varchar(500) NOT NULL DEFAULT '',
+  `actor_id` varchar(32) DEFAULT NULL,
+  `actor_name` varchar(255) NOT NULL DEFAULT 'System',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  PRIMARY KEY (`id`),
+  KEY `idx_stock_serial_events_serial` (`organization_id`,`serial_id`,`id`),
+  KEY `fk_stock_serial_events_serial` (`serial_id`),
+  CONSTRAINT `fk_stock_serial_events_serial` FOREIGN KEY (`serial_id`) REFERENCES `stock_serials` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `stock_serials`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_serials` (
+  `id` varchar(32) NOT NULL,
+  `organization_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `product_id` varchar(32) NOT NULL,
+  `serial_number` varchar(120) NOT NULL,
+  `status` enum('in_stock','sold','in_transit','damaged','quarantine','returned_to_supplier','lost','written_off') NOT NULL DEFAULT 'in_stock',
+  `location_id` varchar(32) DEFAULT NULL,
+  `received_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `receipt_id` varchar(32) DEFAULT NULL,
+  `supplier_id` varchar(32) DEFAULT NULL,
+  `unit_cost` decimal(14,4) DEFAULT NULL,
+  `sold_at` datetime(3) DEFAULT NULL,
+  `sold_ref_type` varchar(32) DEFAULT NULL,
+  `sold_ref_id` varchar(40) DEFAULT NULL,
+  `sold_ref_number` varchar(40) DEFAULT NULL,
+  `sold_price` decimal(12,2) DEFAULT NULL,
+  `customer_name` varchar(255) DEFAULT NULL,
+  `customer_phone` varchar(64) DEFAULT NULL,
+  `warranty_months` smallint(5) unsigned DEFAULT NULL,
+  `warranty_until` date DEFAULT NULL,
+  `notes` varchar(500) NOT NULL DEFAULT '',
+  `created_at` datetime(3) NOT NULL DEFAULT current_timestamp(3),
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_stock_serials_item` (`organization_id`,`variant_id`,`serial_number`),
+  KEY `idx_stock_serials_lookup` (`organization_id`,`serial_number`),
+  KEY `idx_stock_serials_where` (`organization_id`,`variant_id`,`location_id`,`status`),
+  KEY `idx_stock_serials_sold` (`organization_id`,`sold_ref_type`,`sold_ref_id`),
+  KEY `idx_stock_serials_warranty` (`organization_id`,`warranty_until`),
+  KEY `fk_stock_serials_variant` (`variant_id`),
+  CONSTRAINT `fk_stock_serials_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_stock_serials_variant` FOREIGN KEY (`variant_id`) REFERENCES `product_variants` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_stock_serials_place` CHECK (`status` in ('sold','in_transit','returned_to_supplier','lost','written_off') or `location_id` is not null)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `stock_transfer_events`;
@@ -3573,6 +3678,7 @@ CREATE TABLE `suppliers` (
   `phone` varchar(64) NOT NULL DEFAULT '',
   `address` varchar(500) NOT NULL DEFAULT '',
   `payment_terms` varchar(120) NOT NULL DEFAULT '',
+  `lead_time_days` smallint(5) unsigned DEFAULT NULL,
   `notes` varchar(1000) NOT NULL DEFAULT '',
   `status` enum('Active','Archived') NOT NULL DEFAULT 'Active',
   `created_by_id` varchar(32) DEFAULT NULL,
@@ -3819,6 +3925,26 @@ CREATE TABLE `variant_price_overrides` (
   CONSTRAINT `chk_variant_price_overrides_price` CHECK (`price` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `variant_replenishment`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `variant_replenishment` (
+  `organization_id` varchar(32) NOT NULL,
+  `variant_id` varchar(32) NOT NULL,
+  `supplier_id` varchar(32) DEFAULT NULL,
+  `lead_time_days` smallint(5) unsigned DEFAULT NULL,
+  `safety_stock` decimal(14,3) DEFAULT NULL,
+  `updated_by_name` varchar(255) DEFAULT NULL,
+  `updated_at` datetime(3) NOT NULL DEFAULT current_timestamp(3) ON UPDATE current_timestamp(3),
+  PRIMARY KEY (`organization_id`,`variant_id`),
+  KEY `idx_variant_replenishment_supplier` (`supplier_id`),
+  KEY `fk_variant_replenishment_variant` (`variant_id`),
+  CONSTRAINT `fk_variant_replenishment_org` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_variant_replenishment_supplier` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_variant_replenishment_variant` FOREIGN KEY (`variant_id`) REFERENCES `product_variants` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_variant_replenishment` CHECK (`safety_stock` is null or `safety_stock` >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `variant_shop_offers`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -3898,21 +4024,21 @@ DELIMITER ;;
 CREATE DEFINER=`root`@`localhost` FUNCTION `online_available`(p_org VARCHAR(32) COLLATE utf8mb4_unicode_ci, p_variant VARCHAR(32) COLLATE utf8mb4_unicode_ci) RETURNS int(11)
     READS SQL DATA
 RETURN COALESCE((
-  SELECT MAX(FLOOR(GREATEST(sl.on_hand - sl.reserved - COALESCE(x.expired_qty, 0), 0)))
-    FROM stock_levels sl
-    JOIN stock_locations l ON l.id = sl.location_id AND l.organization_id = sl.organization_id
-    LEFT JOIN inventory_settings src ON src.organization_id = p_org
+  SELECT FLOOR(GREATEST(sl.on_hand - sl.reserved - COALESCE(x.expired_qty, 0), 0))
+    FROM inventory_settings src
+    JOIN stock_locations l ON l.id = src.online_source_location_id AND l.organization_id = src.organization_id
+    JOIN stock_levels sl ON sl.location_id = l.id AND sl.organization_id = l.organization_id AND sl.variant_id = p_variant
     LEFT JOIN (
       SELECT ll.location_id, SUM(ll.on_hand) AS expired_qty
         FROM stock_lot_levels ll
         JOIN stock_lots lt ON lt.id = ll.lot_id AND lt.organization_id = ll.organization_id
        WHERE ll.organization_id = p_org AND ll.variant_id = p_variant
-         AND lt.expiry_date IS NOT NULL AND lt.expiry_date < business_today(p_org)
+         AND lt.expiry_date IS NOT NULL
+         AND lt.expiry_date < DATE_ADD(business_today(p_org), INTERVAL (SELECT pv.online_min_shelf_days FROM product_variants pv WHERE pv.organization_id = p_org AND pv.id = p_variant) DAY)
        GROUP BY ll.location_id
     ) x ON x.location_id = sl.location_id
-   WHERE sl.organization_id = p_org AND sl.variant_id = p_variant
-     AND l.status = 'Active' AND l.fulfils_online = 1
-     AND (src.online_source_location_id IS NULL OR l.id = src.online_source_location_id)
+   WHERE src.organization_id = p_org
+     AND l.status = 'Active' AND l.parent_location_id IS NULL AND l.channel = 'online'
 ), 0) ;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
@@ -3933,19 +4059,17 @@ CREATE DEFINER=`root`@`localhost` FUNCTION `online_next_price`(p_org VARCHAR(32)
     READS SQL DATA
 RETURN (
   SELECT b.selling_price
-    FROM stock_batch_levels bl
+    FROM inventory_settings src
+    JOIN stock_locations l ON l.id = src.online_source_location_id AND l.organization_id = src.organization_id
+    JOIN stock_batch_levels bl ON bl.location_id = l.id AND bl.organization_id = l.organization_id
     JOIN stock_batches b ON b.id = bl.batch_id AND b.organization_id = bl.organization_id
-    JOIN stock_locations l ON l.id = bl.location_id AND l.organization_id = bl.organization_id
     JOIN product_variants pv ON pv.id = bl.variant_id AND pv.organization_id = bl.organization_id
     LEFT JOIN stock_lots lt ON lt.id = b.lot_id AND lt.organization_id = b.organization_id
-    LEFT JOIN inventory_settings src ON src.organization_id = p_org
-   WHERE bl.organization_id = p_org AND bl.variant_id = p_variant
+   WHERE src.organization_id = p_org AND bl.variant_id = p_variant
      AND bl.item_condition = 'sellable' AND bl.quantity - bl.reserved > 0
-     AND l.status = 'Active' AND l.fulfils_online = 1
-     AND (src.online_source_location_id IS NULL OR l.id = src.online_source_location_id)
-     AND (lt.expiry_date IS NULL OR lt.expiry_date >= business_today(p_org))
-   ORDER BY (l.fulfilment_priority IS NULL), l.fulfilment_priority, l.name, l.id,
-            CASE WHEN pv.tracking IN ('lot', 'expiry') THEN (lt.expiry_date IS NULL) ELSE 0 END,
+     AND l.status = 'Active' AND l.parent_location_id IS NULL AND l.channel = 'online'
+     AND (lt.expiry_date IS NULL OR lt.expiry_date >= DATE_ADD(business_today(p_org), INTERVAL pv.online_min_shelf_days DAY))
+   ORDER BY CASE WHEN pv.tracking IN ('lot', 'expiry') THEN (lt.expiry_date IS NULL) ELSE 0 END,
             CASE WHEN pv.tracking IN ('lot', 'expiry') THEN lt.expiry_date END,
             b.received_at, b.created_at, b.id
    LIMIT 1
@@ -3969,7 +4093,7 @@ CREATE DEFINER=`root`@`localhost` FUNCTION `online_offered`(p_org VARCHAR(32) CO
     READS SQL DATA
 RETURN COALESCE((
   SELECT CASE
-           WHEN s.online_source_location_id IS NULL THEN 1
+           WHEN s.online_source_location_id IS NULL OR src.id IS NULL THEN 0
            ELSE COALESCE(
              (SELECT o.offered FROM variant_online_offers o
                WHERE o.organization_id = s.organization_id AND o.location_id = s.online_source_location_id AND o.variant_id = p_variant),
@@ -3978,8 +4102,10 @@ RETURN COALESCE((
              1)
          END
     FROM inventory_settings s
+    LEFT JOIN stock_locations src ON src.id = s.online_source_location_id AND src.organization_id = s.organization_id
+         AND src.status = 'Active' AND src.parent_location_id IS NULL AND src.channel = 'online'
    WHERE s.organization_id = p_org
-), 1) ;;
+), 0) ;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;

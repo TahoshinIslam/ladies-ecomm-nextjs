@@ -28,6 +28,7 @@ const TEST_DB_NAME_PATTERN = /(_test|_ci)$/i;
 /** Fixed so .env.test can name it and re-running never orphans an old one. */
 export const TEST_ORGANIZATION_ID = "org_test00000000000000001";
 export const TEST_BRANCH_ID = "brn_test00000000000000001";
+export const TEST_PLAN_ID = "plan_test000000000000000001";
 
 const RENAMED_TABLES = ["customers", "customer_sessions", "store_settings", "storefront_themes"];
 
@@ -76,6 +77,30 @@ async function main() {
     TEST_BRANCH_ID,
     TEST_ORGANIZATION_ID,
   ]);
+
+  // The test store is on a plan that includes online sales — checkout refuses a store whose plan does not (models/entitlementModel.js).
+  // Fixed ids, so re-running changes nothing; tests that need a store WITHOUT the module swap the plan and put it back.
+  await query(
+    `INSERT INTO modules (id, stable_key, name, slug, description, target_portal, type, lifecycle_status)
+     VALUES ('mod.storefront', 'mod.storefront', 'Online storefront', 'storefront', 'Test fixture', 'STORE', 'Add-on', 'Active')
+     ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+  );
+  await query(
+    `INSERT INTO plans (id, name, slug, description, price_monthly, currency) VALUES (?, 'Test plan', 'test-plan', 'Test fixture', 0, 'USD')
+     ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+    [TEST_PLAN_ID],
+  );
+  await query(
+    `INSERT INTO plan_modules (id, plan_id, module_id) VALUES ('pm_test0000000000000000001', ?, 'mod.storefront')
+     ON DUPLICATE KEY UPDATE module_id = VALUES(module_id)`,
+    [TEST_PLAN_ID],
+  );
+  await query(
+    `INSERT INTO subscriptions (id, organization_id, plan_id, status, started_at, expires_at)
+     VALUES ('sub_test0000000000000000001', ?, ?, 'Active', NOW(), DATE_ADD(NOW(), INTERVAL 10 YEAR))
+     ON DUPLICATE KEY UPDATE plan_id = VALUES(plan_id), status = 'Active', expires_at = VALUES(expires_at)`,
+    [TEST_ORGANIZATION_ID, TEST_PLAN_ID],
+  );
 
   console.log(`${name} is ready.`);
   console.log(`  organization ${TEST_ORGANIZATION_ID}`);

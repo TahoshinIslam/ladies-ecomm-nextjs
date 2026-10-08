@@ -72,9 +72,9 @@ describe("The website shows the Product Source Store", { skip: !dbReady && skipR
   async function makeLocation(name, extra = {}) {
     const id = `loc_x${uid()}`;
     await rawQuery(
-      `INSERT INTO stock_locations (id, organization_id, name, code, location_type, status, fulfils_online, fulfilment_priority, created_by_name)
-       VALUES (?, ?, ?, ?, 'warehouse', ?, ?, 1, 'test')`,
-      [id, ORG, name, id.toUpperCase().slice(0, 30), extra.status ?? "Active", extra.fulfilsOnline ?? 1],
+      `INSERT INTO stock_locations (id, organization_id, name, code, location_type, status, fulfils_online, fulfilment_priority, channel, created_by_name)
+       VALUES (?, ?, ?, ?, 'warehouse', ?, ?, 1, ?, 'test')`,
+      [id, ORG, name, id.toUpperCase().slice(0, 30), extra.status ?? "Active", extra.fulfilsOnline ?? 1, extra.channel ?? "online"],
     );
     locationIds.push(id);
     return id;
@@ -158,14 +158,14 @@ describe("The website shows the Product Source Store", { skip: !dbReady && skipR
     return { p1, p2, p3 };
   }
 
-  test("with no source chosen the website behaves as before: any eligible store, the most one can supply", async () => {
-    await setSource(null);
+  test("with no source chosen the website offers nothing: no stock and no listed products — never any store's", async () => {
     const { p1, p2, p3 } = await makeCatalog();
-    assert.equal(await shownStock(p1), 10);
-    assert.equal(await shownStock(p2), 7);
-    assert.equal(await shownStock(p3), 9, "the most ONE store can supply, not the sum");
+    await setSource(null);
+    assert.equal(await shownStock(p1), 0);
+    assert.equal(await shownStock(p2), 0);
+    assert.equal(await shownStock(p3), 0, "Store 1 holds 4 and Store 2 holds 9; with no dedicated warehouse the site shows neither");
     const listed = await names();
-    for (const p of [p1, p2, p3]) assert.ok(listed.includes(p.name), "everything online-published is offered");
+    for (const p of [p1, p2, p3]) assert.ok(!listed.includes(p.name), "nothing is offered until a dedicated warehouse is chosen");
   });
 
   test("Store 1 as the source: its products and its availability, and never another store's stock", async () => {
