@@ -1,4 +1,6 @@
 import { query } from "../config/db.js";
+import { getOrganizationId } from "../lib/tenant.js";
+import { PLACEHOLDER_STORE_NAME, getOrganizationName, resolveStoreName } from "../lib/storeName.js";
 
 const DEFAULT_HOMEPAGE = {
   carouselImages: { burqa: "", abaya: "", hijab: "", khimar: "" },
@@ -34,7 +36,7 @@ function jsonOrDefault(value, fallback) {
 function rowToSettings(row) {
   if (!row) return null;
   const settings = {
-    _id: row.id,
+    _id: row.organization_id,
     store: {
       name: row.store_name,
       supportEmail: row.store_support_email,
@@ -60,9 +62,9 @@ function rowToSettings(row) {
 
 async function saveSettings(settings) {
   await query(
-    `UPDATE settings SET store_name=?, store_support_email=?, store_support_phone=?, store_logo_url=?,
+    `UPDATE store_settings SET store_name=?, store_support_email=?, store_support_phone=?, store_logo_url=?,
        store_logo_dark_url=?, store_favicon_url=?, homepage=?, currency=?, promotions=?, exchange_policy=?,
-       tax_rules=?, shipping_zones=? WHERE id=?`,
+       tax_rules=?, shipping_zones=? WHERE organization_id=?`,
     [
       settings.store.name,
       settings.store.supportEmail || "",
@@ -82,13 +84,37 @@ async function saveSettings(settings) {
   return settings;
 }
 
+/**
+ * This store's settings row.
+ *
+ * Was `WHERE id = 'main'` — one row for one shop. In the shared database the
+ * table is keyed by organization instead and there is no `id` column at all,
+ * so "the singleton" now means "this organization's row": still exactly one,
+ * but one per store rather than one per database.
+ */
 async function getSingleton() {
-  const rows = await query("SELECT * FROM settings WHERE id = 'main'");
-  if (rows.length) return rowToSettings(rows[0]);
+  const organizationId = getOrganizationId();
+
+  const rows = await query("SELECT * FROM store_settings WHERE organization_id = ?", [organizationId]);
+  if (rows.length) {
+    const settings = rowToSettings(rows[0]);
+    // Still the column's placeholder: the shop has not named itself, so it is called what the organization is.
+    if (!settings.store.name || settings.store.name === PLACEHOLDER_STORE_NAME) {
+      settings.store.name = resolveStoreName(settings.store.name, await getOrganizationName());
+    }
+    return settings;
+  }
+
+  // A store with no settings row yet gets the defaults written for it. The
+  // dashboard may be creating the same row at the same moment, so this
+  // tolerates losing that race rather than failing the request.
   await query(
-    `INSERT INTO settings (id, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
-     VALUES ('main', ?, ?, ?, ?, ?, ?)`,
+    `INSERT IGNORE INTO store_settings
+       (organization_id, store_name, homepage, currency, promotions, exchange_policy, tax_rules, shipping_zones)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
+      organizationId,
+      resolveStoreName("", await getOrganizationName()) || PLACEHOLDER_STORE_NAME,
       JSON.stringify(DEFAULT_HOMEPAGE),
       JSON.stringify(DEFAULT_CURRENCY),
       JSON.stringify(DEFAULT_PROMOTIONS),
@@ -97,8 +123,8 @@ async function getSingleton() {
       JSON.stringify(DEFAULT_SHIPPING_ZONES),
     ],
   );
-  const rows2 = await query("SELECT * FROM settings WHERE id = 'main'");
-  return rowToSettings(rows2[0]);
+  const created = await query("SELECT * FROM store_settings WHERE organization_id = ?", [organizationId]);
+  return rowToSettings(created[0]);
 }
 
 const Settings = { getSingleton };

@@ -1,23 +1,15 @@
 import { NextResponse } from "next/server";
 
-import { requireUser, requirePermission } from "../../../lib/auth.js";
-import { PERMISSIONS } from "../../../lib/permissions.js";
-import { createOrder, getAllOrders } from "../../../services/orderService.js";
+import { requireUser } from "../../../lib/auth.js";
+import { createOrder } from "../../../services/orderService.js";
 import { withRoute } from "../../../lib/http.js";
 import { readIdempotencyKey } from "../../../lib/idempotency.js";
-import { parseJsonBody, parseQuery } from "../../../lib/validation.js";
-import { adminOrderListQuerySchema, createOrderSchema } from "../../../schemas/orderSchemas.js";
+import { parseJsonBody } from "../../../lib/validation.js";
+import { createOrderSchema } from "../../../schemas/orderSchemas.js";
 import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
 import { CACHE_TAGS } from "../../../lib/cacheTags.js";
 
 // Admin list — GET /api/orders?status=&search=&sortBy=&sortOrder=&page=&limit=
-export const GET = withRoute(async (request) => {
-  await requirePermission(request, PERMISSIONS.ORDERS_VIEW);
-  const { searchParams } = new URL(request.url);
-  const query = parseQuery(searchParams, adminOrderListQuerySchema);
-  const result = await getAllOrders(query);
-  return NextResponse.json({ success: true, ...result });
-});
 
 export const POST = withRoute(async (request) => {
   const user = await requireUser(request);
@@ -48,3 +40,8 @@ export const POST = withRoute(async (request) => {
     },
   );
 });
+
+// The staff-gated handler that used to live here (GET) went with the
+// admin section: creating and editing the catalog is the dashboard's job now,
+// and it writes an audit trail this app never did. The public handler above
+// remains what the storefront actually needs.

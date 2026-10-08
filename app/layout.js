@@ -5,6 +5,7 @@ import AppProviders from "@/context/ThemeProvider.jsx";
 import { DEFAULT_LOCALE, LOCALE_COOKIE, isValidLocale } from "@/lib/i18n/config.js";
 import { getT } from "@/lib/i18n/server.js";
 import { getSiteOrigin } from "@/lib/seo.js";
+import { getStoreName } from "@/lib/storeName.js";
 import "./globals.css";
 
 // Leo Store design system: Inter for body/UI/forms, Manrope for headings +
@@ -31,27 +32,21 @@ const manrope = Manrope({
 // simply stay relative (still valid, just not cross-site-canonical) when
 // it isn't.
 //
-// Deliberately NOT reading live settings/theme here for the site name
-// (tried it, reverted it): generateMetadata runs on every single page
-// request, so a getCachedPublicSettings()/getCachedActiveTheme() call
-// here would warm/read those cache tags far more often than before Phase
-// 10 (previously only /api/settings/public and /api/theme/active ever
-// touched them from a real request) — this changed cache-timing enough
-// to make Phase 8's own settings-mutation-invalidation HTTP test flaky
-// against the rest of the suite. The literal "TAHOS." fallback below
-// matches the same last-resort default already hardcoded in
-// components/layout/Header.jsx/Footer.jsx; only the live-settings-first
-// resolution (a nice-to-have, not required by this phase) was dropped.
-const siteName = "TAHOS.";
+// The site name is this store's own (lib/storeName.js): what the owner typed, else the organization's name. It is read
+// with a plain query kept for a minute — NOT through the settings/theme caches. generateMetadata runs on every page
+// request, so touching those cache tags here would change their timing (it made the settings-invalidation HTTP test
+// flaky when tried), and a rename shows up within the minute anyway.
 
 export async function generateMetadata() {
   const t = await getT();
   const origin = getSiteOrigin();
+  const siteName = (await getStoreName()) || "Store";
+  const defaultTitle = `${siteName} — ${t("seo.defaultTitle")}`;
 
   return {
     ...(origin ? { metadataBase: new URL(origin) } : {}),
     title: {
-      default: t("seo.defaultTitle"),
+      default: defaultTitle,
       template: `%s · ${siteName}`,
     },
     description: t("seo.defaultDescription"),
@@ -63,12 +58,12 @@ export async function generateMetadata() {
     openGraph: {
       type: "website",
       siteName,
-      title: t("seo.defaultTitle"),
+      title: defaultTitle,
       description: t("seo.defaultDescription"),
     },
     twitter: {
       card: "summary",
-      title: t("seo.defaultTitle"),
+      title: defaultTitle,
       description: t("seo.defaultDescription"),
     },
     // No explicit `icons` field: app/favicon.ico is already picked up

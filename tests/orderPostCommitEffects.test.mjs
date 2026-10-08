@@ -133,9 +133,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.equal(notificationCalls.length, 1, "createAdminNotification must be called exactly once across the real request + its replay");
       assert.equal(newOrderEvents.length, 1, "the NEW_ORDER admin event must be emitted exactly once");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -159,9 +159,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.equal(notificationCalls.length, 1, "concurrent replay must still only create one admin notification");
       assert.equal(newOrderEvents.length, 1, "concurrent replay must still only emit one NEW_ORDER event");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -182,9 +182,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.equal(notificationCalls.length, 2);
       assert.equal(newOrderEvents.length, 2);
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -221,10 +221,10 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
       assert.ok([c1.status, c2.status].every((s) => s === 200));
       assert.equal(orderEventCalls.length, 1, "concurrent duplicate COD creation must still emit exactly one status event");
     } finally {
-      await deleteRows("orders", "user_id", buyer._id);
-      await deleteRows("payments", "user_id", buyer._id);
+      await deleteRows("orders", "customer_id", buyer._id);
+      await deleteRows("payments", "customer_id", buyer._id);
       await deleteRows("products", "id", product._id);
-      await deleteRows("users", "id", buyer._id);
+      await deleteRows("customers", "id", buyer._id);
     }
   });
 
@@ -260,9 +260,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         assert.equal(lowStockEvents.length, 1, "exactly one LOW_STOCK_ALERT event for a genuine new order");
       } finally {
         notificationDelayMs = 0;
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", buyer._id);
+        await deleteRows("customers", "id", buyer._id);
       }
     });
 
@@ -295,9 +295,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         assert.equal(loggedFailures.length, 1, "the failure must be observed/logged (via emitBestEffort), not silently swallowed with no trace at all");
       } finally {
         failAdminEventTypes = new Set();
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", buyer._id);
+        await deleteRows("customers", "id", buyer._id);
       }
     });
 
@@ -321,9 +321,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
         assert.equal(lowStockEvents.length, 1, "a replayed request must not re-run low-stock processing");
       } finally {
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", buyer._id);
+        await deleteRows("customers", "id", buyer._id);
       }
     });
 
@@ -348,9 +348,9 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
         const lowStockEvents = adminEventCalls.filter((e) => e.type === "LOW_STOCK_ALERT");
         assert.equal(lowStockEvents.length, 1, "concurrent replay must not duplicate the low-stock alert");
       } finally {
-        await deleteRows("orders", "user_id", buyer._id);
+        await deleteRows("orders", "customer_id", buyer._id);
         await deleteRows("products", "id", product._id);
-        await deleteRows("users", "id", buyer._id);
+        await deleteRows("customers", "id", buyer._id);
       }
     });
 

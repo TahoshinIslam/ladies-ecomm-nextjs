@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 
 import { escapeHtml } from "../lib/htmlEscape.js";
+import { getStoreName } from "../lib/storeName.js";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -17,7 +18,8 @@ const transporter = nodemailer.createTransport({
  * @param {object} opts - { to, subject, html, text }
  */
 export const sendEmail = async ({ to, subject, html, text }) => {
-  const from = `"${process.env.FROM_NAME || "TAHOS."}" <${
+  // The sender is the store itself unless a deployment sets one.
+  const from = `"${process.env.FROM_NAME || (await getStoreName()) || "Store"}" <${
     process.env.FROM_EMAIL || "noreply@tahos.store"
   }>`;
 
@@ -45,8 +47,8 @@ export const sendEmail = async ({ to, subject, html, text }) => {
 // validated origin + a hex token, never from raw user input, but is still
 // escaped here as defense in depth — escaping a value that's already
 // URL-safe is a no-op.
-export const buildPasswordResetEmail = (name, link) => ({
-  subject: "Reset your TAHOS. password",
+export const buildPasswordResetEmail = (name, link, storeName = "") => ({
+  subject: storeName ? `Reset your ${storeName} password` : "Reset your password",
   html: `
     <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
       <h2>Hi ${escapeHtml(name)}</h2>

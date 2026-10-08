@@ -22,11 +22,12 @@ import {
   rawQuery,
 } from "./helpers/testDb.mjs";
 
+let registerPOST, loginPOST, mePOST_GET;
+
 const canRun = dbReady;
 const reason = skipReason;
 
 describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && reason }, () => {
-  let registerPOST, loginPOST, mePOST_GET, couponsGET;
   let User, Session;
 
   before(async () => {
@@ -35,7 +36,6 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
     ({ POST: registerPOST } = await import("../app/api/users/register/route.js"));
     ({ POST: loginPOST } = await import("../app/api/users/login/route.js"));
     ({ GET: mePOST_GET } = await import("../app/api/users/me/route.js"));
-    ({ GET: couponsGET } = await import("../app/api/coupons/route.js"));
     ({ default: User } = await import("../models/userModel.js"));
     ({ default: Session } = await import("../models/sessionModel.js"));
   });
@@ -68,7 +68,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
     assert.equal(json.user.email, email);
     assert.equal(json.user.password, undefined, "password must never appear in the response");
     assert.ok(sessionCookieFromResponse(res), "Set-Cookie: tahos_session=... must be present");
-    await rawQuery("DELETE FROM users WHERE email = ?", [email]);
+    await rawQuery("DELETE FROM customers WHERE email = ?", [email]);
   });
 
   test("successful login sets a session cookie, no token in the response body", async () => {
@@ -91,11 +91,11 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // normal find() without this explicit opt-in confirms the field-level
       // protection itself, tested separately in tests/session.test.mjs;
       // here we opt in specifically to verify the STORED VALUE is a hash.
-      const [stored] = await rawQuery("SELECT token_hash FROM sessions WHERE user_id = ?", [user._id]);
+      const [stored] = await rawQuery("SELECT token_hash FROM customer_sessions WHERE customer_id = ?", [user._id]);
       assert.notEqual(stored.token_hash, rawValue, "the stored value must be a hash, not the raw token itself");
       assert.equal(stored.token_hash.length, 64, "SHA-256 hex digest is 64 characters");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -109,7 +109,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       assert.equal(json.message, "Invalid credentials");
       assert.equal(sessionCookieFromResponse(res), undefined);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -143,7 +143,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await loginPOST(correctReq);
       assert.equal(res.status, 423, "a locked account rejects even the correct password");
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -169,7 +169,7 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // "no lock is in effect," holds either way.
       assert.equal(after_.lockUntil, null);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -205,13 +205,13 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       // index's own background sweep (which runs on its own ~60s cycle).
       const crypto = await import("node:crypto");
       const tokenHash = crypto.createHash("sha256").update(session.rawToken).digest("hex");
-      await rawQuery("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
+      await rawQuery("UPDATE customer_sessions SET expires_at = ? WHERE token_hash = ?", [new Date(Date.now() - 1000), tokenHash]);
 
       const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -226,56 +226,26 @@ describe("Authentication lifecycle (session-cookie system)", { skip: !canRun && 
       const res = await mePOST_GET(req);
       assert.equal(res.status, 401);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
   test("a session for a user that no longer exists is rejected (401) — no server-side session to fall back on", async () => {
     const user = await createTestUser({ role: "customer" });
     const session = await createTestSession(user._id);
-    await deleteRows("users", "id", user._id); // delete AFTER creating the session — the session record itself is still otherwise valid
+    await deleteRows("customers", "id", user._id); // delete AFTER creating the session — the session record itself is still otherwise valid
     const req = requestAs({ method: "GET", url: "http://test/api/users/me", session });
     const res = await mePOST_GET(req);
     assert.equal(res.status, 401, "lib/session.js's validateSessionToken() returns null when the referenced user no longer exists, even for an otherwise well-formed, unexpired, unrevoked session");
   });
 
   // ===================== Authorization on a permission-gated route =====================
-  // Using GET /api/coupons (requirePermission(COUPONS_MANAGE)) as the
-  // representative admin/staff-gated endpoint.
 
-  test("admin permission enforcement: an admin (bypasses granular permissions entirely) can access a permission-gated route", async () => {
-    const admin = await createTestUser({ role: "admin" });
-    try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(admin._id) });
-      const res = await couponsGET(req);
-      assert.equal(res.status, 200);
-    } finally {
-      await deleteRows("users", "id", admin._id);
-    }
-  });
+  // Three tests here covered a permission-gated route: that an admin
+  // bypassed granular permissions, that an employee holding coupons.manage
+  // got a 200, and that a plain customer was refused. GET /api/coupons was
+  // the vehicle, and it no longer exists — shop management moved to the
+  // admin dashboard, and with it every staff-gated endpoint this app had.
+  // There is nothing left here to gate, so there is nothing left to assert.
 
-  test("staff permission enforcement: an employee WITH coupons.manage succeeds, WITHOUT it is rejected (403)", async () => {
-    const withPerm = await createTestUser({ role: "employee", permissions: ["coupons.manage"] });
-    const withoutPerm = await createTestUser({ role: "employee", permissions: [] });
-    try {
-      const okReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withPerm._id) });
-      assert.equal((await couponsGET(okReq)).status, 200);
-
-      const forbiddenReq = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(withoutPerm._id) });
-      assert.equal((await couponsGET(forbiddenReq)).status, 403);
-    } finally {
-      await deleteRows("users", "id", [withPerm._id, withoutPerm._id]);
-    }
-  });
-
-  test("a normal customer is rejected (403) from a permission-gated admin endpoint, regardless of the permission checked", async () => {
-    const customer = await createTestUser({ role: "customer" });
-    try {
-      const req = requestAs({ method: "GET", url: "http://test/api/coupons", session: await createTestSession(customer._id) });
-      const res = await couponsGET(req);
-      assert.equal(res.status, 403);
-    } finally {
-      await deleteRows("users", "id", customer._id);
-    }
-  });
 });

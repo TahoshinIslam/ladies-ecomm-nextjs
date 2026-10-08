@@ -2,6 +2,7 @@ import slugify from "slugify";
 
 import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 function rowToCategory(row) {
   if (!row) return null;
@@ -37,7 +38,7 @@ function rowToCategory(row) {
     }
     await query(
       `UPDATE categories SET name=?, name_bn=?, slug=?, parent_id=?, image=?, icon=?,
-         description=?, description_bn=?, sort_order=?, is_active=? WHERE id=?`,
+         description=?, description_bn=?, sort_order=?, is_active=? WHERE organization_id=? AND id=?`,
       [
         this.name,
         this.nameBn || "",
@@ -49,31 +50,47 @@ function rowToCategory(row) {
         this.descriptionBn || "",
         this.sortOrder || 0,
         this.isActive ? 1 : 0,
+        getOrganizationId(),
         this._id,
       ],
     );
     return this;
   };
   category.deleteOne = async function deleteOne() {
-    await query("DELETE FROM categories WHERE id = ?", [this._id]);
+    // Soft delete, as the dashboard's catalog does — products reference
+    // categories, and a hard delete would orphan them.
+    await query(
+      "UPDATE categories SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+      [getOrganizationId(), this._id],
+    );
   };
   return category;
 }
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM categories WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM categories WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   return rowToCategory(rows[0]);
 }
 
 async function findBySlug(slug) {
-  const rows = await query("SELECT * FROM categories WHERE slug = ?", [slug]);
+  const rows = await query(
+    "SELECT * FROM categories WHERE organization_id = ? AND slug = ? AND deleted_at IS NULL",
+    [getOrganizationId(), slug],
+  );
   return rowToCategory(rows[0]);
 }
 
 /** Every category, sorted sort_order then name — the one shape listCategories() needs. */
 async function findAll() {
-  const rows = await query("SELECT * FROM categories ORDER BY sort_order ASC, name ASC");
+  const rows = await query(
+    `SELECT * FROM categories WHERE organization_id = ? AND deleted_at IS NULL
+      ORDER BY sort_order ASC, name ASC`,
+    [getOrganizationId()],
+  );
   return rows.map(rowToCategory);
 }
 
@@ -85,29 +102,49 @@ async function findAll() {
  * a timer or an in-process reset call.
  */
 async function stamp() {
-  const rows = await query("SELECT COUNT(*) AS n, MAX(updated_at) AS newest, COALESCE(SUM(is_active), 0) AS active FROM categories");
+  const rows = await query(
+    `SELECT COUNT(*) AS n, MAX(updated_at) AS newest, COALESCE(SUM(is_active), 0) AS active
+       FROM categories WHERE organization_id = ? AND deleted_at IS NULL`,
+    [getOrganizationId()],
+  );
   const { n, newest, active } = rows[0];
   return `${n}|${newest ? new Date(newest).getTime() : 0}|${active}`;
 }
 
 async function findByIds(ids) {
   if (!ids.length) return [];
-  const rows = await query(`SELECT * FROM categories WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  const rows = await query(
+    `SELECT * FROM categories
+      WHERE organization_id = ? AND deleted_at IS NULL AND id IN (${ids.map(() => "?").join(",")})`,
+    [getOrganizationId(), ...ids],
+  );
   return rows.map(rowToCategory);
 }
 
 async function findByParent(parentId) {
   const rows = parentId === null
-    ? await query("SELECT * FROM categories WHERE parent_id IS NULL ORDER BY sort_order ASC, name ASC")
-    : await query("SELECT * FROM categories WHERE parent_id = ? ORDER BY sort_order ASC, name ASC", [parentId]);
+    ? await query(
+        `SELECT * FROM categories
+          WHERE organization_id = ? AND deleted_at IS NULL AND parent_id IS NULL
+          ORDER BY sort_order ASC, name ASC`,
+        [getOrganizationId()],
+      )
+    : await query(
+        `SELECT * FROM categories
+          WHERE organization_id = ? AND deleted_at IS NULL AND parent_id = ?
+          ORDER BY sort_order ASC, name ASC`,
+        [getOrganizationId(), parentId],
+      );
   return rows.map(rowToCategory);
 }
 
 async function findChildIdsByParents(parentIds) {
   if (!parentIds.length) return [];
   const rows = await query(
-    `SELECT id, parent_id FROM categories WHERE parent_id IN (${parentIds.map(() => "?").join(",")})`,
-    parentIds,
+    `SELECT id, parent_id FROM categories
+      WHERE organization_id = ? AND deleted_at IS NULL
+        AND parent_id IN (${parentIds.map(() => "?").join(",")})`,
+    [getOrganizationId(), ...parentIds],
   );
   return rows;
 }
@@ -125,10 +162,11 @@ async function create(data) {
   // form — every other caller (the admin API) never passes one.
   const slug = data.slug || buildSlug(data.name, id);
   await query(
-    `INSERT INTO categories (id, name, name_bn, slug, parent_id, image, icon, description, description_bn, sort_order, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO categories (id, organization_id, name, name_bn, slug, parent_id, image, icon, description, description_bn, sort_order, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
+      getOrganizationId(),
       data.name,
       data.nameBn || "",
       slug,
@@ -145,12 +183,18 @@ async function create(data) {
 }
 
 async function countByParent(parentId) {
-  const rows = await query("SELECT COUNT(*) AS n FROM categories WHERE parent_id = ?", [parentId]);
+  const rows = await query(
+    "SELECT COUNT(*) AS n FROM categories WHERE organization_id = ? AND parent_id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), parentId],
+  );
   return rows[0].n;
 }
 
 async function existsWithParent(parentId) {
-  const rows = await query("SELECT 1 FROM categories WHERE parent_id = ? LIMIT 1", [parentId]);
+  const rows = await query(
+    "SELECT 1 FROM categories WHERE organization_id = ? AND parent_id = ? AND deleted_at IS NULL LIMIT 1",
+    [getOrganizationId(), parentId],
+  );
   return rows.length > 0;
 }
 

@@ -102,19 +102,22 @@ describe("Phase 11 — events table TTL-equivalent and index shape (MySQL)", () 
   const schema = fs.readFileSync(new URL("../sql/schema.sql", import.meta.url), "utf8");
 
   test("declares an expires_at column, indexed for the cleanup sweep (MySQL has no native TTL index — see schema.sql's own comment)", () => {
-    const eventsTable = schema.slice(schema.indexOf("CREATE TABLE IF NOT EXISTS events"));
-    assert.match(eventsTable, /expires_at DATETIME\(3\) NOT NULL/);
-    assert.match(eventsTable, /KEY idx_events_expires_at \(expires_at\)/);
+    const eventsTable = schema.slice(schema.indexOf("CREATE TABLE `storefront_events`"));
+    assert.match(eventsTable, /`expires_at` datetime\(3\) NOT NULL/);
+    assert.match(eventsTable, /KEY `idx_storefront_events_expires_at` \(`expires_at`\)/);
   });
 
   test("declares a (channel, id) compound index for the polling query", () => {
-    const eventsTable = schema.slice(schema.indexOf("CREATE TABLE IF NOT EXISTS events"));
-    assert.match(eventsTable, /KEY idx_events_channel_id \(channel, id\)/);
+    const eventsTable = schema.slice(schema.indexOf("CREATE TABLE `storefront_events`"));
+    // Prefixed by organization: the outbox is shared with every other store,
+    // so the polling query filters on the tenant before the channel, and the
+    // index has to lead with the column that query leads with.
+    assert.match(eventsTable, /KEY `idx_storefront_events_channel_id` \(`organization_id`,`channel`,`id`\)/);
   });
 });
 
 describe("Phase 11 — SSE routes read the durable outbox, not an in-memory bus", { skip: false }, () => {
-  for (const rel of ["app/api/admin/events/route.js", "app/api/orders/[id]/events/route.js"]) {
+  for (const rel of ["app/api/user/events/route.js", "app/api/orders/[id]/events/route.js"]) {
     test(`${rel} imports readEventsSince/resolveStartCursor from lib/events.js`, () => {
       const content = fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
       assert.match(content, /readEventsSince/);
@@ -144,7 +147,7 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
   });
 
   after(async () => {
-    await rawQuery("DELETE FROM events WHERE channel LIKE 'phase11-distributed-events-test%'");
+    await rawQuery("DELETE FROM storefront_events WHERE channel LIKE 'phase11-distributed-events-test%'");
     await disconnectTestDb();
   });
 
@@ -243,7 +246,7 @@ describe("Phase 11 — readEventsSince / resolveStartCursor real DB behavior", {
 });
 
 describe("Phase 12 — SSE routes resolve the cursor BEFORE opening the stream and fail closed", () => {
-  for (const rel of ["app/api/admin/events/route.js", "app/api/orders/[id]/events/route.js"]) {
+  for (const rel of ["app/api/user/events/route.js", "app/api/orders/[id]/events/route.js"]) {
     test(`${rel}: resolveStartCursor is called and awaited before \`new ReadableStream(\`, not inside it`, () => {
       const content = fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
       const cursorCallIndex = content.indexOf("await resolveStartCursor(");

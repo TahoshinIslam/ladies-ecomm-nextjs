@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 
 import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 // SQL-backed replacement for the old Mongoose user model. Keeps the exact
 // same field names the rest of the app already reads/writes (_id, role,
@@ -10,6 +11,18 @@ import { generateObjectId } from "../lib/objectId.js";
 // that used to chain Mongoose query builders (`.select().lean()`, etc.)
 // change shape. See models/README-migration.md for the general pattern
 // every model in this directory follows.
+//
+// This model reads `customers`, not `users`. In the shared database `users`
+// is the dashboard's staff table and `customers` is the shoppers' — the
+// split migration 052 made, because one table holding both meant a shopper
+// and a staff member were the same kind of row with a `role` column telling
+// them apart.
+//
+// Two columns did not come across with it. `role` and `permissions` do not
+// exist on `customers`: a shopper has no role here, and staff permissions
+// are the dashboard's RBAC tables, not a JSON blob on the person. Everything
+// this model returns therefore reports role "customer", which is what every
+// row in this table now is.
 
 function rowToUser(row) {
   if (!row) return null;
@@ -18,8 +31,10 @@ function rowToUser(row) {
     name: row.name,
     email: row.email,
     password: row.password,
-    role: row.role,
-    permissions: typeof row.permissions === "string" ? JSON.parse(row.permissions) : row.permissions || [],
+    // Not columns any more — every row in `customers` is a shopper. Kept on
+    // the returned object so callers that read `.role` still work.
+    role: "customer",
+    permissions: [],
     avatar: row.avatar,
     phone: row.phone,
     isVerified: !!row.is_verified,
@@ -62,18 +77,17 @@ function attachInstanceMethods(user) {
     }
     if (this.__isNew) {
       await query(
-        `INSERT INTO users
-           (id, name, email, password, role, permissions, avatar, phone, is_verified,
+        `INSERT INTO customers
+           (id, organization_id, name, email, password, avatar, phone, is_verified,
             reset_password_token, reset_password_expires, login_attempts, lock_until,
             last_login, first_order_promo_used)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           this._id,
+          getOrganizationId(),
           this.name,
           this.email.toLowerCase().trim(),
           this.password,
-          this.role,
-          JSON.stringify(this.permissions || []),
           this.avatar || "",
           this.phone || "",
           this.isVerified ? 1 : 0,
@@ -90,17 +104,15 @@ function attachInstanceMethods(user) {
     }
 
     await query(
-      `UPDATE users SET
-         name = ?, email = ?, password = ?, role = ?, permissions = ?, avatar = ?, phone = ?,
+      `UPDATE customers SET
+         name = ?, email = ?, password = ?, avatar = ?, phone = ?,
          is_verified = ?, reset_password_token = ?, reset_password_expires = ?,
          login_attempts = ?, lock_until = ?, last_login = ?, first_order_promo_used = ?
-       WHERE id = ?`,
+       WHERE organization_id = ? AND id = ?`,
       [
         this.name,
         this.email.toLowerCase().trim(),
         this.password,
-        this.role,
-        JSON.stringify(this.permissions || []),
         this.avatar || "",
         this.phone || "",
         this.isVerified ? 1 : 0,
@@ -110,6 +122,7 @@ function attachInstanceMethods(user) {
         this.lockUntil ?? null,
         this.lastLogin ?? null,
         this.firstOrderPromoUsed ? 1 : 0,
+        getOrganizationId(),
         this._id,
       ],
     );
@@ -117,7 +130,7 @@ function attachInstanceMethods(user) {
   };
 
   user.deleteOne = async function deleteOne() {
-    await query("DELETE FROM users WHERE id = ?", [this._id]);
+    await query("DELETE FROM customers WHERE organization_id = ? AND id = ?", [getOrganizationId(), this._id]);
   };
 
   user.incLoginAttempts = async function incLoginAttempts() {
@@ -130,9 +143,10 @@ function attachInstanceMethods(user) {
         this.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
       }
     }
-    await query("UPDATE users SET login_attempts = ?, lock_until = ? WHERE id = ?", [
+    await query("UPDATE customers SET login_attempts = ?, lock_until = ? WHERE organization_id = ? AND id = ?", [
       this.loginAttempts,
       this.lockUntil,
+      getOrganizationId(),
       this._id,
     ]);
   };
@@ -141,10 +155,10 @@ function attachInstanceMethods(user) {
     this.loginAttempts = 0;
     this.lockUntil = null;
     this.lastLogin = new Date();
-    await query("UPDATE users SET login_attempts = 0, lock_until = NULL, last_login = ? WHERE id = ?", [
-      this.lastLogin,
-      this._id,
-    ]);
+    await query(
+      "UPDATE customers SET login_attempts = 0, lock_until = NULL, last_login = ? WHERE organization_id = ? AND id = ?",
+      [this.lastLogin, getOrganizationId(), this._id],
+    );
   };
 }
 
@@ -184,7 +198,10 @@ function buildWhere(filter = {}) {
 
 async function findOne(filter) {
   const { sql, params } = buildWhere(filter);
-  const rows = await query(`SELECT * FROM users WHERE ${sql} LIMIT 1`, params);
+  const rows = await query(
+    `SELECT * FROM customers WHERE organization_id = ? AND deleted_at IS NULL AND ${sql} LIMIT 1`,
+    [getOrganizationId(), ...params],
+  );
   return rowToUser(rows[0]);
 }
 
@@ -193,14 +210,12 @@ async function findById(id) {
   return findOne({ _id: id });
 }
 
-async function create({ name, email, password, role, permissions, avatar, phone, isVerified }) {
+async function create({ name, email, password, avatar, phone, isVerified }) {
   const user = rowToUser({
     id: generateObjectId(),
     name,
     email: String(email).toLowerCase().trim(),
     password,
-    role: role || "customer",
-    permissions: JSON.stringify(permissions || []),
     avatar: avatar || "",
     phone: phone || "",
     is_verified: isVerified ? 1 : 0,
@@ -212,15 +227,26 @@ async function create({ name, email, password, role, permissions, avatar, phone,
   return user;
 }
 
-const SORT_COLUMNS = { name: "name", email: "email", role: "role", createdAt: "created_at" };
+const SORT_COLUMNS = { name: "name", email: "email", createdAt: "created_at" };
+
+/**
+ * `role` is no longer a column. Asking for customers matches every row in
+ * this table; asking for staff matches none of them, because staff are not
+ * in it — they are dashboard accounts. Returning nothing is the truthful
+ * answer to "which shoppers are administrators", rather than an error.
+ */
+function roleMatchesCustomers(role) {
+  return !role || role === "customer";
+}
 
 async function find(filter = {}, { sort, skip = 0, limit = 1000 } = {}) {
+  if (!roleMatchesCustomers(filter.role)) return [];
+  // The scope is in the statement below, not in this list. A caller-driven
+  // WHERE that *might* contain `organization_id` is exactly the shape that
+  // hides a missing one, so the invariant part is written out where it can
+  // be read — and checked — and only the optional filters are assembled.
   const clauses = [];
   const params = [];
-  if (filter.role) {
-    clauses.push("role = ?");
-    params.push(filter.role);
-  }
   if (filter.$or) {
     // Only shape actually used: [{name: RegExp}, {email: RegExp}] for the
     // admin users search box — translated to a MySQL LIKE on both columns.
@@ -229,31 +255,33 @@ async function find(filter = {}, { sort, skip = 0, limit = 1000 } = {}) {
     clauses.push("(name LIKE ? OR email LIKE ?)");
     params.push(like, like);
   }
-  const where = clauses.length ? clauses.join(" AND ") : "1=1";
+  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
   const sortCol = SORT_COLUMNS[sort?.field] || "created_at";
   const sortDir = sort?.dir === 1 ? "ASC" : "DESC";
   const rows = await query(
-    `SELECT * FROM users WHERE ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
-    [...params, Number(limit), Number(skip)],
+    `SELECT * FROM customers
+      WHERE organization_id = ? AND deleted_at IS NULL ${filters}
+      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
+    [getOrganizationId(), ...params, Number(limit), Number(skip)],
   );
   return rows.map(rowToUser);
 }
 
 async function countDocuments(filter = {}) {
+  if (!roleMatchesCustomers(filter.role)) return 0;
   const clauses = [];
   const params = [];
-  if (filter.role) {
-    clauses.push("role = ?");
-    params.push(filter.role);
-  }
   if (filter.$or) {
     const term = filter.$or[0]?.name?.source ?? filter.$or[0]?.name ?? "";
     const like = `%${String(term).replace(/\\(.)/g, "$1")}%`;
     clauses.push("(name LIKE ? OR email LIKE ?)");
     params.push(like, like);
   }
-  const where = clauses.length ? clauses.join(" AND ") : "1=1";
-  const rows = await query(`SELECT COUNT(*) AS n FROM users WHERE ${where}`, params);
+  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
+  const rows = await query(
+    `SELECT COUNT(*) AS n FROM customers WHERE organization_id = ? AND deleted_at IS NULL ${filters}`,
+    [getOrganizationId(), ...params],
+  );
   return rows[0].n;
 }
 
@@ -267,26 +295,55 @@ async function countDocuments(filter = {}) {
  * never commits this).
  */
 async function claimFirstOrderPromo(userId, conn) {
-  const sql = "UPDATE users SET first_order_promo_used = 1 WHERE id = ? AND first_order_promo_used = 0";
+  const sql =
+    `UPDATE customers SET first_order_promo_used = 1
+      WHERE organization_id = ? AND id = ? AND deleted_at IS NULL AND first_order_promo_used = 0`;
+  const params = [getOrganizationId(), userId];
   if (conn) {
-    const [result] = await conn.query(sql, [userId]);
+    const [result] = await conn.query(sql, params);
     return result.affectedRows > 0;
   }
-  const result = await query(sql, [userId]);
+  const result = await query(sql, params);
   return result.affectedRows > 0;
 }
 
 /** Read-only check (preview mode: `commit=false` in services/orderService.js). */
 async function hasUnusedFirstOrderPromo(userId, conn) {
-  const sql = "SELECT first_order_promo_used FROM users WHERE id = ?";
-  const rows = conn ? (await conn.query(sql, [userId]))[0] : await query(sql, [userId]);
+  // A closed account reports no unused promo rather than an error: the
+  // `!rows.length` branch below already means "no promo available", which is
+  // the right answer for someone who is not there.
+  const sql =
+    "SELECT first_order_promo_used FROM customers WHERE organization_id = ? AND id = ? AND deleted_at IS NULL";
+  const params = [getOrganizationId(), userId];
+  const rows = conn ? (await conn.query(sql, params))[0] : await query(sql, params);
   if (!rows.length) return false;
   return !rows[0].first_order_promo_used;
 }
 
-/** Every admin/employee's id — the fan-out list for createAdminNotification(). */
+/**
+ * Every staff account for this store — the fan-out list for
+ * createAdminNotification().
+ *
+ * This is the one query in this model that deliberately leaves `customers`.
+ * Staff are dashboard accounts: rows in `users`, joined to this store
+ * through `organization_users`. The old `role IN ('admin','employee')` has
+ * no equivalent here, because the column it read no longer exists and the
+ * people it found are not in this table.
+ *
+ * Only Active memberships: someone invited but who has not claimed their
+ * account yet, or whose access was suspended, should not be accumulating
+ * notifications about orders they cannot open.
+ */
 async function findStaffIds() {
-  const rows = await query("SELECT id FROM users WHERE role IN ('admin', 'employee')");
+  const rows = await query(
+    `SELECT /* dashboard-table */ u.id
+       FROM users u
+       JOIN organization_users ou ON ou.user_id = u.id
+      WHERE ou.organization_id = ?
+        AND ou.status = 'Active'
+        AND u.status = 'Active'`,
+    [getOrganizationId()],
+  );
   return rows.map((r) => r.id);
 }
 

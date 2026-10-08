@@ -1,11 +1,12 @@
 import { query, withConnection } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 function rowToAddress(row) {
   if (!row) return null;
   const address = {
     _id: row.id,
-    user: row.user_id,
+    user: row.customer_id,
     label: row.label,
     fullName: row.full_name,
     phone: row.phone,
@@ -25,12 +26,20 @@ function rowToAddress(row) {
 }
 
 async function findByUser(userId) {
-  const rows = await query("SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, created_at DESC", [userId]);
+  const rows = await query(
+    `SELECT * FROM addresses
+      WHERE organization_id = ? AND customer_id = ? AND deleted_at IS NULL
+      ORDER BY is_default DESC, created_at DESC`,
+    [getOrganizationId(), userId],
+  );
   return rows.map(rowToAddress);
 }
 
 async function findByIdForUser(id, userId) {
-  const rows = await query("SELECT * FROM addresses WHERE id = ? AND user_id = ?", [id, userId]);
+  const rows = await query(
+    "SELECT * FROM addresses WHERE organization_id = ? AND id = ? AND customer_id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id, userId],
+  );
   return rowToAddress(rows[0]);
 }
 
@@ -38,7 +47,10 @@ async function findByIdForUser(id, userId) {
 // address's flag for the same user, inside the same transaction as the
 // write itself.
 async function clearOtherDefaults(conn, userId, excludeId) {
-  await conn.query("UPDATE addresses SET is_default = 0 WHERE user_id = ? AND id != ?", [userId, excludeId || ""]);
+  await conn.query(
+    "UPDATE addresses SET is_default = 0 WHERE organization_id = ? AND customer_id = ? AND id != ?",
+    [getOrganizationId(), userId, excludeId || ""],
+  );
 }
 
 async function create(data) {
@@ -46,8 +58,9 @@ async function create(data) {
   await withConnection(async (conn) => {
     if (data.isDefault) await clearOtherDefaults(conn, data.user, id);
     await conn.query(
-      "INSERT INTO addresses (id, user_id, label, full_name, phone, street, city, state, postal_code, country, is_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, data.user, data.label || "home", data.fullName, data.phone, data.street, data.city, data.state || "", data.postalCode, data.country || "Bangladesh", data.isDefault ? 1 : 0],
+      `INSERT INTO addresses (id, organization_id, customer_id, label, full_name, phone, street, city, state, postal_code, country, is_default)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, getOrganizationId(), data.user, data.label || "home", data.fullName, data.phone, data.street, data.city, data.state || "", data.postalCode, data.country || "Bangladesh", data.isDefault ? 1 : 0],
     );
   });
   return findByIdForUser(id, data.user);
@@ -57,15 +70,19 @@ async function saveAddress(address) {
   await withConnection(async (conn) => {
     if (address.isDefault) await clearOtherDefaults(conn, address.user, address._id);
     await conn.query(
-      "UPDATE addresses SET label=?, full_name=?, phone=?, street=?, city=?, state=?, postal_code=?, country=?, is_default=? WHERE id=?",
-      [address.label, address.fullName, address.phone, address.street, address.city, address.state || "", address.postalCode, address.country, address.isDefault ? 1 : 0, address._id],
+      `UPDATE addresses SET label=?, full_name=?, phone=?, street=?, city=?, state=?, postal_code=?, country=?, is_default=?
+        WHERE organization_id=? AND id=?`,
+      [address.label, address.fullName, address.phone, address.street, address.city, address.state || "", address.postalCode, address.country, address.isDefault ? 1 : 0, getOrganizationId(), address._id],
     );
   });
   return address;
 }
 
 async function deleteForUser(id, userId) {
-  const result = await query("DELETE FROM addresses WHERE id = ? AND user_id = ?", [id, userId]);
+  const result = await query(
+    "DELETE FROM addresses WHERE organization_id = ? AND id = ? AND customer_id = ?",
+    [getOrganizationId(), id, userId],
+  );
   return result.affectedRows > 0;
 }
 

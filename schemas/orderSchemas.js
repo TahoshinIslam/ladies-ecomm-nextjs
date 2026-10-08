@@ -48,7 +48,7 @@ const orderItemSchema = z.object({
 // A real cart/order has no legitimate reason to carry hundreds of distinct
 // line items — bounded to stop a single request from forcing calcTotals()
 // to loop over an unbounded array of Product lookups.
-const orderItemsSchema = z.array(orderItemSchema).min(1, "at least one item is required").max(100, "too many items");
+export const orderItemsSchema = z.array(orderItemSchema).min(1, "at least one item is required").max(100, "too many items");
 
 export const createOrderSchema = z.object({
   items: orderItemsSchema,
@@ -59,6 +59,9 @@ export const createOrderSchema = z.object({
     .optional()
     .transform((v) => (v ? v.toUpperCase() : undefined)),
   notes: requiredString({ min: 0, max: 1000 }).optional().default(""),
+  // The preview's `quote` token: what the shopper was shown and agreed to. When it is sent, checkout prices
+  // again under lock and refuses (409, with the new quote) rather than charge something different.
+  quote: z.string().regex(/^[0-9a-f]{32}$/, "invalid quote").optional(),
 });
 
 // Preview only needs a country to compute region/shipping/tax — the full

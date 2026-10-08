@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
@@ -39,6 +40,7 @@ import {
 } from "../store/shopApi.js";
 import { selectCurrentUser } from "../store/authSlice.js";
 import { useCart } from "../hooks/useCart.js";
+import { useCartCheck } from "../hooks/useCartCheck.js";
 import { formatCurrency, cn, resolveImage, formatVariantAttributes } from "../lib/utils.js";
 import { downloadReceipt } from "../lib/receipt.js";
 import { useSettings } from "../context/SettingsContext.jsx";
@@ -82,6 +84,10 @@ export default function CheckoutPage() {
 
   // Guests can browse checkout — auth is only required when placing the order.
   const { items: cartItems, isLoading: cartLoading } = useCart();
+  // Re-asks whether the bag is still offered and in stock by the store that now
+  // supplies the website, so a change since the bag was filled is explained here
+  // instead of surfacing as a refused order.
+  const availability = useCartCheck(cartItems);
   const { data: addrData } = useGetMyAddressesQuery(undefined, { skip: !user });
   const [createAddress] = useCreateAddressMutation();
   const [validateCoupon] = useValidateCouponMutation();
@@ -267,11 +273,22 @@ export default function CheckoutPage() {
   // address's country defaults to "Bangladesh", so this agrees with the
   // real preview in the overwhelming common case and avoids a flash of a
   // different currency while the debounced preview request is in flight).
+  // Until the server's quote arrives (and always for someone not yet signed in) the bag's own check says what each
+  // item sells for, batch by batch — the same figures the bag showed — so the total never reads differently here.
+  const checkedLine = (it) => {
+    const r = it.product ? availability.resultFor(it.product._id, it.variantId) : null;
+    return r && typeof r.lineTotal === "number" && r.segments?.length ? r : null;
+  };
   const fallbackTotals = useMemo(() => {
     let subtotal = 0;
     for (const it of items) {
       const p = it.product;
       if (!p) continue;
+      const r = availability.resultFor(p._id, it.variantId);
+      if (r && typeof r.lineTotal === "number" && r.segments?.length) {
+        subtotal += r.lineTotal;
+        continue;
+      }
       const price = p.discountPrice ?? p.basePrice;
       subtotal += settings.toBdt(price, p.priceCurrency) * it.quantity;
     }
@@ -285,7 +302,7 @@ export default function CheckoutPage() {
       total: subtotal,
       currency: "BDT",
     };
-  }, [items, settings]);
+  }, [items, settings, availability]);
 
   // BDT-only currency migration: services/orderService.js's calcTotals()
   // now always returns `currency: "BDT"` — there is no more raw-USD
@@ -318,6 +335,7 @@ export default function CheckoutPage() {
       const res = await validateCoupon({
         code: couponCode.trim(),
         subtotal: totals.subtotal,
+        items: items.map((i) => ({ productId: i.productId, variantId: i.variantId, quantity: i.quantity })),
       }).unwrap();
       setAppliedCoupon(res);
       toast.success(t("checkout.couponApplied", { amount: formatCurrency(res.discount, locale) }));
@@ -403,6 +421,9 @@ export default function CheckoutPage() {
           },
           couponCode: appliedCoupon?.coupon?.code,
           notes,
+          // What the shopper was shown. If the price or availability moved since, the server refuses with the
+          // new quote (409) instead of charging something they did not see.
+          quote: serverTotals?.quote,
         }).unwrap();
 
         orderId = orderRes.order._id;
@@ -427,7 +448,13 @@ export default function CheckoutPage() {
         return;
       }
     } catch (e) {
-      toast.error(e?.data?.message || t("checkout.placeOrderFailed"));
+      // The quote the shopper confirmed is no longer what checkout would charge: show the new one, make nothing.
+      if (e?.data?.errors?.code === "QUOTE_CHANGED" && e.data.errors.preview) {
+        setServerTotals(e.data.errors.preview);
+        toast.error(e.data.message);
+      } else {
+        toast.error(e?.data?.message || t("checkout.placeOrderFailed"));
+      }
     } finally {
       submitLockRef.current.release();
       setSubmitting(false);
@@ -633,7 +660,12 @@ export default function CheckoutPage() {
                 const p = it.product;
                 if (!p) return null;
                 const price = p.discountPrice ?? p.basePrice;
-                const lineTotal = toCheckoutPrice(price, p.priceCurrency) * it.quantity;
+                // The server's quote is what checkout will charge: this item's units by the price they sell at
+                // (one entry, or several when the quantity is taken from batches priced differently).
+                const serverLines = (serverTotals?.lines ?? []).filter((l) => String(l.variantId) === String(it.variantId));
+                const checked = serverLines.length ? null : checkedLine(it);
+                const quoted = serverLines.length ? serverLines : checked ? checked.segments.map((g) => ({ quantity: g.quantity, unitPrice: g.unitPrice, lineTotal: g.quantity * g.unitPrice })) : [];
+                const lineTotal = quoted.length ? quoted.reduce((sum, l) => sum + l.lineTotal, 0) : toCheckoutPrice(price, p.priceCurrency) * it.quantity;
                 const variantLine = formatVariantAttributes(it.variant?.attributes, locale);
                 return (
                   <li key={`${p._id}-${it.variantId}`} className="py-3">
@@ -660,6 +692,16 @@ export default function CheckoutPage() {
                         <p className="text-xs text-muted-foreground">
                           {variantLine ? `${variantLine} · ` : ""}{t("checkout.qty")} {it.quantity}
                         </p>
+                        {quoted.length > 1 ? (
+                          <ul data-price-breakdown aria-label={`Price breakdown for ${p.name}`} className="mt-1 text-xs text-muted-foreground">
+                            {quoted.map((l, n) => (
+                              <li key={n} className="flex justify-between gap-2">
+                                <span>{l.quantity} × {formatCurrency(l.unitPrice, locale)}</span>
+                                <span>{formatCurrency(l.lineTotal, locale)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
                       </div>
                       <p className="text-sm font-bold">
                         {/* In checkout currency — matches subtotal/total below */}
@@ -730,10 +772,29 @@ export default function CheckoutPage() {
                 ) : null;
               })()
             )}
+            {availability.blocking ? (
+              <div role="alert" data-checkout-availability className="mt-5 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+                <p className="font-semibold">Some items in your bag are no longer available as chosen.</p>
+                <ul className="mt-1.5 space-y-1">
+                  {availability.problems.map((p) => (
+                    <li key={`${p.productId}-${p.variantId}`} className="flex items-center gap-2">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {(cartItems.find((i) => String(i.variantId) === String(p.variantId))?.product?.name ?? "An item")} — {p.message}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/cart" className="mt-2 inline-block underline underline-offset-2">
+                  Review your bag
+                </Link>
+              </div>
+            ) : null}
             <Button
               onClick={handlePlaceOrder}
               loading={placing || submitting}
               disabled={
+                availability.blocking ||
                 // A pending order already waiting on COD (resumableOrderId)
                 // bypasses the empty-cart/no-address checks below — those
                 // describe "not ready to CREATE an order", not "nothing to

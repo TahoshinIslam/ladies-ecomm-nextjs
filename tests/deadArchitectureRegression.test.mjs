@@ -117,14 +117,25 @@ describe("Phase 6 — COD-only enforcement stays in place", () => {
     assert.deepEqual(offenders, []);
   });
 
-  test("payments.method is COD-only at the schema level, not pre-declaring unimplemented gateways", () => {
+  test("payments.method is cod or a plain recorded `online` prepayment — never a pre-declared gateway", () => {
     // Post Mongo -> MySQL migration, field-level enum constraints live in
     // sql/schema.sql's DDL (MySQL ENUM), not in models/paymentModel.js —
     // the SQL model is a plain query builder with no schema-declaration
     // layer of its own, unlike the old Mongoose schema this test used to
     // check directly.
     const content = fs.readFileSync(abs("sql/schema.sql"), "utf8");
-    assert.match(content, /method\s+ENUM\('cod'\)/);
+    // Matched case-insensitively and with optional backticks: schema.sql is
+    // a generated dump now, and MariaDB writes `method` enum('cod') where
+    // the hand-written DDL said method ENUM('cod'). Same constraint, same
+    // meaning — only the rendering differs.
+    //
+    // ecom_erp migration 109 added `online` so a prepaid order is distinguishable from cash on delivery (a payment taken
+    // outside the storefront and recorded by staff). It is deliberately generic: the storefront still has NO gateway
+    // code (the tests above), and a gateway-named value (stripe, sslcommerz, bkash…) would be exactly the pre-declaring
+    // this test exists to stop.
+    const column = content.match(/`?method`?\s+enum\(([^)]*)\)/i);
+    assert.ok(column, "payments.method is an enum");
+    assert.deepEqual(column[1].split(",").map((v) => v.trim().replace(/'/g, "")), ["cod", "online"]);
   });
 });
 

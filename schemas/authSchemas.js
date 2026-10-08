@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { emailSchema, phoneSchema, requiredString, paginationSchema, searchQuerySchema, sortFieldSchema, sortOrderSchema } from "./commonSchemas.js";
-import { PERMISSIONS } from "../lib/permissions.js";
 
 // Exported as plain numbers (not just baked into passwordSchema below) so
 // client forms can build their OWN zod object — with their own translated
@@ -74,31 +73,7 @@ export const updateMeSchema = z
   })
   .strict();
 
-// PUT /api/users/[id] — admin managing another user. Mirrors
-// services/userService.js's ADMIN_USER_WRITABLE_FIELDS exactly; `.strict()`
-// so a caller can never write any other model field this way.
-// `permissions` is checked against the SAME `PERMISSIONS` constant lib/auth.js
-// itself enforces — an unknown permission string is now a clean 400 here
-// instead of surfacing only as a service-level error deep inside
-// updateUser().
-export const updateUserAdminSchema = z
-  .object({
-    name: requiredString({ min: 1, max: 100 }).optional(),
-    email: emailSchema.optional(),
-    role: z.enum(["customer", "employee", "admin"]).optional(),
-    isVerified: z.boolean().optional(),
-    permissions: z.array(z.enum(Object.values(PERMISSIONS))).max(50).optional(),
-  })
-  .strict()
-  .refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
-
-// GET /api/users (admin list)
-export const adminUserListQuerySchema = z
-  .object({
-    role: z.enum(["customer", "employee", "admin"]).optional(),
-    search: searchQuerySchema,
-    sortBy: sortFieldSchema(["name", "email", "role", "createdAt"], "createdAt"),
-    sortOrder: sortOrderSchema,
-  })
-  .extend(paginationSchema().shape)
-  .strict();
+// updateUserAdminSchema and adminUserListQuerySchema used to sit here. Both
+// described requests only a staff member could make — setting another
+// account's role and permissions, or paging the user list — and both went
+// with the endpoints that accepted them.

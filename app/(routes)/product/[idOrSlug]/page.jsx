@@ -27,7 +27,7 @@ export async function generateMetadata({ params }) {
   const canonicalPath = `/product/${product.slug || idOrSlug}`;
   const canonicalUrl = absoluteUrl(canonicalPath);
   // Every field below falls back to the existing auto-derived value when
-  // the admin hasn't set an override (views/admin/ProductsPage.jsx's SEO
+  // the shop owner hasn't set an override (the dashboard's product SEO
   // section) — a product with none of these set behaves exactly as before
   // this fell back existed.
   const title = product.metaTitle || product.name;

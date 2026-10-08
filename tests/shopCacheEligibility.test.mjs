@@ -5,7 +5,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { getShopCacheKey } from "../lib/shopCacheEligibility.js";
+import { getShopCacheKey as rawGetShopCacheKey } from "../lib/shopCacheEligibility.js";
+
+// Every key is scoped to a store (see the function's own comment). These
+// tests are about the query-canonicalisation half, so they pin one store
+// and vary only the query — except the tenancy block at the bottom, which
+// does the opposite.
+const ORG = "org_testtenant0001";
+const getShopCacheKey = (query, options = {}) =>
+  rawGetShopCacheKey(query, { organizationId: ORG, ...options });
 
 describe("Phase 8 — shop cache eligibility: canonical equivalence", () => {
   test("two equivalent queries with keys in a different insertion order produce the same key", () => {
@@ -103,5 +111,25 @@ describe("Shop redesign — collection/availability/ratingGte cache dimensions",
     const b = getShopCacheKey({ ratingGte: "4", sort: "-createdAt", availability: "in_stock", category: "abc123", collection: "discount" });
     assert.equal(a, b);
     assert.ok(a);
+  });
+});
+
+describe("shop cache eligibility: one cache, many stores", () => {
+  test("the same query for two different stores produces two different keys", () => {
+    const a = rawGetShopCacheKey({ category: "abc123" }, { organizationId: "org_aaa" });
+    const b = rawGetShopCacheKey({ category: "abc123" }, { organizationId: "org_bbb" });
+    assert.ok(a && b);
+    assert.notEqual(a, b, "a shared cache must not hand one store another store's catalog");
+  });
+
+  test("the default query is still per-store", () => {
+    const a = rawGetShopCacheKey({}, { organizationId: "org_aaa" });
+    const b = rawGetShopCacheKey({}, { organizationId: "org_bbb" });
+    assert.notEqual(a, b);
+  });
+
+  test("no organization means no caching, rather than a shared entry", () => {
+    assert.equal(rawGetShopCacheKey({ category: "abc123" }, {}), null);
+    assert.equal(rawGetShopCacheKey({ category: "abc123" }, { organizationId: "" }), null);
   });
 });

@@ -86,7 +86,7 @@ provision unilaterally.
   `lib/events.js`) was a confirmed gap in the old CLI-only script — it's
   now covered too.
   **[PREPARED, NOT DEPLOYED]** `vercel.json` now has a real `crons` entry
-  (`0 * * * *` — hourly — calling this exact endpoint), matching this
+  (`0 3 * * *` — daily at 03:00 UTC, the most often a Vercel Hobby account allows; use `0 * * * *` for hourly on a Pro plan — calling this exact endpoint), matching this
   project's actual hosting target (`.vercel/project.json` confirms this
   repo is already linked to a Vercel project). Vercel automatically sends
   `Authorization: Bearer $CRON_SECRET` on every Cron-triggered invocation

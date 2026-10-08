@@ -90,7 +90,7 @@ export default function Header({ initialDepartments = [] }) {
   // instead makes it survive the drawer closing and reopening.
   const [mobileCategoryPath, setMobileCategoryPath] = useState([]);
 
-  const shopName = settings?.store?.name || "TAHOS.";
+  const shopName = settings?.store?.name || "";
 
   const { data: cartData } = useGetCartQuery(undefined, { skip: !user });
   const { data: wlData } = useGetWishlistQuery(undefined, { skip: !user });
@@ -320,10 +320,10 @@ export default function Header({ initialDepartments = [] }) {
           </div>
         </div>
 
-        {/* Nav row — "All Categories" now sits at the far left on every
-            storefront page (not just /shop): the homepage's old always-
-            expanded CategorySidebar is gone, so this is the one category
-            entry point everywhere above the mobile drawer's own breakpoint.
+        {/* Nav row — "All Categories" sits at the far left on every storefront page except the home page, where
+            the always-open CategorySidebar beside the hero is the category list (showing the trigger there too
+            would be a second, redundant entry point). Everywhere else it is the one category entry point above
+            the mobile drawer's own breakpoint.
             A plain flex row (not the old 3-column grid built to keep the
             center nav mathematically centered around a page-dependent left
             column) — the nav links now sit immediately beside the trigger,
@@ -342,7 +342,7 @@ export default function Header({ initialDepartments = [] }) {
                   the mobile drawer's own category browser
                   (MobileCategoryDrawer), so showing this trigger too would
                   be a duplicate, redundant category entry point. */}
-              <HeaderCategoryMenu categories={allCategories} className="hidden lg:flex" />
+              {pathname !== "/" ? <HeaderCategoryMenu categories={allCategories} className="hidden lg:flex" /> : null}
             </div>
 
             <nav aria-label="Primary" className="flex h-11 items-center gap-5 text-[14.5px] font-medium">

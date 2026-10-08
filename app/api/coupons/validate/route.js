@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireUser } from "../../../../lib/auth.js";
 import { validateCoupon } from "../../../../services/couponService.js";
+import { quoteCoupon } from "../../../../services/orderService.js";
 import { withRoute } from "../../../../lib/http.js";
 import { enforceRateLimit } from "../../../../lib/rateLimit.js";
 import { COUPON_VALIDATE_USER_LIMIT, COUPON_VALIDATE_USER_WINDOW_MS } from "../../../../lib/rateLimitConfig.js";
@@ -18,7 +19,10 @@ export const POST = withRoute(async (request) => {
   // coupon-specific).
   await enforceRateLimit([{ identity: String(user._id), action: "coupon-validate:user", limit: COUPON_VALIDATE_USER_LIMIT, windowMs: COUPON_VALIDATE_USER_WINDOW_MS }]);
 
-  const { code, subtotal } = await parseJsonBody(request, validateCouponSchema);
-  const result = await validateCoupon(code, subtotal);
+  const { code, subtotal, items } = await parseJsonBody(request, validateCouponSchema);
+  // With the cart's items, the coupon is priced exactly as the order will be
+  // (category limits included); the subtotal-only form remains for callers
+  // that do not send items.
+  const result = items?.length ? await quoteCoupon(user._id, { code, items }) : await validateCoupon(code, subtotal);
   return NextResponse.json({ success: true, ...result });
 });

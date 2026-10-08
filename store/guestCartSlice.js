@@ -20,6 +20,9 @@ const snapshotProduct = (p) => ({
   images: p.images,
   basePrice: p.basePrice,
   discountPrice: p.discountPrice,
+  // Without it a Taka product in a guest bag reads as a still-USD one and its price is converted a second time
+  // (the server's own snapshot, services/cartService.js, keeps it).
+  priceCurrency: p.priceCurrency,
   brand: p.brand,
 });
 

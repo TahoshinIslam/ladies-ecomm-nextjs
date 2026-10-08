@@ -134,7 +134,7 @@ describe("Part B — services/userService.js forgotPassword(): injection is esca
 
   after(async () => {
     mock.reset();
-    await deleteRows("users", "id", user._id);
+    await deleteRows("customers", "id", user._id);
     await disconnectTestDb();
   });
 

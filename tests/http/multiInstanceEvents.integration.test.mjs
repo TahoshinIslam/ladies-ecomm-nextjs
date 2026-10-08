@@ -20,8 +20,11 @@
 //      redelivers it, and does deliver a later one.
 //   4. Duplicate replay (same Idempotency-Key) does not duplicate the
 //      underlying Event documents.
-//   5. A failed/rejected mutation (schema validation failure) emits no
+//   5. A failed/rejected mutation (a forbidden status change) emits no
 //      event at all.
+//
+// The admin order screens and API were removed from the storefront (the dashboard owns administration), so the requests that
+// change an order are the customer's own: cancel. Properties 1, 3 and 5 are driven through it.
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -45,7 +48,7 @@ async function countEvents({ channel, type, orderId }) {
     clauses.push("JSON_UNQUOTE(JSON_EXTRACT(payload, '$.orderId')) = ?");
     params.push(orderId);
   }
-  const rows = await rawQuery(`SELECT COUNT(*) AS n FROM events WHERE ${clauses.join(" AND ")}`, params);
+  const rows = await rawQuery(`SELECT COUNT(*) AS n FROM storefront_events WHERE ${clauses.join(" AND ")}`, params);
   return Number(rows[0].n);
 }
 
@@ -132,16 +135,13 @@ async function collectFramesUntil(response, predicate, timeoutMs = 8000) {
 }
 
 describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durable event outbox", { skip }, () => {
-  let admin, customer, product, order, adminAuth, customerAuth, Order, withTransaction;
+  let customer, product, order, customerAuth, Order, withTransaction, emitOrderEvent;
+  const extraOrders = [];
 
-  before(async () => {
-    ({ default: Order } = await import("../../models/orderModel.js"));
-    ({ withTransaction } = await import("../../lib/db/tx.js"));
-
-    admin = await createTestUser({ role: "admin" });
-    customer = await createTestUser({ role: "customer" });
-    product = await createTestProduct({ stock: 10 });
-    order = await withTransaction((conn) =>
+  // An order owned by `customer` in the given status. The admin order screens were removed from the storefront, so the only requests
+  // left that change an order — and emit its event — are the customer's own (cancel); the tests drive those.
+  const makeOrder = (status) =>
+    withTransaction((conn) =>
       Order.create(
         {
           user: customer._id,
@@ -149,28 +149,44 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
           shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" },
           subtotal: 1000,
           total: 1000,
-          status: "processing",
+          status,
           idempotencyKeyHash: crypto.randomBytes(16).toString("hex"),
           idempotencyRequestHash: crypto.randomBytes(16).toString("hex"),
         },
         conn,
       ),
     );
+  const cancelViaInstanceA = (orderId, auth = customerAuth) =>
+    fetch(`${BASE_A}/api/orders/${orderId}/cancel`, {
+      method: "POST",
+      headers: { cookie: auth.cookie, "content-type": "application/json", origin: BASE_A, "x-csrf-token": auth.csrf },
+      body: "{}",
+    });
 
-    adminAuth = await cookieHeaderFor(admin._id);
+  before(async () => {
+    ({ default: Order } = await import("../../models/orderModel.js"));
+    ({ withTransaction } = await import("../../lib/db/tx.js"));
+    ({ emitOrderEvent } = await import("../../lib/events.js"));
+
+    customer = await createTestUser({ role: "customer" });
+    product = await createTestProduct({ stock: 10 });
+    order = await makeOrder("processing");
     customerAuth = await cookieHeaderFor(customer._id);
   });
 
   after(async () => {
     if (dbConnectable) {
       if (order?._id) await deleteRows("orders", "id", order._id);
-      await rawQuery("DELETE FROM events");
+      for (const id of extraOrders) await deleteRows("orders", "id", id);
+      await rawQuery("DELETE FROM storefront_events");
       await disconnectTestDb();
     }
   });
 
   test("an event committed via a real request to INSTANCE A is delivered to a stream connected to INSTANCE B (cross-process proof)", async () => {
-    const streamRes = await fetch(`${BASE_B}/api/orders/${order._id}/events`, {
+    const fresh = await makeOrder("processing");
+    extraOrders.push(fresh._id);
+    const streamRes = await fetch(`${BASE_B}/api/orders/${fresh._id}/events`, {
       headers: { cookie: customerAuth.cookie },
     });
     assert.equal(streamRes.status, 200);
@@ -180,18 +196,14 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
     // The commit happens on INSTANCE A — a completely separate process
     // from the one instance B's stream is polling against. Only a
     // durable, shared record (not process memory) can bridge this.
-    const updateRes = await fetch(`${BASE_A}/api/orders/${order._id}/status`, {
-      method: "PUT",
-      headers: { cookie: adminAuth.cookie, "content-type": "application/json", origin: BASE_A, "x-csrf-token": adminAuth.csrf },
-      body: JSON.stringify({ status: "shipped" }),
-    });
-    assert.equal(updateRes.status, 200, "the status-update request to instance A must itself succeed");
+    const cancelRes = await cancelViaInstanceA(fresh._id);
+    assert.equal(cancelRes.status, 200, "the cancel request to instance A must itself succeed");
 
     const frames = await framesPromise;
     const statusFrame = frames.find((f) => f.event === "ORDER_STATUS_UPDATED");
     assert.ok(statusFrame, "instance B's stream must have received the ORDER_STATUS_UPDATED event committed via instance A");
     const payload = JSON.parse(statusFrame.data);
-    assert.equal(payload.status, "shipped");
+    assert.equal(payload.status, "cancelled");
     assert.ok(statusFrame.id, "the frame must carry an `id:` field for Last-Event-ID resume");
   });
 
@@ -208,21 +220,19 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
   });
 
   test("Last-Event-ID resume: reconnecting with a prior event's id never redelivers it, and does deliver a new one", async () => {
-    // Establish a fresh connection, capture one real event's id.
-    const firstRes = await fetch(`${BASE_B}/api/orders/${order._id}/events`, { headers: { cookie: customerAuth.cookie } });
+    const fresh = await makeOrder("processing");
+    extraOrders.push(fresh._id);
+    // Establish a fresh connection, capture one real event's id — committed by a real request to instance A.
+    const firstRes = await fetch(`${BASE_B}/api/orders/${fresh._id}/events`, { headers: { cookie: customerAuth.cookie } });
     const firstFramesPromise = collectFramesUntil(firstRes, (f) => f.event === "ORDER_STATUS_UPDATED");
-    await fetch(`${BASE_A}/api/orders/${order._id}/status`, {
-      method: "PUT",
-      headers: { cookie: adminAuth.cookie, "content-type": "application/json", origin: BASE_A, "x-csrf-token": adminAuth.csrf },
-      body: JSON.stringify({ status: "delivered" }),
-    });
+    assert.equal((await cancelViaInstanceA(fresh._id)).status, 200);
     const firstFrames = await firstFramesPromise;
     const firstEventFrame = firstFrames.find((f) => f.event === "ORDER_STATUS_UPDATED");
     assert.ok(firstEventFrame?.id);
 
     // Reconnect with that id as Last-Event-ID, with no new event yet —
     // must NOT redeliver the one we already saw.
-    const resumeRes = await fetch(`${BASE_B}/api/orders/${order._id}/events`, {
+    const resumeRes = await fetch(`${BASE_B}/api/orders/${fresh._id}/events`, {
       headers: { cookie: customerAuth.cookie, "last-event-id": firstEventFrame.id },
     });
     const resumeFramesPromise = collectFramesUntil(resumeRes, (f) => f.event === "ORDER_STATUS_UPDATED", 3000);
@@ -232,18 +242,14 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
       "a resumed connection must never redeliver an event at or before Last-Event-ID",
     );
 
-    // Now commit a genuinely new status change and confirm THIS resumed
-    // connection (still open, from the same reconnect) still gets it —
-    // re-open since the prior collect call already consumed/cancelled it.
-    const secondRes = await fetch(`${BASE_B}/api/orders/${order._id}/events`, {
+    // A genuinely new event. An order can only be cancelled once, so this one is written to the shared outbox directly from the test
+    // process (a third process) — exactly what a later status change from another instance would leave there. Instance B's stream
+    // must still deliver it to a connection that resumed from the first event's id.
+    const secondRes = await fetch(`${BASE_B}/api/orders/${fresh._id}/events`, {
       headers: { cookie: customerAuth.cookie, "last-event-id": firstEventFrame.id },
     });
     const secondFramesPromise = collectFramesUntil(secondRes, (f) => f.event === "ORDER_STATUS_UPDATED");
-    await fetch(`${BASE_A}/api/orders/${order._id}/status`, {
-      method: "PUT",
-      headers: { cookie: adminAuth.cookie, "content-type": "application/json", origin: BASE_A, "x-csrf-token": adminAuth.csrf },
-      body: JSON.stringify({ status: "refunded" }), // valid transition from "delivered" (see services/orderService.js's ORDER_STATUS_TRANSITIONS)
-    });
+    await withTransaction((conn) => emitOrderEvent(fresh._id.toString(), { orderId: fresh._id.toString(), status: "refunded" }, { session: conn }));
     const secondFrames = await secondFramesPromise;
     const secondEventFrame = secondFrames.find((f) => f.event === "ORDER_STATUS_UPDATED");
     assert.ok(secondEventFrame, "a resumed connection must still deliver a genuinely new event");
@@ -289,17 +295,16 @@ describe("Phase 11 (MANDATORY) — cross-process realtime delivery via the durab
     await deleteRows("orders", "id", newOrderId);
   });
 
-  test("a rejected mutation (schema validation failure) emits no event at all", async () => {
-    const beforeCount = await countEvents({ channel: `order:${order._id}` });
+  test("a rejected mutation (a forbidden status change) emits no event at all", async () => {
+    // A delivered order cannot be cancelled: the transition is refused before anything is written.
+    const done = await makeOrder("delivered");
+    extraOrders.push(done._id);
+    const beforeCount = await countEvents({ channel: `order:${done._id}` });
 
-    const res = await fetch(`${BASE_A}/api/orders/${order._id}/status`, {
-      method: "PUT",
-      headers: { cookie: adminAuth.cookie, "content-type": "application/json", origin: BASE_A, "x-csrf-token": adminAuth.csrf },
-      body: JSON.stringify({ status: "not-a-real-status" }),
-    });
-    assert.equal(res.status, 400, "an invalid status value must be rejected before any event is emitted");
+    const res = await cancelViaInstanceA(done._id);
+    assert.ok(res.status >= 400 && res.status < 500, `a forbidden cancel must be refused with a client error (got ${res.status})`);
 
-    const afterCount = await countEvents({ channel: `order:${order._id}` });
+    const afterCount = await countEvents({ channel: `order:${done._id}` });
     assert.equal(afterCount, beforeCount, "a rejected mutation must never write an Event document");
   });
 });

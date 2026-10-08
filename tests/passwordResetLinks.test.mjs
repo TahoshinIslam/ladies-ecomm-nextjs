@@ -84,7 +84,7 @@ describe("services/userService.js forgotPassword() — reset link construction a
       await forgotPassword(user.email);
       return extractLink(sentMail.html);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   }
 
@@ -123,7 +123,7 @@ describe("services/userService.js forgotPassword() — reset link construction a
         assert.deepEqual(res, { message: "If that email exists, a link has been sent." });
         assert.equal(sentMail, undefined, "no email may be sent when the origin is rejected");
       } finally {
-        await deleteRows("users", "id", user._id);
+        await deleteRows("customers", "id", user._id);
       }
     } finally {
       process.env.NODE_ENV = "test";
@@ -147,7 +147,7 @@ describe("services/userService.js forgotPassword() — reset link construction a
         assert.deepEqual(res, { message: "If that email exists, a link has been sent." }, "the public response must be identical to the happy path");
         assert.equal(sentMail, undefined, "no email may be sent when the origin is invalid");
       } finally {
-        await deleteRows("users", "id", user._id);
+        await deleteRows("customers", "id", user._id);
       }
     });
   }
@@ -168,7 +168,7 @@ describe("services/userService.js forgotPassword() — reset link construction a
       const nonexistentRes = await triggerReset("definitely-not-registered-anywhere@example.invalid");
       assert.deepEqual(existingRes, nonexistentRes);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 
@@ -181,7 +181,7 @@ describe("services/userService.js forgotPassword() — reset link construction a
       assert.deepEqual(existingRes, nonexistentRes, "a broken CLIENT_URL must not distinguish real accounts from fake ones via a thrown error");
       assert.equal(sentMail, undefined);
     } finally {
-      await deleteRows("users", "id", user._id);
+      await deleteRows("customers", "id", user._id);
     }
   });
 });

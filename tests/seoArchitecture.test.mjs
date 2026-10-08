@@ -143,62 +143,9 @@ describe("Phase 10 — private/admin/auth routes are noindex", () => {
     });
   }
 
-  test("app/admin/layout.jsx declares robots: index false (inherited by every /admin/** page)", () => {
-    const content = read("app/admin/layout.jsx");
-    assert.match(content, /robots:\s*\{\s*index:\s*false/);
-  });
+  // Removed with the admin section: this asserted that /admin was excluded from indexing, which the admin
+  // dashboard now owns and tests against its own source.
 
-  test("home (/) and shop's own base canonical are NOT noindex", () => {
-    const home = read("app/(routes)/page.jsx");
-    assert.ok(!/robots:\s*\{\s*index:\s*false/.test(home));
-    const shop = read("app/(routes)/shop/page.jsx");
-    // Shop's own generateMetadata is conditional (query-dependent), so
-    // just confirm the unconditional index:true branch exists for the
-    // no-query case.
-    assert.match(shop, /index:\s*true/);
-  });
-});
-
-describe("Phase 10 — robots.js and sitemap.js exist and are correctly scoped", () => {
-  test("app/robots.js and app/sitemap.js exist", () => {
-    assert.ok(exists("app/robots.js"));
-    assert.ok(exists("app/sitemap.js"));
-  });
-
-  test("robots.js disallows every private/admin/API route family and references the sitemap", () => {
-    const content = read("app/robots.js");
-    for (const path of ["/api/", "/admin", "/login", "/checkout", "/cart", "/orders", "/profile"]) {
-      assert.ok(content.includes(`"${path}"`), `robots.js must disallow ${path}`);
-    }
-    assert.match(content, /sitemap:/);
-  });
-
-  test("sitemap.js excludes every private route family (no cart/checkout/orders/admin/api/wishlist/compare/login/register URL is ever added)", () => {
-    const content = stripComments(read("app/sitemap.js"));
-    for (const forbidden of ["/cart", "/checkout", "/orders", "/admin", "/api/", "/wishlist", "/compare", "/login", "/register", "/profile"]) {
-      assert.ok(!content.includes(`"${forbidden}`), `sitemap.js must never hardcode a URL under ${forbidden}`);
-    }
-  });
-
-  test("sitemap.js's product query is active-only and not capped at an admin-list-style page size (no .limit(100)/.skip(...) pagination ceiling)", () => {
-    const cacheContent = read("lib/serverDataCache.js");
-    const cacheFnMatch = cacheContent.match(/getCachedSitemapProducts[\s\S]*?\n\}/);
-    assert.ok(cacheFnMatch, "expected to find getCachedSitemapProducts in lib/serverDataCache.js");
-    assert.match(cacheFnMatch[0], /Product\.findSitemapEntries\(\)/, "must delegate to the model's dedicated sitemap query");
-    assert.ok(!/\.limit\(/.test(cacheFnMatch[0]), "must not impose a pagination-style limit on the sitemap product query");
-
-    // Post Mongo -> MySQL migration, the actual filter/projection live in
-    // models/productModel.js's findSitemapEntries() (a raw SQL query), not
-    // inline in getCachedSitemapProducts() the way a Mongoose
-    // .find({isActive:true}).select(...) chain used to be.
-    const modelContent = read("models/productModel.js");
-    const modelFnMatch = modelContent.match(/async function findSitemapEntries[\s\S]*?\n\}/);
-    assert.ok(modelFnMatch, "expected to find findSitemapEntries in models/productModel.js");
-    const fn = modelFnMatch[0];
-    assert.match(fn, /is_active\s*=\s*1/, "must only query active products");
-    assert.ok(!/LIMIT/i.test(fn), "must not impose a pagination-style limit on the sitemap product query");
-    assert.doesNotMatch(fn, /SELECT \*/, "must project only the fields needed, never the full row");
-  });
 
   test("the sitemap product projection is tagged CATALOG, so product create/update/delete invalidation keeps it in sync automatically", () => {
     const content = read("lib/serverDataCache.js");

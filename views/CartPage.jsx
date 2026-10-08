@@ -11,6 +11,7 @@ import EmptyState from "@/components/ui/EmptyState.jsx";
 import Skeleton from "@/components/ui/Skeleton.jsx";
 import Breadcrumb from "@/components/ui/Breadcrumb.jsx";
 import { useCart } from "@/hooks/useCart.js";
+import { useCartCheck } from "@/hooks/useCartCheck.js";
 import { useSettings } from "@/context/SettingsContext.jsx";
 import { useLocale } from "@/context/LocaleProvider.jsx";
 import { resolveImage, resolveVariantPricing, formatVariantAttributes } from "@/lib/utils.js";
@@ -20,6 +21,7 @@ export default function CartPage() {
   const { t, locale } = useLocale();
   const cart = useCart();
   const { items, isLoading } = cart;
+  const availability = useCartCheck(items);
   const [pending, setPending] = useState(() => new Set());
 
   const keyOf = (productId, variantId) => `${productId}-${variantId}`;
@@ -47,8 +49,16 @@ export default function CartPage() {
   // displayPrice values first and converting the total once would silently
   // mis-convert a mixed cart (a BDT item's value would be multiplied by
   // the exchange rate a second time).
+  // When the quantity in the bag is taken from batches that sell at different prices, the server says so
+  // (`segments`, with the line's total) — that total is what checkout will charge, so it is the one shown.
+  const batchLine = (i) => {
+    const r = i.product ? availability.resultFor(i.product._id, i.variantId) : null;
+    return r && typeof r.lineTotal === "number" && r.segments?.length ? r : null;
+  };
   const subtotal = items.reduce((sum, i) => {
     if (!i.product) return sum;
+    const priced = batchLine(i);
+    if (priced) return sum + priced.lineTotal;
     const { displayPrice, currency } = resolveVariantPricing(i.product, i.variant);
     return sum + settings.toBdt(displayPrice, currency) * i.quantity;
   }, 0);
@@ -106,6 +116,12 @@ export default function CartPage() {
             <span className="text-right">{t("cart.colTotal")}</span>
             <span />
           </div>
+          {availability.blocking ? (
+            <div role="alert" data-cart-banner className="mb-4 mt-4 rounded-xl border border-verm/40 bg-verm/5 px-4 py-3 text-[13.5px] text-ink">
+              <strong className="font-semibold">Some items in your bag have changed.</strong>{" "}
+              Our online store&apos;s range or stock has been updated since you added them. Review the items marked below — remove them or lower the quantity — then continue to checkout.
+            </div>
+          ) : null}
           <ul>
           {items.map((item) => {
             const p = item.product;
@@ -115,6 +131,9 @@ export default function CartPage() {
             const busy = pending.has(keyOf(id, variantId));
             const { displayPrice, currency } = resolveVariantPricing(p, item.variant);
             const variantLine = formatVariantAttributes(item.variant?.attributes, locale);
+            const status = availability.resultFor(id, variantId);
+            const batched = batchLine(item);
+            const lineValue = batched ? settings.formatPrice(batched.lineTotal, "BDT") : settings.formatPrice(displayPrice * item.quantity, currency);
 
             return (
               <li
@@ -152,6 +171,18 @@ export default function CartPage() {
                     {p.name}
                   </Link>
                   {variantLine && <div className="mt-1 text-[13.5px] text-stone">{variantLine}</div>}
+                  {batched && batched.segments.length > 1 ? (
+                    <p data-price-breakdown className="mt-1.5 text-[13px] text-stone">
+                      {batched.segments.map((g, n) => (
+                        <span key={n}>{n > 0 ? " + " : ""}{g.quantity} × {settings.formatPrice(g.unitPrice, "BDT")}</span>
+                      ))}
+                    </p>
+                  ) : null}
+                  {status && status.status !== "ok" ? (
+                    <p role="alert" data-cart-notice={status.status} className="mt-2 text-[13px] font-medium text-verm">
+                      {status.message}
+                    </p>
+                  ) : null}
                   {/* Mobile only: price/qty/remove inline under the name — the
                       grid columns above (sm+) render these as their own cells. */}
                   <div className="mt-3 flex items-center justify-between gap-3 sm:hidden">
@@ -174,7 +205,7 @@ export default function CartPage() {
                       increaseLabel={t("product.increaseQuantity")}
                     />
                     <div data-tabular className="text-[15.5px] font-semibold">
-                      {settings.formatPrice(displayPrice * item.quantity, currency)}
+                      {lineValue}
                     </div>
                   </div>
                   <button
@@ -212,7 +243,7 @@ export default function CartPage() {
                   />
                 </div>
                 <div data-tabular className="hidden text-right text-[15.5px] font-semibold sm:block">
-                  {settings.formatPrice(displayPrice * item.quantity, currency)}
+                  {lineValue}
                 </div>
                 <button
                   type="button"
@@ -257,11 +288,20 @@ export default function CartPage() {
           </div>
           <p className="mt-1.5 text-[12.5px] text-stone">{t("cart.taxAndDeliveryNote")}</p>
 
-          <Link href="/checkout" className="mt-5 block">
-            <Button variant="accent" size="xl" className="w-full">
-              {t("checkout.title")}
-            </Button>
-          </Link>
+          {availability.blocking ? (
+            <div className="mt-5">
+              <Button variant="accent" size="xl" className="w-full" disabled aria-disabled="true">
+                {t("checkout.title")}
+              </Button>
+              <p className="mt-2 text-[12.5px] text-stone">Fix the items marked above to continue.</p>
+            </div>
+          ) : (
+            <Link href="/checkout" className="mt-5 block">
+              <Button variant="accent" size="xl" className="w-full">
+                {t("checkout.title")}
+              </Button>
+            </Link>
+          )}
           <Link href="/shop" className="mt-2.5 block">
             <Button variant="ghost" size="lg" className="w-full text-stone">
               {t("cart.continueShopping")}

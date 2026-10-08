@@ -5,6 +5,7 @@ import { requireCronSecret } from "../../../../../lib/cronAuth.js";
 import { runExpiryCleanup } from "../../../../../lib/expiryCleanup.js";
 import { HttpError } from "../../../../../lib/http.js";
 import { logEvent } from "../../../../../lib/logger.js";
+import { getOrganizationId } from "../../../../../lib/tenant.js";
 
 // Confirmed audit gap, closed: scripts/cleanupExpired.mjs's batched,
 // idempotent expiry sweep (sessions/rate_limit_counters/events) existed
@@ -37,7 +38,7 @@ export async function GET(request) {
   try {
     requireCronSecret(request);
     await connectDB();
-    const { deleted, total } = await runExpiryCleanup(query);
+    const { deleted, total } = await runExpiryCleanup(query, getOrganizationId());
 
     // Structured, secret-free — matches every other route's logging
     // discipline (see lib/logger.js's strict field allowlist): a single

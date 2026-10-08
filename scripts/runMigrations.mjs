@@ -6,7 +6,14 @@
 // existing tables" — it doesn't; MySQL simply no-ops the whole statement
 // if the table is already there, constraint changes and all).
 //
-// Tracks applied migrations in a `schema_migrations` table (id, applied_at)
+// Tracks applied migrations in a `storefront_migrations` table
+// (id, description, applied_at).
+//
+// Not `schema_migrations`: the admin dashboard shares this database and
+// already owns a table by that name, with different columns (name,
+// applied_at, duration_ms). Pointed here, the CREATE TABLE IF NOT EXISTS
+// below would find itself satisfied by the dashboard's table and every
+// lookup would then fail on its missing `id` column.
 // so this script is safe to run repeatedly and only ever applies each
 // migration once, in order. Each migration module in scripts/migrations/
 // exports { id, description, up(conn) }. A migration that cannot safely
@@ -22,7 +29,7 @@ import { checkTestDbConfig, KNOWN_NON_TEST_DB_NAMES } from "../lib/testDbSafety.
 
 async function ensureMigrationsTable(conn) {
   await conn.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS storefront_migrations (
       id VARCHAR(64) PRIMARY KEY,
       description VARCHAR(255) NOT NULL,
       applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
@@ -31,7 +38,7 @@ async function ensureMigrationsTable(conn) {
 }
 
 async function alreadyApplied(conn, id) {
-  const [rows] = await conn.query("SELECT id FROM schema_migrations WHERE id = ?", [id]);
+  const [rows] = await conn.query("SELECT id FROM storefront_migrations WHERE id = ?", [id]);
   return rows.length > 0;
 }
 
@@ -76,7 +83,7 @@ async function main() {
       }
       console.log(`[run]  ${migration.id} — ${migration.description}`);
       await migration.up(conn);
-      await conn.query("INSERT INTO schema_migrations (id, description) VALUES (?, ?)", [migration.id, migration.description]);
+      await conn.query("INSERT INTO storefront_migrations (id, description) VALUES (?, ?)", [migration.id, migration.description]);
       console.log(`[done] ${migration.id}`);
     }
   });

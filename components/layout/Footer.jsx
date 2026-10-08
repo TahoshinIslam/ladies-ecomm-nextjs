@@ -38,7 +38,7 @@ export default function Footer({ initialDepartments = [] }) {
   const year = new Date().getFullYear();
   const { data: catsData } = useGetCategoriesQuery();
   const departments = (catsData?.categories ?? initialDepartments).filter((c) => !c.parent);
-  const shopName = settings?.store?.name || "TAHOS.";
+  const shopName = settings?.store?.name || "";
 
   const shopColumn = {
     heading: t("footer.shop"),

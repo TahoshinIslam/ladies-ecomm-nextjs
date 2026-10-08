@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { getSessionUser, requirePermission } from "../../../lib/auth.js";
-import { PERMISSIONS } from "../../../lib/permissions.js";
-import { createAttribute } from "../../../services/attributeService.js";
 import { withRoute } from "../../../lib/http.js";
 import { getServerLocale } from "../../../lib/i18n/server.js";
 import { localizeAttributeDefinitionList } from "../../../lib/i18n/localize.js";
-import { parseJsonBody, requireObjectIdFormat } from "../../../lib/validation.js";
-import { createAttributeSchema } from "../../../schemas/catalogSchemas.js";
-import { invalidateCacheTags } from "../../../lib/cacheInvalidation.js";
-import { CACHE_TAGS } from "../../../lib/cacheTags.js";
+import { requireObjectIdFormat } from "../../../lib/validation.js";
+
 import { getCachedAllAttributes, getCachedAttributesForCategory } from "../../../lib/serverDataCache.js";
 
 // GET /api/attributes           -> full raw list (Attributes admin page —
@@ -35,21 +30,16 @@ export const GET = withRoute(async (request) => {
     return NextResponse.json({ attributes });
   }
   requireObjectIdFormat(category, "category");
-  const user = await getSessionUser(request).catch(() => null);
-  const isAdmin = user?.role === "admin";
   const [attributes, locale] = await Promise.all([
     getCachedAttributesForCategory(category),
     getServerLocale(),
   ]);
   return NextResponse.json({
-    attributes: isAdmin ? attributes : localizeAttributeDefinitionList(attributes, locale),
+    attributes: localizeAttributeDefinitionList(attributes, locale),
   });
 });
 
-export const POST = withRoute(async (request) => {
-  await requirePermission(request, PERMISSIONS.CATEGORIES_MANAGE);
-  const body = await parseJsonBody(request, createAttributeSchema);
-  const attribute = await createAttribute(body);
-  invalidateCacheTags([CACHE_TAGS.ATTRIBUTES, CACHE_TAGS.CATALOG]);
-  return NextResponse.json({ success: true, attribute }, { status: 201 });
-});
+// The staff-gated handler that used to live here (POST) went with the
+// admin section: creating and editing the catalog is the dashboard's job now,
+// and it writes an audit trail this app never did. The public handler above
+// remains what the storefront actually needs.

@@ -18,6 +18,12 @@
 
 import crypto from "node:crypto";
 
+// Fixtures belong to the organization scripts/setupTestDb.mjs created, which
+// is also what STORE_ORGANIZATION_ID names in .env.test. Read from the
+// environment rather than hard-coded so the two cannot drift apart: the app
+// code under test resolves the same value through lib/tenant.js.
+export const testOrganizationId = () => process.env.STORE_ORGANIZATION_ID;
+
 const TEST_DB_NAME_PATTERN = /(_test|_ci)$/i;
 
 export const dbReady =
@@ -89,20 +95,99 @@ export async function rawQuery(sql, params) {
 }
 
 // Truncates every table this test suite writes to, in an order that
-// respects the schema's ON DELETE CASCADE relationships (see
-// sql/schema.sql) — a parent truncated first would otherwise leave FK
-// errors on the child tables that still reference rows about to vanish.
-// Called by individual test files' own before()/after() blocks (not
-// automatically) so each file controls exactly when its data resets;
-// dbReady/connectTestDb() already refuse to run this against anything
-// that isn't clearly a test database.
+// respects the schema's ON DELETE CASCADE relationships — a parent
+// truncated first would otherwise leave FK errors on the child tables that
+// still reference rows about to vanish. Called by individual test files'
+// own before()/after() blocks (not automatically) so each file controls
+// exactly when its data resets; dbReady/connectTestDb() already refuse to
+// run this against anything that isn't clearly a test database.
+//
+// Four of these were renamed when the storefront moved onto the shared
+// schema: users -> customers, sessions -> customer_sessions,
+// themes -> storefront_themes, events -> storefront_events.
+//
+// `organizations` and `branches` are deliberately NOT here. They are not
+// fixture data — they are the tenant every fixture hangs off, created once
+// by scripts/setupTestDb.mjs. Truncating them would take every fixture with
+// them by cascade and leave the next test inserting rows whose
+// organization_id references nothing.
 const TRUNCATE_ORDER = [
+  // Inventory (ecom_erp migrations 064–065). TRUNCATE does not fire the
+  // ledger's append-only DELETE trigger, which is what lets tests reset it.
+  // Quantities live on receipt batches (ecom_erp migrations 087–090); stock_levels is their projection.
+  "stock_batch_allocations", "stock_batch_price_changes", "stock_transfer_line_batches", "stock_batch_levels", "stock_batches",
+  "online_price_versions", "stock_lot_events", "stock_lots",
+  "stock_reservations", "stock_movements", "stock_levels",
+  "customer_return_lines", "customer_returns", "supplier_return_lines", "supplier_returns",
+  "stock_receipt_lines", "stock_receipts", "purchase_order_lines", "purchase_orders",
+  "stock_adjustment_lines", "stock_adjustments", "stock_count_lines", "stock_counts",
+  "stock_transfer_lines", "stock_transfers", "suppliers", "document_sequences",
+  "inventory_settings", "stock_locations",
   "order_items", "orders", "cart_items", "carts", "coupon_usages", "coupon_categories", "coupons",
-  "payments", "wishlist_items", "wishlists", "notifications", "reviews", "addresses", "sessions",
-  "rate_limit_counters", "events", "deleted_products", "product_attributes", "product_variants", "products",
+  "payments", "wishlist_items", "wishlists", "notifications", "reviews", "review_helpful_votes",
+  "addresses", "customer_sessions", "rate_limit_counters", "storefront_events", "deleted_products",
+  "product_attributes", "product_variants", "products",
   "attribute_definition_options", "attribute_definition_label_overrides", "attribute_definition_categories",
-  "attribute_definitions", "brands", "categories", "promotions", "themes", "users",
+  "attribute_definitions", "brands", "categories", "promotions", "storefront_themes", "store_settings",
+  "customers",
 ];
+
+/**
+ * Put stock on a shelf the way the dashboard's receiving does: a receipt BATCH (with its own selling price and
+ * cost) and its sellable level at the location. `stock_levels` follows by trigger; nothing writes it here.
+ * `lot` ({ id, expiryDate? }) puts the batch in a lot — made if it does not exist yet. Returns the batch id.
+ */
+export async function seedBatch({ location, variantId, productId, quantity, price = null, cost = null, lot = null, receivedAt = null }) {
+  if (!dbReady) throw new Error(skipReason);
+  const { query } = await import("../../config/db.js");
+  const org = testOrganizationId();
+  const id = `bat_t${crypto.randomBytes(7).toString("hex")}`;
+  let sellingPrice = price;
+  if (sellingPrice == null) {
+    const [row] = await query(
+      "SELECT COALESCE(pv.price, p.base_price) AS price FROM product_variants pv JOIN products p ON p.id = pv.product_id AND p.organization_id = pv.organization_id WHERE pv.organization_id = ? AND pv.id = ?",
+      [org, variantId],
+    );
+    sellingPrice = Number(row?.price ?? 0);
+  }
+  let lotId = null;
+  if (lot) {
+    lotId = lot.id;
+    const [exists] = await query("SELECT id FROM stock_lots WHERE organization_id = ? AND id = ?", [org, lotId]);
+    if (!exists) {
+      await query(
+        "INSERT INTO stock_lots (id, organization_id, variant_id, product_id, lot_ref, expiry_date) VALUES (?, ?, ?, ?, ?, ?)",
+        [lotId, org, variantId, productId, lot.ref ?? lotId.slice(-8), lot.expiryDate ?? null],
+      );
+    }
+  }
+  await query(
+    `INSERT INTO stock_batches
+       (id, organization_id, variant_id, product_id, origin, source_type, source_id, lot_id, received_at, unit_cost, cost_source, selling_price, price_source, quantity_received, created_by_name)
+     VALUES (?, ?, ?, ?, 'receipt', 'test', ?, ?, COALESCE(?, NOW(3)), ?, ?, ?, 'entered', ?, 'test')`,
+    [id, org, variantId, productId, id, lotId, receivedAt, cost, cost == null ? "unknown" : "entered", sellingPrice, quantity],
+  );
+  await query(
+    "INSERT INTO stock_batch_levels (organization_id, location_id, batch_id, item_condition, variant_id, product_id, quantity, reserved) VALUES (?, ?, ?, 'sellable', ?, ?, ?, 0)",
+    [org, location, id, variantId, productId, quantity],
+  );
+  return id;
+}
+
+/** Remove every batch, level and reservation of a variant — a test starting that variant from nothing. */
+export async function clearVariantStock(variantId) {
+  if (!dbReady) throw new Error(skipReason);
+  const { query } = await import("../../config/db.js");
+  const org = testOrganizationId();
+  await query("SET FOREIGN_KEY_CHECKS = 0");
+  try {
+    for (const table of ["stock_batch_allocations", "stock_batch_levels", "stock_batches", "stock_levels"]) {
+      await query(`DELETE FROM ${table} WHERE organization_id = ? AND variant_id = ?`, [org, variantId]);
+    }
+  } finally {
+    await query("SET FOREIGN_KEY_CHECKS = 1");
+  }
+}
 
 export async function truncateAll() {
   if (!dbReady) throw new Error(skipReason);
@@ -198,15 +283,26 @@ export function requestAs({
 
 const unique = () => crypto.randomBytes(6).toString("hex");
 
-export async function createTestUser({ role = "customer", permissions = [] } = {}) {
+/**
+ * A shopper.
+ *
+ * `role` and `permissions` are still accepted and ignored. They were columns
+ * on the old `users` table; `customers` has neither, because a shopper has
+ * no role and staff are not in this table at all — they are the dashboard's
+ * accounts. Callers that pass `{ role: "employee" }` therefore get a plain
+ * customer, which is the honest result: this app can no longer create a
+ * staff member. The parameters stay so those call sites keep saying what
+ * they meant while they are being retired.
+ */
+export async function createTestUser({ role, permissions } = {}) {
+  void role;
+  void permissions;
   const { default: User } = await import("../../models/userModel.js");
   const suffix = unique();
   const user = await User.create({
     name: `Test User ${suffix}`,
     email: `test-${suffix}@example.invalid`,
     password: "TestPassword123!",
-    role,
-    permissions,
     isVerified: true,
   });
   return user;
@@ -220,6 +316,11 @@ export async function createTestCategory() {
 
 export async function createTestProduct({ stock = 10, basePrice = 1000 } = {}) {
   const { default: Product } = await import("../../models/productModel.js");
+  // The website offers nothing until the store has a dedicated online warehouse (ecom_erp migration 108): a store with
+  // none yet gets one — the fixture default — before its first product, so a fresh product is visible to the shop.
+  const { ensureDefaultLocation } = await import("../../models/inventoryModel.js");
+  const { withTransaction } = await import("../../lib/db/tx.js");
+  await withTransaction((conn) => ensureDefaultLocation(conn));
   const category = await createTestCategory();
   const suffix = unique();
   return Product.create({

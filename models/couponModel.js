@@ -1,5 +1,6 @@
 import { query, withConnection } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
+import { getOrganizationId } from "../lib/tenant.js";
 
 function rowToCoupon(row, categories) {
   if (!row) return null;
@@ -32,36 +33,53 @@ function rowToCoupon(row, categories) {
 }
 
 async function loadCategories(couponId) {
-  const rows = await query("SELECT category_id FROM coupon_categories WHERE coupon_id = ?", [couponId]);
+  const rows = await query(
+    "SELECT category_id FROM coupon_categories WHERE organization_id = ? AND coupon_id = ?",
+    [getOrganizationId(), couponId],
+  );
   return rows.map((r) => r.category_id);
 }
 
 async function findById(id) {
   if (!id) return null;
-  const rows = await query("SELECT * FROM coupons WHERE id = ?", [id]);
+  const rows = await query(
+    "SELECT * FROM coupons WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   if (!rows.length) return null;
   return rowToCoupon(rows[0], await loadCategories(id));
 }
 
 async function findByCode(code) {
-  const rows = await query("SELECT * FROM coupons WHERE code = ?", [String(code || "").toUpperCase()]);
+  const rows = await query(
+    "SELECT * FROM coupons WHERE organization_id = ? AND code = ? AND deleted_at IS NULL",
+    [getOrganizationId(), String(code || "").toUpperCase()],
+  );
   if (!rows.length) return null;
   return rowToCoupon(rows[0], await loadCategories(rows[0].id));
 }
 
 /** `conn`-aware variant for use inside services/orderService.js's transaction. */
 async function findByCodeActive(code, conn) {
-  const sql = "SELECT * FROM coupons WHERE code = ? AND is_active = 1";
-  const params = [String(code || "").toUpperCase()];
+  const sql =
+    "SELECT * FROM coupons WHERE organization_id = ? AND code = ? AND is_active = 1 AND deleted_at IS NULL";
+  const params = [getOrganizationId(), String(code || "").toUpperCase()];
   const rows = conn ? (await conn.query(sql, params))[0] : await query(sql, params);
   if (!rows.length) return null;
   return rowToCoupon(rows[0], await loadCategories(rows[0].id));
 }
 
 async function writeCategories(conn, couponId, categoryIds) {
-  await conn.query("DELETE FROM coupon_categories WHERE coupon_id = ?", [couponId]);
+  const organizationId = getOrganizationId();
+  await conn.query("DELETE FROM coupon_categories WHERE organization_id = ? AND coupon_id = ?", [
+    organizationId,
+    couponId,
+  ]);
   for (const categoryId of categoryIds || []) {
-    await conn.query("INSERT IGNORE INTO coupon_categories (coupon_id, category_id) VALUES (?, ?)", [couponId, categoryId]);
+    await conn.query(
+      "INSERT IGNORE INTO coupon_categories (organization_id, coupon_id, category_id) VALUES (?, ?, ?)",
+      [organizationId, couponId, categoryId],
+    );
   }
 }
 
@@ -69,10 +87,12 @@ async function create(data) {
   const id = generateObjectId();
   await withConnection(async (conn) => {
     await conn.query(
-      `INSERT INTO coupons (id, code, discount_type, discount_value, min_order_amount, max_discount, usage_limit, used_count, per_user_limit, expires_at, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO coupons (id, organization_id, code, discount_type, discount_value, min_order_amount, max_discount,
+         usage_limit, used_count, per_user_limit, expires_at, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
+        getOrganizationId(),
         String(data.code).toUpperCase(),
         data.discountType,
         data.discountValue,
@@ -102,7 +122,8 @@ async function update(id, data) {
   await withConnection(async (conn) => {
     await conn.query(
       `UPDATE coupons SET code=?, discount_type=?, discount_value=?, min_order_amount=?, max_discount=?,
-         usage_limit=?, per_user_limit=?, expires_at=?, is_active=? WHERE id=?`,
+         usage_limit=?, per_user_limit=?, expires_at=?, is_active=?
+        WHERE organization_id=? AND id=?`,
       [
         String(merged.code).toUpperCase(),
         merged.discountType,
@@ -113,6 +134,7 @@ async function update(id, data) {
         merged.perUserLimit ?? 1,
         merged.expiresAt,
         merged.isActive === false ? 0 : 1,
+        getOrganizationId(),
         id,
       ],
     );
@@ -122,7 +144,12 @@ async function update(id, data) {
 }
 
 async function deleteById(id) {
-  const result = await query("DELETE FROM coupons WHERE id = ?", [id]);
+  // Soft delete, as the dashboard does — a coupon still referenced by an
+  // order's `coupon_id` must remain resolvable after it is withdrawn.
+  const result = await query(
+    "UPDATE coupons SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
+    [getOrganizationId(), id],
+  );
   return result.affectedRows > 0;
 }
 
@@ -157,31 +184,42 @@ async function findAdminList({ search, status, sortBy, sortOrder, skip, limit })
   const { where, params } = buildAdminWhere({ search, status });
   const sortCol = SORT_COLUMNS[sortBy] || "created_at";
   const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
+  const filters = where === "1=1" ? "" : `AND ${where}`;
   const rows = await query(
-    `SELECT * FROM coupons WHERE ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
-    [...params, Number(limit), Number(skip)],
+    `SELECT * FROM coupons
+      WHERE organization_id = ? AND deleted_at IS NULL ${filters}
+      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
+    [getOrganizationId(), ...params, Number(limit), Number(skip)],
   );
   return Promise.all(rows.map(async (r) => rowToCoupon(r, await loadCategories(r.id))));
 }
 
 async function countAdminList({ search, status }) {
   const { where, params } = buildAdminWhere({ search, status });
-  const rows = await query(`SELECT COUNT(*) AS n FROM coupons WHERE ${where}`, params);
+  const filters = where === "1=1" ? "" : `AND ${where}`;
+  const rows = await query(
+    `SELECT COUNT(*) AS n FROM coupons WHERE organization_id = ? AND deleted_at IS NULL ${filters}`,
+    [getOrganizationId(), ...params],
+  );
   return rows[0].n;
 }
 
 /** Atomic, guarded global-usage claim inside an order-creation transaction — mirrors the old guarded $inc with a usageLimit re-check at write time. */
 async function claimGlobalUsage(conn, couponId) {
   const [result] = await conn.query(
-    "UPDATE coupons SET used_count = used_count + 1 WHERE id = ? AND (usage_limit IS NULL OR used_count < usage_limit)",
-    [couponId],
+    `UPDATE coupons SET used_count = used_count + 1
+      WHERE organization_id = ? AND id = ? AND (usage_limit IS NULL OR used_count < usage_limit)`,
+    [getOrganizationId(), couponId],
   );
   return result.affectedRows === 1;
 }
 
 /** Reverses claimGlobalUsage() on order cancellation. */
 async function restoreGlobalUsage(conn, couponId) {
-  await conn.query("UPDATE coupons SET used_count = used_count - 1 WHERE id = ? AND used_count > 0", [couponId]);
+  await conn.query(
+    "UPDATE coupons SET used_count = used_count - 1 WHERE organization_id = ? AND id = ? AND used_count > 0",
+    [getOrganizationId(), couponId],
+  );
 }
 
 const Coupon = {

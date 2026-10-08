@@ -9,7 +9,9 @@ import { emitUserEvent, emitBestEffort } from "../lib/events.js";
 export async function createAdminNotification({ message, url }) {
   const staffIds = await User.findStaffIds();
   if (!staffIds.length) return;
-  await Notification.insertMany(staffIds.map((id) => ({ recipient: id, message, url })));
+  // "staff": these ids are dashboard accounts in `users`, not shoppers in
+  // `customers`, and the notification row has to record which.
+  await Notification.insertMany(staffIds.map((id) => ({ recipient: id, message, url })), "staff");
 }
 
 // The customer-facing counterpart to createAdminNotification above — one

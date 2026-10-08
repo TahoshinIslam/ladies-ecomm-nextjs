@@ -21,7 +21,7 @@ const publicUser = (user) => ({
   // actually granted — the sidebar filter and every permission check on the
   // frontend silently fall back to "no permissions" regardless of what's
   // stored on their account. Empty for customers/admins (admins bypass
-  // permission checks entirely via role in lib/permissions.js).
+  // permission checks entirely via role — a concept this app no longer has).
   permissions: user.permissions || [],
 });
 

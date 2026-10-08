@@ -72,7 +72,7 @@ async function main() {
     ["product_variants", "uq_product_variants_sku"],
     ["sessions", "uq_sessions_token_hash"],
     ["reviews", "uq_reviews_user_product"],
-    ["orders", "uq_orders_user_idempotency"],
+    ["orders", "uq_orders_customer_idempotency"],
     ["payments", "uq_payments_order"],
   ];
   for (const [table, indexName] of constraintChecks) {

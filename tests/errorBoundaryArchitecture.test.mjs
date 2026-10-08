@@ -17,7 +17,7 @@ function stripComments(content) {
 }
 
 describe("Phase 10 — required error/not-found boundary files exist", () => {
-  for (const rel of ["app/error.jsx", "app/global-error.jsx", "app/not-found.jsx", "app/admin/error.jsx"]) {
+  for (const rel of ["app/error.jsx", "app/global-error.jsx", "app/not-found.jsx"]) {
     test(`${rel} exists`, () => {
       assert.ok(exists(rel), `${rel} must exist`);
     });
@@ -25,7 +25,7 @@ describe("Phase 10 — required error/not-found boundary files exist", () => {
 });
 
 describe("Phase 10 — error.jsx / global-error.jsx / admin/error.jsx use the installed Next 16.3.4 contract", () => {
-  for (const rel of ["app/error.jsx", "app/global-error.jsx", "app/admin/error.jsx"]) {
+  for (const rel of ["app/error.jsx", "app/global-error.jsx"]) {
     test(`${rel} is a Client Component with the { error, retry } contract`, () => {
       const content = read(rel);
       assert.ok(/^\s*["']use client["'];?\s*$/m.test(content), `${rel} must be a Client Component (Next requires this for error boundaries)`);
@@ -112,7 +112,6 @@ describe("Phase 10 — loading boundaries never sit above a known auth/authoriza
   // sidebar with Dashboard/Profile — same URL, same page.jsx content.)
   test("no loading.jsx exists for the orders/[id] or admin route segments", () => {
     assert.ok(!exists("app/(routes)/(account)/orders/[id]/loading.jsx"));
-    assert.ok(!exists("app/admin/loading.jsx"));
   });
 
   test("app/(routes)/(account)/orders/[id]/page.jsx still renders its page directly, with no <Suspense> wrapping it", () => {
@@ -120,11 +119,9 @@ describe("Phase 10 — loading boundaries never sit above a known auth/authoriza
     assert.ok(!/<Suspense/.test(content), "orders/[id]/page.jsx must not introduce a Suspense boundary above its notFound()-calling body");
   });
 
-  test("app/admin/layout.jsx's staff-role gate still calls redirect() directly in a Server Component layout, not behind a client-rendered loading shell", () => {
-    const content = read("app/admin/layout.jsx");
-    assert.ok(!/^\s*["']use client["'];?\s*$/m.test(content), "app/admin/layout.jsx must remain a Server Component");
-    assert.match(content, /redirect\(/, "the staff-role gate must still call redirect()");
-  });
+  // Removed with the admin section: this asserted that the admin layout's role gate ran in a Server Component, which the admin
+  // dashboard now owns and tests against its own source.
+
 
   test("views/OrderDetailPage.jsx and views/ProductDetailPage.jsx still call notFound() directly (not deferred inside a client-only branch)", () => {
     for (const rel of ["views/OrderDetailPage.jsx", "views/ProductDetailPage.jsx"]) {
