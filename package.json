@@ -6,9 +6,9 @@
     "node": ">=22.18.0 <23"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3100",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3100",
     "lint": "eslint",
     "seed": "node --env-file=.env scripts/seedCatalog.mjs",
     "migrate:mongo-to-mysql": "node --env-file=.env scripts/migrateMongoToMysql.mjs",
