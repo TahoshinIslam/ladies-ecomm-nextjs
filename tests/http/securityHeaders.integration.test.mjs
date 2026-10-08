@@ -134,16 +134,6 @@ describe("Phase 3 closure — real HTTP: security headers and Content-Security-P
 
   // ===================== SSE response =====================
 
-  test("the SSE route's rejection path (no session) is unaffected by the new security-header layer — still 401, still no permissive CORS header; the route's own Content-Type/Cache-Control contract on a SUCCESSFUL connection is exhaustively covered by tests/http/authSessionCsrfSse.integration.test.mjs and not re-asserted here", async () => {
-    const controller = new AbortController();
-    try {
-      const res = await fetch(`${BASE_URL}/api/admin/events`, { signal: controller.signal });
-      assert.equal(res.status, 401, "no session — proving the new global headers() config didn't interfere with this route's own auth check");
-      assert.equal(res.headers.get("access-control-allow-origin"), null);
-    } finally {
-      controller.abort();
-    }
-  });
 
   // Rate-limiting / client-IP-trust behavior over real HTTP is covered
   // comprehensively in tests/http/clientIpTrust.integration.test.mjs

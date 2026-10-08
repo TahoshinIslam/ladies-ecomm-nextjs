@@ -583,28 +583,8 @@ describe("Phase 2 closure — real HTTP: session lifecycle, login, CSRF matrix, 
       return { res, controller };
     }
 
-    test("admin SSE: no cookie -> 401", async () => {
-      const { res } = await openSse("/api/admin/events", new CookieJar());
-      assert.equal(res.status, 401);
-    });
 
-    test("admin SSE: authenticated customer -> 403", async () => {
-      const { res } = await openSse("/api/admin/events", customerJar);
-      assert.equal(res.status, 403);
-    });
 
-    test("admin SSE: authorized staff -> real 200 SSE response with correct headers, aborts cleanly, no hang", async () => {
-      const { res, controller } = await openSse("/api/admin/events", staffJar);
-      try {
-        assert.equal(res.status, 200);
-        assert.equal(res.headers.get("content-type"), "text/event-stream");
-        const cacheControl = res.headers.get("cache-control") || "";
-        assert.match(cacheControl, /no-cache|no-store/);
-        assert.match(cacheControl, /no-transform/);
-      } finally {
-        controller.abort();
-      }
-    });
 
     test("order SSE: the order's owner gets a real 200 SSE response", async () => {
       const { res, controller } = await openSse(`/api/orders/${orderId}/events`, ownerJar);

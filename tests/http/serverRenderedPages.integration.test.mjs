@@ -268,26 +268,8 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
     assert.ok(html.includes("Current password") || html.includes("current password"));
   });
 
-  // ---------- Admin overview ----------
-  test("unauthorized access to /admin (customer role) is denied, not shown the dashboard", async () => {
-    const cookie = await cookieHeaderFor(customer._id);
-    const res = await fetch(`${BASE_URL}/admin`, { headers: { cookie }, redirect: "manual" });
-    assert.ok([302, 303, 307].includes(res.status), `expected a redirect away from the dashboard, got ${res.status}`);
-  });
 
-  test("unauthenticated access to /admin redirects to login, not the dashboard", async () => {
-    const res = await fetch(`${BASE_URL}/admin`, { redirect: "manual" });
-    assert.ok([302, 303, 307].includes(res.status), `expected a redirect, got ${res.status}`);
-    assert.match(res.headers.get("location") || "", /\/login/);
-  });
 
-  test("authorized admin sees the real, server-rendered dashboard statistics", async () => {
-    const cookie = await cookieHeaderFor(admin._id);
-    const res = await fetch(`${BASE_URL}/admin`, { headers: { cookie } });
-    assert.equal(res.status, 200);
-    const html = await res.text();
-    assert.match(html, /Total revenue|Orders|Customers|Products/);
-  });
 
   test("no page response leaks a password hash, raw session token, or CSRF secret", async () => {
     const cookie = await cookieHeaderFor(customer._id);

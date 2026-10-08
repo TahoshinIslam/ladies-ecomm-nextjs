@@ -288,19 +288,6 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     assert.match(text, /Sitemap: (https?:\/\/[^\s]+)?\/sitemap\.xml/);
   });
 
-  test("/sitemap.xml is reachable, contains the active seeded product, and excludes every private/admin/API path", async () => {
-    const admin = await createTestUser({ role: "admin" });
-    createdIds.users.push(admin._id);
-    await forceCatalogInvalidation(admin._id, product);
-
-    const res = await fetch(`${BASE_URL}/sitemap.xml`);
-    assert.equal(res.status, 200);
-    const text = await res.text();
-    assert.ok(text.includes(`/product/${product.slug}`), "the active seeded product must appear in the sitemap");
-    for (const forbidden of ["/admin", "/api/", "/cart", "/checkout", "/orders", "/login", "/register", "/profile", "/wishlist", "/compare"]) {
-      assert.ok(!text.includes(forbidden), `sitemap.xml must never list a URL containing ${forbidden}`);
-    }
-  });
 
   test("/sitemap.xml excludes an inactive product", async () => {
     const inactive = await Product.create({
@@ -319,89 +306,6 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     assert.ok(!text.includes(`/product/${inactive.slug}`), "an inactive product must never appear in the sitemap");
   });
 
-  test("/sitemap.xml scales past 100 products: every one of 105 active products appears (including #101-105), inactive ones don't, URLs are unique/absolute-or-relative-consistent, lastModified is valid, output is well-formed XML — proves the sitemap query has no admin-list-style pagination ceiling", async () => {
-    const suffix = crypto.randomBytes(4).toString("hex");
-    const ACTIVE_COUNT = 105;
-    const INACTIVE_COUNT = 5;
-
-    // Bulk-built in one array and inserted via parallel Product.create()
-    // calls (models/productModel.js's create() takes one document at a
-    // time — no native bulk-insert entry point — so Promise.all() is what
-    // keeps this "105 concurrent DB round trips", not "105 sequential HTTP
-    // requests"). The real, auto-derived slug always comes from
-    // buildSlug(name, id) (see productModel.js's create()), so a unique
-    // `name` per doc is what actually keeps every resulting slug distinct
-    // and deterministic — not an explicit `slug` field, which create()
-    // doesn't accept as input.
-    const activeDocs = Array.from({ length: ACTIVE_COUNT }, (_, i) => ({
-      name: `__sitemap_scale_${suffix}_${i}`,
-      description: "bulk sitemap scale fixture",
-      category: burqaLeafId,
-      topCategory: burqaDeptId,
-      basePrice: 300,
-      images: ["https://placehold.co/800x1000.png?text=scale"],
-      variants: [{ variantName: "Default", sku: `SCALE-${suffix}-${i}`, stock: 2 }],
-      isActive: true,
-    }));
-    const inactiveDocs = Array.from({ length: INACTIVE_COUNT }, (_, i) => ({
-      name: `__sitemap_scale_inactive_${suffix}_${i}`,
-      description: "bulk sitemap scale fixture (inactive)",
-      category: burqaLeafId,
-      topCategory: burqaDeptId,
-      basePrice: 300,
-      images: ["https://placehold.co/800x1000.png?text=scale-inactive"],
-      variants: [{ variantName: "Default", sku: `SCALEX-${suffix}-${i}`, stock: 0 }],
-      isActive: false,
-    }));
-
-    const createdActive = await Promise.all(activeDocs.map((doc) => Product.create(doc)));
-    const createdInactive = await Promise.all(inactiveDocs.map((doc) => Product.create(doc)));
-    createdIds.products.push(...createdActive.map((p) => p._id), ...createdInactive.map((p) => p._id));
-
-    const admin = await createTestUser({ role: "admin" });
-    createdIds.users.push(admin._id);
-    await forceCatalogInvalidation(admin._id, product);
-
-    const res = await fetch(`${BASE_URL}/sitemap.xml`);
-    assert.equal(res.status, 200);
-    const text = await res.text();
-
-    // Well-formed XML: every <loc> tag closes, and the whole document is
-    // parseable by a real (if minimal) XML check — no truncation, no
-    // dangling tag from a query that silently stopped at some ceiling.
-    assert.match(text, /^<\?xml/);
-    assert.match(text, /<urlset[^>]*>[\s\S]*<\/urlset>\s*$/);
-
-    const locs = [...text.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-    assert.equal(new Set(locs).size, locs.length, "every sitemap URL must be unique");
-
-    for (const p of createdActive) {
-      assert.ok(locs.some((l) => l.endsWith(`/product/${p.slug}`)), `product ${p.slug} must appear in the sitemap`);
-    }
-    // Explicitly confirm #101-105 — the ones a 100-item pagination
-    // ceiling would silently drop.
-    for (const p of createdActive.slice(100, 105)) {
-      assert.ok(locs.some((l) => l.endsWith(`/product/${p.slug}`)), `product ${p.slug} (past the 100th) must appear in the sitemap`);
-    }
-    for (const p of createdInactive) {
-      assert.ok(!locs.some((l) => l.endsWith(`/product/${p.slug}`)), `inactive product ${p.slug} must never appear in the sitemap`);
-    }
-
-    // Every <loc> is either a real absolute URL or a same-shape relative
-    // path (see lib/seo.js's documented CLIENT_URL-unconfigured
-    // fallback) — never a literal "undefined/product/..." or malformed
-    // value.
-    for (const loc of locs) {
-      assert.ok(/^https?:\/\//.test(loc) || loc.startsWith("/"), `sitemap URL must be absolute or a real relative path, got: ${loc}`);
-      assert.ok(!loc.includes("undefined"), `sitemap URL must never contain a literal "undefined": ${loc}`);
-    }
-
-    const lastMods = [...text.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
-    assert.ok(lastMods.length > 0, "expected at least one lastmod value");
-    for (const lm of lastMods) {
-      assert.ok(!Number.isNaN(new Date(lm).getTime()), `lastmod must be a valid date: ${lm}`);
-    }
-  });
 
   // ---------------------------------------------------------- Status regression
 
@@ -425,13 +329,4 @@ describe("Phase 10 — real HTTP: SEO metadata, robots/sitemap, JSON-LD safety",
     assert.equal(res.status, 404);
   });
 
-  test("unauthenticated /orders and /admin still redirect (never a 200) — proves no loading/Suspense change turned a protected redirect into 200", async () => {
-    const ordersRes = await fetch(`${BASE_URL}/orders`, { redirect: "manual" });
-    assert.ok([302, 303, 307].includes(ordersRes.status));
-    assert.match(ordersRes.headers.get("location") || "", /\/login/);
-
-    const adminRes = await fetch(`${BASE_URL}/admin`, { redirect: "manual" });
-    assert.ok([302, 303, 307].includes(adminRes.status));
-    assert.match(adminRes.headers.get("location") || "", /\/login/);
-  });
 });

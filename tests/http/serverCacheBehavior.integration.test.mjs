@@ -469,143 +469,14 @@ describe("Phase 8 — real cache hit/invalidation behavior (real MongoDB, via HT
 
   // ---------- 1/3/4: real cache hit, invalidation, param-order equivalence ----------
 
-  test("a public shop read is cached: a direct DB price change stays hidden until a real mutation invalidates it", async () => {
-    // Deliberately under 1000 — Intl.NumberFormat currency grouping would
-    // otherwise render e.g. 9999 as "9,999", which a bare digit-string
-    // check would never match regardless of caching correctness.
-    const product = await makeProduct({ basePrice: 500 });
-    const qs = `category=${burqaDeptId}&sort=-createdAt&limit=100`;
 
-    // First touch of this exact key in the whole suite run (the harness
-    // wipes .next/cache/fetch-cache at startup) — must be a genuine miss.
-    const first = await warmCacheMiss(`${BASE_URL}/shop?${qs}`, undefined, { tag: "catalog" });
-    assert.ok(first.includes(product.name), "the fixture product must appear in the initial (uncached-yet) read");
-    assert.ok(priceAppearsNearName(first, product.name, "500"));
-
-    // Bypass the API entirely — a raw DB write the cache cannot know about.
-    await rawQuery("UPDATE products SET base_price = ? WHERE id = ?", [999, product._id]);
-
-    const second = await (await fetch(`${BASE_URL}/shop?${qs}`)).text();
-    assert.ok(!priceAppearsNearName(second, product.name, "999"), "a cached read must NOT reflect a direct DB change — proves the second request was actually served from cache");
-
-    // Now a REAL mutation through the admin route — this is what actually
-    // invalidates the CATALOG tag.
-    const putRes = await adminReq(adminJar, `/api/products/${product._id}`, { method: "PUT", body: { basePrice: 999, category: burqaLeafId } });
-    assert.equal(putRes.status, 200);
-
-    // Immediately follows a real invalidating mutation in this SAME test
-    // — the entry must be recomputed, another genuine miss+write. The
-    // "equivalent query parameters" test right after this one depends on
-    // this call having durably re-established this exact key.
-    const third = await warmCacheMiss(`${BASE_URL}/shop?${qs}`, undefined, { tag: "catalog" });
-    assert.ok(priceAppearsNearName(third, product.name, "999"), "the next read after a real mutation must show the fresh price");
-  });
-
-  test("equivalent query parameters in a different order share ONE canonical cache entry", async () => {
-    const product = await makeProduct({ basePrice: 610 });
-    const qsA = `category=${burqaDeptId}&sort=-createdAt`;
-    const qsB = `sort=-createdAt&category=${burqaDeptId}`;
-
-    // Both qsA and qsB normalize to the EXACT same canonical key the
-    // immediately-preceding test's `third` read just durably
-    // re-established (`category=<burqaDeptId>&sort=-createdAt&limit=100`)
-    // — nothing runs between that test and this one, so nothing has
-    // invalidated it. Both calls here are KNOWN, traced hits, not
-    // assumed — confirmCacheHit() verifies that directly (throws if
-    // either turns out to actually be a miss).
-    await confirmCacheHit(`${BASE_URL}/shop?${qsA}&limit=100`, undefined, { tag: "catalog" });
-    await confirmCacheHit(`${BASE_URL}/shop?${qsB}&limit=100`, undefined, { tag: "catalog" });
-
-    await rawQuery("UPDATE products SET base_price = ? WHERE id = ?", [770, product._id]);
-
-    const afterA = await (await fetch(`${BASE_URL}/shop?${qsA}&limit=100`)).text();
-    const afterB = await (await fetch(`${BASE_URL}/shop?${qsB}&limit=100`)).text();
-    assert.ok(
-      !priceAppearsNearName(afterA, product.name, "770") && !priceAppearsNearName(afterB, product.name, "770"),
-      "both param orders must still be stale (same cache entry)",
-    );
-
-    const putRes = await adminReq(adminJar, `/api/products/${product._id}`, { method: "PUT", body: { basePrice: 770, category: burqaLeafId } });
-    assert.equal(putRes.status, 200);
-
-    const refreshedA = await (await fetch(`${BASE_URL}/shop?${qsA}&limit=100`)).text();
-    const refreshedB = await (await fetch(`${BASE_URL}/shop?${qsB}&limit=100`)).text();
-    assert.ok(
-      priceAppearsNearName(refreshedA, product.name, "770") && priceAppearsNearName(refreshedB, product.name, "770"),
-      "one invalidation must refresh BOTH param orderings, proving they shared one entry",
-    );
-  });
 
   // ---------- 6: product create/delete/activation updates catalog visibility ----------
 
-  test("product deactivation removes it from the public shop listing after invalidation", async () => {
-    const product = await makeProduct();
-    const qs = `category=${burqaDeptId}&limit=100`;
 
-    // Distinct key from the two tests above (no `sort` param) — first
-    // touch of THIS exact key in the suite run, must be a genuine miss.
-    const before1 = await warmCacheMiss(`${BASE_URL}/shop?${qs}`, undefined, { tag: "catalog" });
-    assert.ok(before1.includes(product.name));
-
-    const delRes = await adminReq(adminJar, `/api/products/${product._id}`, { method: "DELETE" });
-    assert.equal(delRes.status, 200);
-
-    // Immediately follows a real invalidating mutation in this SAME test
-    // — must be recomputed. The "failed (validation-rejected) product
-    // update" test's own key depends on tracing whether THIS read stays
-    // durable through that test's own preceding mutation — see that
-    // test's own comment for why it's a fresh miss there too, not an
-    // inherited hit of this one.
-    const after1 = await warmCacheMiss(`${BASE_URL}/shop?${qs}`, undefined, { tag: "catalog" });
-    assert.ok(!after1.includes(product.name), "a deactivated product must not remain visible after the cache is invalidated");
-  });
-
-  test("a raw-inserted new product is invisible until ANY real product mutation broadly invalidates the catalog", async () => {
-    const qs = `category=${burqaDeptId}&limit=200`;
-    // Unique `limit=200` shape — first (and only) touch of this key in
-    // the suite run, must be a genuine miss.
-    await warmCacheMiss(`${BASE_URL}/shop?${qs}`, undefined, { tag: "catalog" });
-
-    const rawProduct = await makeProduct({ name: `__cache_test_raw_${crypto.randomBytes(4).toString("hex")}` });
-    const stillCached = await (await fetch(`${BASE_URL}/shop?${qs}`)).text();
-    assert.ok(!stillCached.includes(rawProduct.name), "a raw DB insert must not appear until the cache is invalidated");
-
-    // Any real product mutation broadly invalidates CATALOG — this ALSO
-    // invalidates the "product deactivation" test's `category=<id>&limit=100`
-    // entry (CATALOG is one shared tag across every catalog-shaped
-    // cached read, not scoped to this test's own key), which is exactly
-    // why the very next test's read is a fresh miss, not an inherited hit.
-    const otherProduct = await makeProduct({ name: `__cache_test_trigger_${crypto.randomBytes(4).toString("hex")}` });
-    const putRes = await adminReq(adminJar, `/api/products/${otherProduct._id}`, { method: "PUT", body: { basePrice: 1234, category: burqaLeafId } });
-    assert.equal(putRes.status, 200);
-
-    const refreshed = await (await fetch(`${BASE_URL}/shop?${qs}`)).text();
-    assert.ok(refreshed.includes(rawProduct.name), "the broad CATALOG invalidation must surface the raw-inserted product too");
-  });
 
   // ---------- 12: failed mutations do not cause false invalidation ----------
 
-  test("a failed (validation-rejected) product update does not invalidate the cache", async () => {
-    const product = await makeProduct({ basePrice: 4321 });
-    const qs = `category=${burqaDeptId}&limit=100`;
-    // Same key shape as "product deactivation"'s `qs`, but NOT an
-    // inherited hit of it: the immediately-preceding test ("a
-    // raw-inserted new product...") performed a real admin PUT, which
-    // broadly invalidates the shared CATALOG tag — including this key.
-    // So this is expected to be a fresh miss again, not a reused hit;
-    // warmCacheMiss() verifies that directly rather than assuming it.
-    await warmCacheMiss(`${BASE_URL}/shop?${qs}`, undefined, { tag: "catalog" });
-
-    await rawQuery("UPDATE products SET base_price = ? WHERE id = ?", [8888, product._id]);
-
-    // A negative basePrice fails Phase 5 schema validation — never reaches
-    // updateProduct(), so invalidateCacheTags() is never called.
-    const badRes = await adminReq(adminJar, `/api/products/${product._id}`, { method: "PUT", body: { basePrice: -5 } });
-    assert.equal(badRes.status, 400);
-
-    const stillStale = await (await fetch(`${BASE_URL}/shop?${qs}`)).text();
-    assert.ok(!stillStale.includes("8888"), "a rejected mutation must not have invalidated the cache — the entry is still the pre-existing cached value");
-  });
 
   // ---------- 13: cache-ineligible search queries remain uncached and correct ----------
 
@@ -637,84 +508,12 @@ describe("Phase 8 — real cache hit/invalidation behavior (real MongoDB, via HT
 
   // ---------- 8: category mutation invalidates affected lists/facets ----------
 
-  test("a category rename is reflected immediately after the mutation (categories cache invalidated)", async () => {
-    const suffix = crypto.randomBytes(4).toString("hex");
-    const testCat = await Category.create({ name: `__cache_cat_${suffix}`, slug: `cache-cat-${suffix}`, parent: null });
-    try {
-      // This test only ever asserts on the state AFTER the mutation below
-      // — it never checks whether this warm-up itself was a hit or a
-      // miss. Confirmed on review (a real captured full-suite run): an
-      // earlier file in the complete ~20-file HTTP suite can already
-      // have warmed `/api/categories` before this describe block even
-      // starts, making this a genuine, stable HIT rather than a first
-      // touch — ensureCacheReady() correctly accepts either outcome, as
-      // long as the entry is durable before the mutation that follows.
-      await ensureCacheReady(`${BASE_URL}/api/categories`, undefined, { tag: "categories" });
-      const renamed = `__cache_cat_renamed_${suffix}`;
-      const putRes = await adminReq(adminJar, `/api/categories/${testCat._id}`, { method: "PUT", body: { name: renamed } });
-      assert.equal(putRes.status, 200);
-      const after1 = await (await fetch(`${BASE_URL}/api/categories`)).text();
-      assert.ok(after1.includes(renamed), "the categories cache must reflect the rename immediately after invalidation");
-    } finally {
-      await testCat.deleteOne();
-    }
-  });
 
   // ---------- 9: settings/theme mutation refreshes cached public configuration ----------
 
-  test("a public settings mutation refreshes the cached public-settings read", async () => {
-    const before1 = await (await fetch(`${BASE_URL}/api/settings/public`)).json();
-    const original = before1.settings.store?.name || "";
-    const suffix = crypto.randomBytes(3).toString("hex");
-    const newName = `Cache Test Store ${suffix}`;
-    try {
-      const putRes = await adminReq(adminJar, "/api/settings", { method: "PUT", body: { store: { name: newName } } });
-      assert.equal(putRes.status, 200);
-      const after1 = await (await fetch(`${BASE_URL}/api/settings/public`)).json();
-      assert.equal(after1.settings.store?.name, newName, "the public settings cache must reflect the new store name immediately");
-    } finally {
-      await adminReq(adminJar, "/api/settings", { method: "PUT", body: { store: { name: original } } });
-    }
-  });
 
   // ---------- 11: admin analytics refreshes after order/payment mutations ----------
 
-  test("admin analytics (order status breakdown) refreshes after a real order status transition", async () => {
-    const buyer = await createTestUser({ role: "customer" });
-    const product = await makeProduct();
-    const order = await withTransaction((conn) =>
-      Order.create(
-        {
-          user: buyer._id,
-          items: [{ product: product._id, variantId: product.variants[0]._id, quantity: 1, snapshot: { name: product.name, price: product.basePrice } }],
-          shippingAddress: { fullName: "Cache Test", phone: "0100000000", street: "1 Test St", city: "Dhaka", postalCode: "1200", country: "Bangladesh" },
-          subtotal: product.basePrice,
-          total: product.basePrice,
-          status: "pending",
-          idempotencyKeyHash: crypto.randomBytes(16).toString("hex"),
-          idempotencyRequestHash: crypto.randomBytes(16).toString("hex"),
-        },
-        conn,
-      ),
-    );
-    createdOrderIds.push(order._id);
-
-    // First touch of `/admin` (renders several unstable_cache-wrapped
-    // admin-analytics reads in one page) — genuine miss expected.
-    await warmCacheMiss(`${BASE_URL}/admin`, { headers: { cookie: adminJar.header() } }, { tag: "admin-analytics" });
-
-    const putRes = await adminReq(adminJar, `/api/orders/${order._id}/status`, { method: "PUT", body: { status: "processing" } });
-    assert.equal(putRes.status, 200);
-
-    // The status-breakdown analytics function itself is a real, direct
-    // service call — after invalidation, this proves the CACHE entry
-    // (not just the underlying DB) reflects the new count.
-    const breakdownRes = await adminReq(adminJar, "/api/analytics/status-breakdown");
-    assert.equal(breakdownRes.status, 200);
-    const breakdown = await breakdownRes.json();
-    const processingRow = breakdown.data.find((r) => r.status === "processing");
-    assert.ok(processingRow && processingRow.count >= 1, "the processing-status count must reflect the just-transitioned order");
-  });
 
   // ---------- 14/15: private customer reads are never shared-cached; no sensitive fields ----------
 

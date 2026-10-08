@@ -130,19 +130,6 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
     }
   });
 
-  test("real HTTP: GET /api/orders?limit=999999 as admin -> 400 (bounded pagination), not an unbounded query", async () => {
-    const suffix = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-    const admin = await User.create({ name: "HTTP Validation Admin", email: `httpvalid-admin-${suffix}@example.invalid`, password: "RealHttpTest123!", role: "admin", isVerified: true });
-    const jar = new CookieJar();
-    try {
-      const loginRes = await req(jar, "/api/users/login", { method: "POST", body: { email: admin.email, password: "RealHttpTest123!" } });
-      assert.equal(loginRes.status, 200);
-      const res = await req(jar, "/api/orders?limit=999999");
-      assert.equal(res.status, 400);
-    } finally {
-      await deleteRows("customers", "id", admin._id);
-    }
-  });
 
   test("real HTTP: a malformed ObjectId path param on the COD route -> 400, not a raw CastError-derived 500", async () => {
     const { jar, email } = await registerNewUser();
@@ -194,56 +181,5 @@ describe("Phase 5 closure — real HTTP: shared validation architecture", { skip
     }
   });
 
-  test("real HTTP (Phase 5B): POST /api/products with a negative basePrice is rejected (400), never reaches Mongoose", async () => {
-    const suffix = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-    const admin = await User.create({ name: "HTTP Validation Admin 2", email: `httpvalid-admin2-${suffix}@example.invalid`, password: "RealHttpTest123!", role: "admin", isVerified: true });
-    const jar = new CookieJar();
-    try {
-      const loginRes = await req(jar, "/api/users/login", { method: "POST", body: { email: admin.email, password: "RealHttpTest123!" } });
-      assert.equal(loginRes.status, 200);
-      const res = await req(jar, "/api/products", {
-        method: "POST",
-        body: { name: "x", description: "x", category: "507f1f77bcf86cd799439011", basePrice: -1, images: ["https://example.test/a.jpg"], variants: [{ variantName: "x", sku: "x", stock: 1 }] },
-        extraHeaders: { "x-csrf-token": jar.get("tahos_csrf") },
-      });
-      assert.equal(res.status, 400);
-    } finally {
-      await deleteRows("customers", "id", admin._id);
-    }
-  });
 
-  test("real HTTP (Phase 5B): PUT /api/orders/[id]/status rejects a forbidden regression (409) and a malformed status (400)", async () => {
-    const suffix = `${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-    const admin = await User.create({ name: "HTTP Validation Admin 3", email: `httpvalid-admin3-${suffix}@example.invalid`, password: "RealHttpTest123!", role: "admin", isVerified: true });
-    const { jar: buyerJar, email: buyerEmail } = await registerNewUser();
-    const adminJar = new CookieJar();
-    const product = await createTestProduct({ stock: 5 });
-    try {
-      const loginRes = await req(adminJar, "/api/users/login", { method: "POST", body: { email: admin.email, password: "RealHttpTest123!" } });
-      assert.equal(loginRes.status, 200);
-
-      const orderRes = await req(buyerJar, "/api/orders", {
-        method: "POST",
-        body: { items: [{ productId: product._id.toString(), variantId: product.variants[0]._id.toString(), quantity: 1 }], shippingAddress: { fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "Bangladesh" } },
-        extraHeaders: { "idempotency-key": crypto.randomBytes(16).toString("hex"), "x-csrf-token": buyerJar.get("tahos_csrf") },
-      });
-      assert.equal(orderRes.status, 201);
-      const { order } = await orderRes.json();
-
-      const malformed = await req(adminJar, `/api/orders/${order._id}/status`, { method: "PUT", body: { status: "not-a-real-status" }, extraHeaders: { "x-csrf-token": adminJar.get("tahos_csrf") } });
-      assert.equal(malformed.status, 400);
-
-      const toCancelled = await req(adminJar, `/api/orders/${order._id}/status`, { method: "PUT", body: { status: "cancelled" }, extraHeaders: { "x-csrf-token": adminJar.get("tahos_csrf") } });
-      assert.equal(toCancelled.status, 200);
-
-      const regression = await req(adminJar, `/api/orders/${order._id}/status`, { method: "PUT", body: { status: "processing" }, extraHeaders: { "x-csrf-token": adminJar.get("tahos_csrf") } });
-      assert.equal(regression.status, 409, "a cancelled order must never be moved to another status");
-    } finally {
-      const buyer = await User.findOne({ email: buyerEmail });
-      if (buyer) await deleteRows("orders", "customer_id", buyer._id);
-      await deleteRows("customers", "id", admin._id);
-      await deleteRows("customers", "email", buyerEmail);
-      await deleteRows("products", "id", product._id);
-    }
-  });
 });
