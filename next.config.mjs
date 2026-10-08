@@ -79,7 +79,10 @@ const nextConfig = {
   // leaving product grids stuck showing their loading skeleton forever.
   // This has zero effect in production (`allowedDevOrigins` is a dev-only
   // config key) — see node_modules/next/dist/docs/.../allowedDevOrigins.md.
-  allowedDevOrigins: ["192.168.68.31", "192.168.68.*"],
+  //
+  // Any home/office private network, not one fixed subnet: the machine's address changes whenever it joins a different router (it moved
+  // from 192.168.68.x to 192.168.0.x), and a blocked address looks exactly like "the store shows no products".
+  allowedDevOrigins: ["192.168.*.*", "10.*.*.*", "172.*.*.*"],
   images: {
     // Phase 9 — HTTPS-only, minimally scoped to the remote origins this
     // app actually serves images from.

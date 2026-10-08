@@ -12,17 +12,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useSelector, useDispatch } from "react-redux";
 import { motion } from "framer-motion";
 import {
+  Banknote,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Flame,
+  Headset,
   Heart,
   Home,
-  ShoppingBag,
+  Lock,
   Minus,
   Plus,
-  Truck,
   RefreshCw,
-  Shield,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingCart,
+  Truck,
   ImageOff,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -89,6 +98,21 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const [selectedImage, setSelectedImage] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
   const [quantity, setQuantity] = useState(1);
+  const [tab, setTab] = useState("description");
+  const [showAllThumbs, setShowAllThumbs] = useState(false);
+  const [stackVisible, setStackVisible] = useState(false);
+  const buyStackRef = useRef(null);
+  const router = useRouter();
+
+  // The mobile sticky purchase bar only appears once the main buttons have scrolled out of view — until then they are the one set of
+  // controls on screen.
+  useEffect(() => {
+    const node = buyStackRef.current;
+    if (!node || typeof IntersectionObserver === "undefined") return undefined;
+    const observer = new IntersectionObserver(([entry]) => setStackVisible(entry.isIntersecting), { threshold: 0.2 });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   const variants = useMemo(() => product?.variants ?? [], [product]);
   // Candidate variant axes for this product's department come from
@@ -169,6 +193,22 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
     }
   };
 
+  // Buy now = add this exact selection to the cart, then go straight to checkout.
+  const handleBuyNow = async () => {
+    if (!selectedVariant) {
+      toast.error(t("product.selectOptionError", { option: attrLabel(missingAxisLabel) || t("product.size") }));
+      return;
+    }
+    setAdding(true);
+    try {
+      await cart.addItem({ product, variant: selectedVariant, quantity });
+      router.push("/checkout");
+    } catch (e) {
+      toast.error(e?.data?.message || t("product.addToCartFailed"));
+      setAdding(false);
+    }
+  };
+
   const handleWishlist = async () => {
     if (!user) {
       toast.error(t("product.pleaseSignIn"));
@@ -202,8 +242,40 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const measurements = product.measurements || {};
   const hasMeasurements = measurements.heightRange || measurements.chest || measurements.sleeveLength;
 
+  const stockLeft = selectedVariant ? pricing.stock : variants.reduce((a, v) => a + (v.stock ?? 0), 0);
+  const showLowStock = !isProductUnavailable && stockLeft > 0 && stockLeft <= 5;
+  const discountPercent = pricing.hasDiscount ? Math.round(((pricing.price - pricing.discountPrice) / pricing.price) * 100) : 0;
+  const highlights = infoRows.slice(0, 3);
+  const exchangeDays = settings.exchangePolicy?.windowDays;
+
+  const specRows = [
+    ...(product.brand?.name ? [[t("shop.brand"), product.brand.name]] : []),
+    ...(product.category?.name ? [[t("product.category"), departmentName(locale, product.category.slug, product.category.name)]] : []),
+    ...infoRows.map((r) => [r.label, r.value]),
+    ...(product.ageGroup && AGE_GROUP_KEYS[product.ageGroup] ? [[t("filters.ageGroup"), t(AGE_GROUP_KEYS[product.ageGroup])]] : []),
+    ...(product.includedItems?.length ? [[t("product.whatsIncluded"), product.includedItems.join(", ")]] : []),
+    ...(measurements.heightRange ? [[t("product.height"), measurements.heightRange]] : []),
+    ...(measurements.chest ? [[t("product.chest"), measurements.chest]] : []),
+    ...(measurements.sleeveLength ? [[t("product.sleeve"), measurements.sleeveLength]] : []),
+    ...(selectedVariant?.sku ? [[t("product.sku"), selectedVariant.sku]] : []),
+    ...(careInstructions ? [[t("product.careInstructions"), careInstructions]] : []),
+  ];
+
+  const tabs = [
+    { id: "description", label: t("product.description") },
+    { id: "specs", label: t("product.specifications") },
+    { id: "reviews", label: `${t("product.reviews")}${product.numReviews ? ` (${product.numReviews})` : ""}` },
+    { id: "shipping", label: t("footer.shippingReturns") },
+  ];
+
+  const mainBtnLabel = isSelectionUnavailable
+    ? t("product.outOfStockCombination")
+    : needsSelection
+      ? t("product.selectOption", { label: attrLabel(missingAxisLabel) || missingAxisLabel })
+      : null;
+
   return (
-    <div className="container-x py-10 pb-28 lg:pb-10">
+    <div className="container-x py-6 pb-28 sm:py-8 lg:pb-10">
       <Breadcrumb
         items={[
           { label: t("navigation.home"), href: "/", icon: Home },
@@ -218,216 +290,187 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
         ]}
       />
 
-      <div className="grid gap-8 lg:grid-cols-2">
-        {/* Gallery — capped and centered at 768-1023px only: the grid stays
-            single-column until lg (1024), so without this the image (and
-            its aspect-4/5) renders at the full column width and can run
-            very tall on a tablet, pushing price/size/CTA off the first
-            screen. Reverts to filling its lg:grid-cols-2 column at 1024+.
-            aspect-4/5 (not aspect-square) so this matches ProductCard's own
-            grid-card plate exactly — one consistent image box across the
-            whole site, so a photo that fits one fits the other. */}
-        <div className="w-full space-y-4 md:mx-auto md:max-w-[440px] lg:mx-0 lg:max-w-none">
-          <motion.div
-            key={`${selectedVariant?._id}-${selectedImage}`}
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3 }}
-            onTouchStart={onGalleryTouchStart}
-            onTouchEnd={onGalleryTouchEnd}
-            className="relative aspect-4/5 overflow-hidden rounded-2xl bg-media"
-          >
-            {/* Hatched plate stands in until artwork exists, matching the way
-                ProductCard renders a product with no images. */}
-            <div aria-hidden="true" className="absolute inset-0 hatch" />
-            <div aria-hidden="true" className="absolute inset-0 glow" />
-            {hasArtwork && !imageFailed ? (
-              // The product-detail page's genuine LCP candidate — the only
-              // high-fetch-priority image on this route (thumbnails below
-              // stay default/lazy, per this phase's "thumbnails must not be
-              // priority" rule).
-              framingForUrl(product.imageFraming, galleryImages[selectedImage]) ? (
-                // Saved crop/fit for this photo — same FramedImage the admin
-                // editor previews with; unframed photos keep the render below.
-                <FramedImage
-                  src={galleryImages[selectedImage]}
-                  framing={framingForUrl(product.imageFraming, galleryImages[selectedImage])}
-                  placement="product.gallery"
-                  alt={product.name}
-                  sizes="(max-width: 1024px) 100vw, 50vw"
-                  loading="eager"
-                  lcp
-                  onError={() => setImageFailed(true)}
-                />
-              ) : (
-              <Image
-                src={resolveImage(galleryImages[selectedImage], 800)}
-                alt={product.name}
-                fill
-                sizes="(max-width: 1024px) 100vw, 50vw"
-                loading="eager"
-                fetchPriority="high"
-                // `object-contain`, not `object-cover` — see
-                // components/product/ProductCard.jsx's identical fix: this
-                // box is a fixed 1:1 square, but not every uploaded photo
-                // is shot square, so `cover` was slicing off the top/sides
-                // of taller/narrower photos (a model's head, in practice).
-                // `contain` always shows the whole photo, letterboxed on
-                // the existing bg-media plate when the ratio doesn't match.
-                className="object-contain"
-                onError={() => setImageFailed(true)}
-              />
-              )
-            ) : imageFailed ? (
-              <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center text-stone">
-                <ImageOff className="h-5 w-5" strokeWidth={1.6} />
-                <span className="font-mono text-[11px] uppercase leading-[1.8] tracking-[0.08em]">
-                  {t("product.imageDidntLoad")}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-10">
+        {/* Gallery card: one big picture with arrows, a wishlist heart and a "only N left" flag, thumbnails underneath. */}
+        <div className="w-full md:mx-auto md:max-w-[520px] lg:mx-0 lg:max-w-none">
+          <div className="rounded-2xl border border-line bg-surface p-3 shadow-card sm:p-4">
+            <motion.div
+              key={`${selectedVariant?._id}-${selectedImage}`}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.3 }}
+              onTouchStart={onGalleryTouchStart}
+              onTouchEnd={onGalleryTouchEnd}
+              className="relative aspect-4/5 overflow-hidden rounded-xl bg-media lg:aspect-[6/5]"
+            >
+              <div aria-hidden="true" className="absolute inset-0 hatch" />
+              <div aria-hidden="true" className="absolute inset-0 glow" />
+              {hasArtwork && !imageFailed ? (
+                // The page's genuine LCP candidate — the only high-priority image on this route.
+                framingForUrl(product.imageFraming, galleryImages[selectedImage]) ? (
+                  <FramedImage
+                    src={galleryImages[selectedImage]}
+                    framing={framingForUrl(product.imageFraming, galleryImages[selectedImage])}
+                    placement="product.gallery"
+                    alt={product.name}
+                    sizes="(max-width: 1024px) 100vw, 50vw"
+                    loading="eager"
+                    lcp
+                    onError={() => setImageFailed(true)}
+                  />
+                ) : (
+                  <Image
+                    src={resolveImage(galleryImages[selectedImage], 800)}
+                    alt={product.name}
+                    fill
+                    sizes="(max-width: 1024px) 100vw, 50vw"
+                    loading="eager"
+                    fetchPriority="high"
+                    // object-contain: always the whole photo, letterboxed on the plate when the ratio differs.
+                    className="object-contain"
+                    onError={() => setImageFailed(true)}
+                  />
+                )
+              ) : imageFailed ? (
+                <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center text-stone">
+                  <ImageOff className="h-5 w-5" strokeWidth={1.6} />
+                  <span className="font-mono text-[11px] uppercase leading-[1.8] tracking-[0.08em]">{t("product.imageDidntLoad")}</span>
                 </span>
-              </span>
-            ) : (
-              <span className="absolute inset-0 grid place-items-center px-8 text-center font-mono text-[11px] uppercase leading-[1.8] tracking-[0.08em] text-stone">
-                {product.name}
-              </span>
+              ) : (
+                <span className="absolute inset-0 grid place-items-center px-8 text-center font-mono text-[11px] uppercase leading-[1.8] tracking-[0.08em] text-stone">
+                  {product.name}
+                </span>
+              )}
+
+              {showLowStock ? (
+                <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12.5px] font-semibold text-danger backdrop-blur">
+                  <Flame className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t("product.lowStock", { count: stockLeft })}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleWishlist}
+                aria-label={t("navigation.wishlist")}
+                aria-pressed={isWished}
+                className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-full bg-surface/95 text-ink shadow-card transition-transform hover:scale-105 focus-ring"
+              >
+                <Heart className={cn("h-5 w-5", isWished && "fill-danger text-danger")} />
+              </button>
+              {galleryImages.length > 1 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { setImageFailed(false); setSelectedImage((i) => (i - 1 + galleryImages.length) % galleryImages.length); }}
+                    aria-label={t("pagination.previous")}
+                    className="absolute left-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-surface/95 text-ink shadow-card transition-transform hover:scale-105 focus-ring"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setImageFailed(false); setSelectedImage((i) => (i + 1) % galleryImages.length); }}
+                    aria-label={t("pagination.next")}
+                    className="absolute right-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-surface/95 text-ink shadow-card transition-transform hover:scale-105 focus-ring"
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </>
+              ) : null}
+            </motion.div>
+
+            {galleryImages.length > 1 && (
+              <div className={cn("mt-3 grid grid-cols-5 gap-2", showAllThumbs && "sm:grid-cols-6")}>
+                {(showAllThumbs || galleryImages.length <= 5 ? galleryImages : galleryImages.slice(0, 4)).map((src, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      setSelectedImage(i);
+                      setImageFailed(false);
+                    }}
+                    aria-label={t("product.viewImageNumber", { number: i + 1 })}
+                    aria-current={i === selectedImage}
+                    className={cn(
+                      "relative aspect-square overflow-hidden rounded-xl border-2 bg-media transition-colors",
+                      i === selectedImage ? "border-verm" : "border-line hover:border-ink/40",
+                    )}
+                  >
+                    <Image src={resolveImage(src, 160)} alt="" fill sizes="96px" loading="lazy" className="object-contain" />
+                  </button>
+                ))}
+                {!showAllThumbs && galleryImages.length > 5 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllThumbs(true)}
+                    className="grid aspect-square place-items-center rounded-xl border-2 border-line bg-surface text-center text-[12px] font-semibold text-ink transition-colors hover:border-ink/40"
+                  >
+                    <span>
+                      +{galleryImages.length - 4}
+                      <span className="block text-[11px] font-medium text-stone">{t("product.moreImages")}</span>
+                    </span>
+                  </button>
+                ) : null}
+              </div>
             )}
-          </motion.div>
-          {galleryImages.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto no-scrollbar">
-              {galleryImages.map((src, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setSelectedImage(i);
-                    setImageFailed(false);
-                  }}
-                  aria-label={t("product.viewImageNumber", { number: i + 1 })}
-                  aria-current={i === selectedImage}
-                  className={cn(
-                    "h-20 w-20 flex-shrink-0 overflow-hidden rounded-md border-2 bg-media transition-colors",
-                    i === selectedImage ? "border-accent" : "border-transparent"
-                  )}
-                >
-                  <Image src={resolveImage(src, 160)} alt="" width={80} height={80} loading="lazy" className="h-full w-full object-contain" />
-                </button>
-              ))}
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Info */}
-        <div className="flex flex-col">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              {product.brand?.name && (
-                <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                  {product.brand.name}
-                </p>
-              )}
-              {/* text-3xl/font-black left no smaller step for phones — a
-                  longer compound name ("Saudi-Style Closed Burqa") wrapped
-                  across several lines at that size on a ~340px-wide
-                  viewport, reading as broken. Smaller base size on mobile,
-                  stepping back up to the original 3xl/4xl from `sm` up. */}
-              <h1 className="mt-1 font-heading text-2xl font-black sm:text-3xl lg:text-4xl">
-                {product.name}
-              </h1>
-            </div>
+        {/* Buying column */}
+        <div className="flex min-w-0 flex-col">
+          {product.brand?.name && (
+            <p className="text-[12.5px] font-semibold uppercase tracking-wider text-stone">{product.brand.name}</p>
+          )}
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="font-heading text-[30px] font-extrabold leading-tight tracking-tight text-ink sm:text-[38px]">{product.name}</h1>
             {product.isFeatured && <Badge variant="accent">{t("filters.featured")}</Badge>}
           </div>
 
-          {/* No reviews have been collected yet — the rating row simply
-              doesn't render rather than showing a fabricated 0-star score. */}
+          {/* No reviews yet means no rating row — never a fabricated score. */}
           {product.numReviews != null && (
-            <div className="mt-3 flex items-center gap-3">
-              <Rating value={product.rating} size={16} showValue />
-              <span className="text-sm text-muted-foreground">
-                {t("product.reviewsCount", { count: product.numReviews })}
-              </span>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Rating value={product.rating} size={17} showValue />
+              <span className="text-[13.5px] text-stone">{t("product.reviewsCount", { count: product.numReviews })}</span>
             </div>
           )}
 
-          <div className="mt-5 flex items-baseline gap-3">
-            <span className="font-heading text-4xl font-black text-verm">
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span data-tabular className="font-heading text-[40px] font-extrabold leading-none text-verm sm:text-[46px]">
               {settings.formatPrice(pricing.displayPrice, pricing.currency)}
             </span>
             {pricing.hasDiscount && (
               <>
-                <span className="text-xl text-muted-foreground line-through">
-                  {settings.formatPrice(pricing.price, pricing.currency)}
+                <span data-tabular className="text-[19px] text-stone line-through">{settings.formatPrice(pricing.price, pricing.currency)}</span>
+                <span className="rounded-lg bg-danger/10 px-3 py-1.5 text-[13.5px] font-bold text-danger">
+                  {t("product.discountBadge", { percent: discountPercent })}
                 </span>
-                <Badge variant="danger">
-                  {t("product.discountBadge", {
-                    percent: Math.round(((pricing.price - pricing.discountPrice) / pricing.price) * 100),
-                  })}
-                </Badge>
               </>
             )}
           </div>
 
-          <p className="mt-5 text-foreground/80 text-pretty">
-            {product.description}
-          </p>
-
-          {/* Modest-fashion product info — fabric, coverage, closure,
-              lining, occasion (whichever apply to this category). */}
-          {infoRows.length > 0 && (
-            <div className="mt-5 flex flex-wrap gap-2">
-              {infoRows.map((r) => (
-                <Badge key={r.key} variant="outline">
-                  {r.label}: {r.value}
-                </Badge>
+          {highlights.length > 0 && (
+            <ul className="mt-5 space-y-2">
+              {highlights.map((r) => (
+                <li key={r.key} className="flex items-center gap-2.5 text-[15px] text-ink">
+                  <CheckCircle2 className="h-5 w-5 flex-none fill-verm text-surface" aria-hidden="true" />
+                  <span>
+                    <span className="text-stone">{r.label}:</span> {r.value}
+                  </span>
+                </li>
               ))}
-              {product.ageGroup && AGE_GROUP_KEYS[product.ageGroup] && (
-                <Badge variant="outline">{t(AGE_GROUP_KEYS[product.ageGroup])}</Badge>
-              )}
-            </div>
-          )}
-
-          {product.includedItems?.length > 0 && (
-            <div className="mt-4 text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground">{t("product.includes")}</span>{" "}
-              {product.includedItems.join(", ")}
-            </div>
-          )}
-
-          {hasMeasurements && (
-            <div className="mt-4 grid grid-cols-3 gap-3 rounded-lg border border-border p-3 text-center text-xs">
-              {measurements.heightRange && (
-                <div><div className="font-semibold text-foreground">{measurements.heightRange}</div><div className="text-muted-foreground">{t("product.height")}</div></div>
-              )}
-              {measurements.chest && (
-                <div><div className="font-semibold text-foreground">{measurements.chest}</div><div className="text-muted-foreground">{t("product.chest")}</div></div>
-              )}
-              {measurements.sleeveLength && (
-                <div><div className="font-semibold text-foreground">{measurements.sleeveLength}</div><div className="text-muted-foreground">{t("product.sleeve")}</div></div>
-              )}
-            </div>
+            </ul>
           )}
 
           {isProductUnavailable ? (
-            /* Every variant is gone — the exact copy the design calls for, not
-               a disabled "Out of stock" button standing in for it. */
             <div className="mt-6 rounded-2xl border border-line bg-media p-6">
-              <p className="text-[15.5px] leading-relaxed text-ink">
-                {t("product.itemGoneMessage")}
-              </p>
-              <Button
-                variant="primary"
-                size="lg"
-                onClick={handleNotify}
-                className="mt-4 w-full sm:w-auto"
-              >
+              <p className="text-[15.5px] leading-relaxed text-ink">{t("product.itemGoneMessage")}</p>
+              <Button variant="primary" size="lg" onClick={handleNotify} className="mt-4 w-full sm:w-auto">
                 {t("product.notifyIfReturns")}
               </Button>
             </div>
           ) : (
             <>
-              {/* Variant selectors — only the axes that actually vary on
-                  this product get a control (see lib/utils.js
-                  getVariantAxes), driven by AttributeDefinition rather than
-                  a fixed clothing-only list. Never renders a combination
-                  that doesn't exist as a real variant — only stock=0 ones,
-                  disabled. */}
+              {/* One control per axis that actually varies on this product (colour, size, fabric…). */}
               {axes.map((axis) => (
                 <VariantAxisRow
                   key={axis}
@@ -441,117 +484,181 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
               ))}
 
               {selectedVariant && (
-                <p className="mt-2 text-xs text-muted-foreground">
+                <p className="mt-2 text-xs text-stone">
                   {isSelectionUnavailable ? t("product.outOfStock") : t("product.stockCount", { count: pricing.stock })}
                   {selectedVariant.sku && <> · SKU {selectedVariant.sku}</>}
                 </p>
               )}
 
-              {/* Quantity + actions — hidden on mobile in favor of the sticky
-                  bar below, so there's only one Add to cart control visible
-                  at a time. */}
-              <div className="mt-6 hidden gap-3 lg:flex">
+              <div className="mt-6 flex items-center gap-4">
+                <span className="text-[15px] font-semibold text-ink">{t("product.quantity")}</span>
                 <QuantityStepper quantity={quantity} setQuantity={setQuantity} max={pricing.stock || 99} />
+              </div>
+
+              <div ref={buyStackRef} className="mt-4 space-y-2.5">
                 <Button
-                  size="lg"
+                  size="xl"
+                  onClick={handleBuyNow}
+                  loading={adding}
+                  disabled={isSelectionUnavailable || needsSelection}
+                  className="w-full bg-verm-contrast text-white hover:bg-verm-contrast hover:brightness-110"
+                >
+                  {mainBtnLabel ?? t("product.buyNow")}
+                </Button>
+                <Button
+                  size="xl"
                   onClick={handleAdd}
                   loading={adding}
                   disabled={isSelectionUnavailable || needsSelection}
-                  className="flex-1"
+                  className="w-full bg-[#f5b324] text-[#1c1a14] hover:bg-[#f5b324] hover:brightness-95"
                 >
-                  <ShoppingBag className="h-4 w-4" />
-                  {isSelectionUnavailable
-                    ? t("product.outOfStockCombination")
-                    : needsSelection
-                      ? t("product.selectOption", { label: attrLabel(missingAxisLabel) || missingAxisLabel })
-                      : t("product.addToCart")}
+                  <ShoppingCart className="h-5 w-5" />
+                  {t("product.addToCart")}
                 </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={handleWishlist}
-                  aria-label={t("navigation.wishlist")}
-                >
-                  <Heart className={cn("h-4 w-4", isWished && "fill-danger text-danger")} />
+                <Button size="xl" variant="subtle" onClick={handleWishlist} className="w-full">
+                  <Heart className={cn("h-5 w-5", isWished && "fill-danger text-danger")} />
+                  {isWished ? t("product.removeFromWishlist") : t("product.addToWishlist")}
                 </Button>
               </div>
             </>
           )}
 
-          {careInstructions && (
-            <p className="mt-6 text-xs leading-relaxed text-muted-foreground">
-              <span className="font-semibold text-foreground">{t("product.careLabel")}</span>
-              {careInstructions}
-            </p>
-          )}
+          {/* Delivery — only what the shop really promises: the free-delivery threshold it has configured, and cash on delivery. */}
+          <div className="mt-5 flex items-start gap-3 text-verm">
+            <Truck className="mt-0.5 h-7 w-7 flex-none" aria-hidden="true" />
+            <div>
+              <p className="text-[16px] font-bold">{freeShipAmount ? t("product.deliveryFreeOver", { amount: freeShipAmount }) : t("product.deliveryChargeAtCheckout")}</p>
+              <p className="text-[13.5px]">{t("product.deliveryPayOnArrival")}</p>
+            </div>
+          </div>
 
-          {/* Perks */}
-          <div className="mt-8 grid grid-cols-3 gap-3 border-t border-border pt-6">
-            <Perk
-              icon={Truck}
-              title={t("product.freeShipping")}
-              desc={freeShipAmount ? t("product.freeShippingOver", { amount: freeShipAmount }) : t("product.onQualifyingOrders")}
-            />
-            <Perk icon={RefreshCw} title={t("product.exchanges14Day")} desc={t("product.easyAndFree")} />
-            <Perk icon={Shield} title={t("header.announcementSecureCheckout")} desc={t("checkout.cashOnDelivery")} />
+          <div className="mt-4 grid grid-cols-3 gap-2.5">
+            <TrustCard icon={Lock} title={t("header.announcementSecureCheckout")} desc={t("checkout.cashOnDelivery")} />
+            <TrustCard icon={RefreshCw} title={exchangeDays ? t("product.exchangesDays", { days: exchangeDays }) : t("product.exchanges14Day")} desc={t("product.easyAndFree")} />
+            <TrustCard icon={ShieldCheck} title={t("product.trustQuality")} desc={t("product.trustQualityDesc")} />
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-[13px] text-stone">
+            <span>{t("product.weAccept")}</span>
+            <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2 font-semibold text-ink">
+              <Banknote className="h-4 w-4 text-verm" aria-hidden="true" />
+              {t("checkout.cashOnDelivery")}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Reviews */}
-      <section className="mt-16">
-        <div className="mb-6 flex items-end justify-between border-b border-border pb-4">
-          <h2 className="font-heading text-2xl font-bold">
-            {t("product.customerReviews")}
-          </h2>
-          <Link
-            href="/orders"
-            className="text-xs font-bold uppercase tracking-wider underline underline-offset-4 hover:text-accent"
-          >
-            {t("product.writeReview")}
-          </Link>
+      {/* Tabs: description, specifications, reviews, shipping & returns. */}
+      <section className="mt-10 rounded-2xl border border-line bg-surface p-4 shadow-card sm:p-6" aria-label={t("product.details")}>
+        <div role="tablist" aria-label={t("product.details")} className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">
+          {tabs.map((x) => (
+            <button
+              key={x.id}
+              id={`tab-${x.id}`}
+              role="tab"
+              type="button"
+              aria-selected={tab === x.id}
+              aria-controls={`panel-${x.id}`}
+              onClick={() => setTab(x.id)}
+              className={cn(
+                "relative flex-none whitespace-nowrap px-4 py-3 text-[15px] font-semibold transition-colors focus-ring",
+                tab === x.id ? "text-verm after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-verm" : "text-ink hover:text-verm",
+              )}
+            >
+              {x.label}
+            </button>
+          ))}
         </div>
-        <ReviewList productId={product._id} rating={product.rating} numReviews={product.numReviews} />
-        <p className="mt-4 text-xs text-muted-foreground">
-          {t("product.reviewEligibilityPre")}{" "}
-          <Link href="/orders" className="text-accent hover:underline">
-            {t("product.reviewEligibilityLink")}
-          </Link>
-          {t("product.reviewEligibilityPost")}
-        </p>
+
+        <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} className="pt-5">
+          {tab === "description" && (
+            <p className="max-w-[80ch] whitespace-pre-line text-[15px] leading-relaxed text-ink/85 text-pretty">
+              {product.description || t("product.noDescription")}
+            </p>
+          )}
+
+          {tab === "specs" &&
+            (specRows.length ? (
+              <dl className="grid max-w-[760px] divide-y divide-line rounded-xl border border-line text-[14.5px]">
+                {specRows.map(([label, value]) => (
+                  <div key={label} className="grid grid-cols-[minmax(120px,200px)_1fr] gap-4 px-4 py-2.5">
+                    <dt className="text-stone">{label}</dt>
+                    <dd className="min-w-0 break-words font-medium text-ink">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-[15px] text-stone">{t("product.noSpecifications")}</p>
+            ))}
+
+          {tab === "reviews" && (
+            <div>
+              <div className="mb-5 flex items-end justify-between gap-3">
+                <h2 className="font-heading text-xl font-bold">{t("product.customerReviews")}</h2>
+                <Link href="/orders" className="text-xs font-bold uppercase tracking-wider underline underline-offset-4 hover:text-verm">
+                  {t("product.writeReview")}
+                </Link>
+              </div>
+              <ReviewList productId={product._id} rating={product.rating} numReviews={product.numReviews} />
+              <p className="mt-4 text-xs text-stone">
+                {t("product.reviewEligibilityPre")}{" "}
+                <Link href="/orders" className="text-verm hover:underline">
+                  {t("product.reviewEligibilityLink")}
+                </Link>
+                {t("product.reviewEligibilityPost")}
+              </p>
+            </div>
+          )}
+
+          {tab === "shipping" && (
+            <div className="max-w-[80ch] space-y-4 text-[15px] leading-relaxed text-ink/85">
+              <div>
+                <h3 className="font-semibold text-ink">{t("product.deliveryHeading")}</h3>
+                <p>{freeShipAmount ? t("product.deliveryFreeOver", { amount: freeShipAmount }) : t("product.deliveryChargeAtCheckout")} {t("product.deliveryPayOnArrival")}.</p>
+              </div>
+              <div>
+                <h3 className="font-semibold text-ink">{t("pages.shippingReturnsHeading")}</h3>
+                <p>{t("pages.shippingReturnsBody")}</p>
+                <p className="mt-2 text-[13.5px] text-stone">{t("pages.shippingReturnsNote")}</p>
+                <Link href="/contact" className="mt-2 inline-block font-semibold text-verm hover:underline">
+                  {t("pages.shippingReturnsCta")}
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
-      {/* You may also like — real MongoDB candidates, ranked by category/
-          attribute overlap with a real-signal fallback fill (see
-          services/productService.js's listRelated), already resolved
-          server-side. Renders nothing of its own accord with zero results. */}
-      <div className="mt-16">
-        <ProductRail
-          id="related-products-heading"
-          title={t("product.relatedHeading")}
-          products={relatedProducts}
-          isLoading={false}
-        />
+      {/* The shop's promises, once more, as a strip. */}
+      <div className="mt-6 grid grid-cols-2 gap-y-5 rounded-2xl border border-line bg-surface px-4 py-5 shadow-card sm:px-6 lg:grid-cols-4 lg:divide-x lg:divide-line">
+        <StripItem icon={Truck} title={t("product.freeDelivery")} desc={freeShipAmount ? t("product.freeShippingOver", { amount: freeShipAmount }) : t("product.onQualifyingOrders")} />
+        <StripItem icon={ShieldCheck} title={t("product.easyReturns")} desc={exchangeDays ? t("product.exchangePolicyDays", { days: exchangeDays }) : t("product.exchanges14Day")} />
+        <StripItem icon={Lock} title={t("product.securePayment")} desc={t("checkout.cashOnDelivery")} />
+        <StripItem icon={Headset} title={t("product.customerSupport")} desc={t("product.supportDesc")} href="/contact" />
       </div>
 
-      {/* Recently viewed — hides itself entirely with no history. Excludes
-          the product currently on screen. */}
-      <RecentlyViewedRail excludeId={product._id} className="mt-16" />
+      {/* You may also like — ranked server-side by category/attribute overlap; renders nothing with zero results. */}
+      <div className="mt-12">
+        <ProductRail id="related-products-heading" title={t("product.relatedHeading")} products={relatedProducts} isLoading={false} />
+      </div>
 
-      {/* Mobile sticky purchase bar — clears MobileNav's ~66px tab bar plus
-          its own safe-area inset, so it never overlaps the fixed bottom nav. */}
+      {/* Recently viewed — hides itself entirely with no history. */}
+      <RecentlyViewedRail excludeId={product._id} className="mt-12" />
+
+      {/* Mobile sticky purchase bar — clears MobileNav's ~66px tab bar plus its own safe-area inset. Shown only once the main buttons
+          have scrolled out of sight, so there is never a second set of buy buttons beside them. */}
       {!isProductUnavailable && (
         <div
           className="fixed inset-x-0 z-[70] flex items-center gap-3 border-t border-line bg-surface px-4 py-3 shadow-sheet lg:hidden"
-          // Matches MobileNav.jsx's own height math exactly: its 66px tab
-          // row plus max(10px, safe-area-inset-bottom) padding — not a bare
-          // env() alone, which under-shoots by 10px on devices with a
-          // near-zero safe area (most non-notched phones).
-          style={{ bottom: "calc(66px + max(10px, env(safe-area-inset-bottom)))" }}
+          aria-hidden={stackVisible}
+          style={{
+            bottom: "calc(66px + max(10px, env(safe-area-inset-bottom)))",
+            ...(stackVisible ? { display: "none" } : {}),
+          }}
         >
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold">{product.name}</div>
-            <div data-tabular className="text-base font-bold">{settings.formatPrice(pricing.displayPrice, pricing.currency)}</div>
+            <div data-tabular className="text-base font-bold text-verm">{settings.formatPrice(pricing.displayPrice, pricing.currency)}</div>
           </div>
           <button
             onClick={handleWishlist}
@@ -560,13 +667,8 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
           >
             <Heart className={cn("h-4 w-4", isWished && "fill-danger text-danger")} />
           </button>
-          <Button
-            onClick={handleAdd}
-            loading={adding}
-            disabled={isSelectionUnavailable || needsSelection}
-            className="flex-none"
-          >
-            <ShoppingBag className="h-4 w-4" />
+          <Button onClick={handleAdd} loading={adding} disabled={isSelectionUnavailable || needsSelection} className="flex-none bg-[#f5b324] text-[#1c1a14] hover:bg-[#f5b324] hover:brightness-95">
+            <ShoppingCart className="h-4 w-4" />
             {isSelectionUnavailable
               ? t("product.outOfStock")
               : needsSelection
@@ -668,19 +770,21 @@ function VariantAxisRow({ label, options, displayOptions, selected, onSelect, sw
 function QuantityStepper({ quantity, setQuantity, max }) {
   const { t } = useLocale();
   return (
-    <div className="flex items-center rounded-md border border-border">
+    <div className="inline-flex items-center overflow-hidden rounded-xl border border-line bg-surface">
       <button
+        type="button"
         onClick={() => setQuantity((q) => Math.max(1, q - 1))}
         disabled={quantity <= 1}
-        className="px-3 py-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+        className="grid h-11 w-11 place-items-center text-ink transition-colors hover:bg-wash disabled:opacity-40"
         aria-label={t("product.decreaseQuantity")}
       >
         <Minus className="h-4 w-4" />
       </button>
-      <span aria-live="polite" className="w-10 text-center text-sm font-bold">{quantity}</span>
+      <span aria-live="polite" className="w-12 border-x border-line text-center text-[15px] font-bold leading-[44px]">{quantity}</span>
       <button
+        type="button"
         onClick={() => setQuantity((q) => Math.min(max || 99, q + 1))}
-        className="px-3 py-2 text-muted-foreground hover:text-foreground"
+        className="grid h-11 w-11 place-items-center text-ink transition-colors hover:bg-wash"
         aria-label={t("product.increaseQuantity")}
       >
         <Plus className="h-4 w-4" />
@@ -689,12 +793,31 @@ function QuantityStepper({ quantity, setQuantity, max }) {
   );
 }
 
-function Perk({ icon: Icon, title, desc }) {
+function TrustCard({ icon: Icon, title, desc }) {
   return (
-    <div className="flex flex-col items-center text-center">
-      <Icon className="mb-1 h-5 w-5 text-accent" />
-      <p className="text-xs font-bold">{title}</p>
-      <p className="text-xs text-muted-foreground">{desc}</p>
+    <div className="flex items-start gap-2 rounded-xl border border-line bg-surface p-2.5 sm:gap-2.5 sm:p-3">
+      <Icon className="mt-0.5 h-5 w-5 flex-none text-ink" strokeWidth={1.7} aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="text-[12px] font-bold leading-tight text-ink">{title}</p>
+        <p className="mt-0.5 text-[11px] leading-tight text-stone">{desc}</p>
+      </div>
     </div>
+  );
+}
+
+function StripItem({ icon: Icon, title, desc, href }) {
+  const body = (
+    <div className="flex items-center gap-3 lg:px-6 lg:first:pl-0">
+      <Icon className="h-8 w-8 flex-none text-ink" strokeWidth={1.4} aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="text-[14px] font-bold text-ink">{title}</p>
+        <p className="text-[12.5px] text-stone">{desc}</p>
+      </div>
+    </div>
+  );
+  return href ? (
+    <Link href={href} className="block focus-ring">{body}</Link>
+  ) : (
+    body
   );
 }
