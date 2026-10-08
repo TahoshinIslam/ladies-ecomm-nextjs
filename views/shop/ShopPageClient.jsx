@@ -645,7 +645,7 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
 function CategoryTileFilter({ departments, departmentImages, imageFraming = {}, loading, selected, onSelect, disabled }) {
   const { t, locale } = useLocale();
   const rowClasses =
-    "-mx-5 mt-2 mb-6 flex gap-4 overflow-x-auto px-5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-9";
+    "-mx-2.5 mt-2 mb-6 flex gap-4 overflow-x-auto px-2.5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-9";
 
   if (loading) {
     return (

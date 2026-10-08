@@ -347,7 +347,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
           )}
 
           <div className="mt-5 flex items-baseline gap-3">
-            <span className="font-heading text-4xl font-black">
+            <span className="font-heading text-4xl font-black text-verm">
               {settings.formatPrice(pricing.displayPrice, pricing.currency)}
             </span>
             {pricing.hasDiscount && (

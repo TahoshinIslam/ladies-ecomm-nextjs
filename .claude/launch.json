@@ -5,18 +5,18 @@
       "name": "tahos-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "port": 3100
     },
     {
       "name": "tahos-dev-testdb",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["--env-file=.env.test", "scripts/devTestDb.mjs", "-p", "3100"],
-      "port": 3100
+      "runtimeArgs": ["--env-file=.env.test", "scripts/devTestDb.mjs", "-p", "3101"],
+      "port": 3101
     },
     {
       "name": "tahos-prod-measure",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start", "--", "-p", "3200"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "start", "-p", "3200"],
       "port": 3200
     }
   ]

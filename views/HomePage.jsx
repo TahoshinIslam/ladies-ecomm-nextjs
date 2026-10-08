@@ -7,6 +7,7 @@ import NewsletterForm from "../components/layout/NewsletterForm.jsx";
 import CategorySidebar from "../components/layout/CategorySidebar.jsx";
 import CategoryCard from "../components/product/CategoryCard.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
+import MiniBanners from "./home/MiniBanners.jsx";
 import ProductShowcaseSection from "./home/ProductShowcaseSection.jsx";
 import GuidedFinderSection from "./home/GuidedFinderSection.jsx";
 import SectionHead from "./home/SectionHead.jsx";
@@ -27,6 +28,7 @@ import { getT, getServerLocale } from "../lib/i18n/server.js";
 import { localizeProductList, localizeCategoryList } from "../lib/i18n/localize.js";
 import { departmentName } from "../lib/i18n/catalog.js";
 import { resolveImage } from "../lib/utils.js";
+import { buildMiniBannerSlots, pickMiniBannerProducts } from "../lib/miniBanners.js";
 import FramedImage from "../components/ui/FramedImage.jsx";
 import { homepageFramingFor } from "../lib/imageFraming.js";
 import { sortDepartmentsForFavourites } from "../lib/storefrontDepartments.js";
@@ -202,6 +204,10 @@ export default async function HomePage() {
     ]),
   );
 
+  // The small banners beside the carousel: real, buyable products — discounted first (see lib/miniBanners.js).
+  // A banner the owner has uploaded a picture for (Settings → Shop layout → Offer banners) wins its slot; the rest are products.
+  const miniBannerSlots = buildMiniBannerSlots(homepageSettings.miniBanners, pickMiniBannerProducts(shopFeatured, shopNew));
+
   return (
     <>
       {/* Confirmed audit fix: the page had zero <h1> elements — every
@@ -224,13 +230,14 @@ export default async function HomePage() {
           hero are the same height; the list scrolls inside it when there are many departments. Tight top
           padding keeps the banner close under the header. */}
       <section aria-label={t("home.heroLabel")} className="container-x pt-3 sm:pt-5">
-        <div className="mx-auto flex max-w-[1620px] items-stretch gap-6 lg:h-[460px]">
+        <div className="flex flex-col gap-3 lg:h-[460px] lg:flex-row lg:items-stretch lg:gap-4">
           <CategorySidebar categories={categories} />
           <div className="min-w-0 flex-1">
             <div className="aspect-[4/3] w-full sm:aspect-[16/7] sm:max-h-[560px] lg:aspect-auto lg:h-full lg:max-h-none">
               <HeroCarousel departments={departments} heroImageBySlug={heroImageBySlug} heroFramingBySlug={heroFramingBySlug} promotions={carouselPromotions} />
             </div>
           </div>
+          <MiniBanners slots={miniBannerSlots} />
         </div>
       </section>
 
@@ -240,11 +247,12 @@ export default async function HomePage() {
           full-width 3-column department grid. Every remaining department
           stays one click away via the header's mega menu, nav row, and the
           "Browse all departments" link below. */}
-      <section aria-labelledby="favourites-h" className="container-x pt-8">
-        <h2 id="favourites-h" className="text-[19px] font-semibold tracking-[-0.01em]">
+      <section aria-labelledby="favourites-h" className="container-x pt-5 sm:pt-8">
+        {/* Visually removed (the tiles speak for themselves); kept for screen readers, which still get a heading for this region. */}
+        <h2 id="favourites-h" className="sr-only">
           {t("home.favouritesEyebrow")}
         </h2>
-        <div className="-mx-5 mt-6 flex gap-4 overflow-x-auto px-5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-8">
+        <div className="-mx-2.5 flex gap-4 overflow-x-auto px-2.5 pb-1 no-scrollbar sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-5 sm:overflow-visible sm:px-0 lg:grid-cols-8">
           {departments.slice(0, 8).map((d) => (
             <CategoryCard
               key={d._id}
@@ -258,7 +266,7 @@ export default async function HomePage() {
         </div>
         <Link
           href="/shop"
-          className="mt-6 inline-flex items-center gap-1.5 text-[13.5px] font-semibold text-verm hover:underline focus-ring"
+          className="mt-4 inline-flex items-center gap-1.5 text-[13.5px] sm:mt-6 font-semibold text-verm hover:underline focus-ring"
         >
           {t("home.browseAllDepartments")}
           <ArrowRight className="h-3.5 w-3.5" />
@@ -267,14 +275,14 @@ export default async function HomePage() {
 
       {/* Features/trust row — a slim, low-shadow strip of real, configured
           policies (no invented delivery windows or thresholds). */}
-      <section aria-label={t("home.serviceBenefits")} className="container-x pt-14">
-        <div className="grid gap-x-6 gap-y-6 rounded-2xl border border-line bg-media px-6 py-7 sm:grid-cols-2 sm:divide-x sm:divide-line lg:grid-cols-4">
+      <section aria-label={t("home.serviceBenefits")} className="container-x pt-6 sm:pt-14">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4 rounded-2xl border border-line bg-media px-4 py-4 sm:gap-x-6 sm:gap-y-6 sm:px-6 sm:py-7 sm:grid-cols-2 sm:divide-x sm:divide-line lg:grid-cols-4">
           {FEATURES.map((item) => (
-            <div key={item.titleKey} className="flex items-start gap-3 sm:pl-6 first:sm:pl-0">
+            <div key={item.titleKey} className="flex items-start gap-2 sm:gap-3 sm:pl-6 first:sm:pl-0">
               <item.icon className="h-[20px] w-[20px] flex-none text-verm" strokeWidth={1.6} aria-hidden="true" />
               <div>
-                <div className="text-[14px] font-semibold">{t(item.titleKey)}</div>
-                <div className="mt-0.5 text-[12.5px] text-stone">{t(item.bodyKey)}</div>
+                <div className="text-[13px] font-semibold leading-snug sm:text-[14px]">{t(item.titleKey)}</div>
+                <div className="mt-0.5 hidden text-[12.5px] text-stone sm:block">{t(item.bodyKey)}</div>
               </div>
             </div>
           ))}
@@ -284,14 +292,14 @@ export default async function HomePage() {
       {/* Departments — the full, every-department browser (kept, further
           down the page) for shoppers who want the whole catalog laid out
           rather than the curated favourites strip above. */}
-      <section id="departments" aria-labelledby="dept-h" className="container-x pt-32">
+      <section id="departments" aria-labelledby="dept-h" className="container-x pt-10 sm:pt-20 lg:pt-32">
         <SectionHead
           eyebrow={t("home.departmentsEyebrow")}
           title={t("home.shopByDepartment")}
           aside={t("home.departmentsSub")}
           id="dept-h"
         />
-        <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-12 sm:gap-5 lg:grid-cols-3">
           {departments.map((d) => {
             const deptName = departmentName(locale, d.slug, d.name);
             const deptImage = departmentImages[d.slug] || heroImageBySlug[d.slug] || null;
@@ -300,12 +308,12 @@ export default async function HomePage() {
                 key={d._id}
                 href={`/shop?category=${d._id}`}
                 data-reveal
-                className="group flex flex-col border border-line p-7 transition-colors hover:border-ink focus-ring"
+                className={`group flex-col rounded-xl border border-line p-3 transition-colors hover:border-ink focus-ring sm:flex sm:rounded-none sm:p-7 ${(departmentCounts[d._id] ?? 0) === 0 ? "hidden" : "flex"}`}
               >
-                <p className="text-right text-[12.5px] text-stone">
+                <p className="text-right text-[11.5px] text-stone sm:text-[12.5px]">
                   {t("home.productCount", { count: departmentCounts[d._id] ?? 0 })}
                 </p>
-                <div className="relative mt-3 aspect-4/3 overflow-hidden bg-media">
+                <div className="relative mt-2 aspect-4/3 overflow-hidden rounded-lg bg-media sm:mt-3 sm:rounded-none">
                   {deptImage && departmentImages[d.slug] && homepageFramingFor(imageFraming, "department.card", d.slug) ? (
                     <FramedImage
                       src={deptImage}
@@ -326,7 +334,7 @@ export default async function HomePage() {
                     <div aria-hidden="true" className="absolute inset-0 hatch" />
                   )}
                 </div>
-                <h3 className="mt-4 text-[17px] font-semibold">{deptName}</h3>
+                <h3 className="mt-2.5 text-[14px] font-semibold sm:mt-4 sm:text-[17px]">{deptName}</h3>
               </Link>
             );
           })}
@@ -353,7 +361,7 @@ export default async function HomePage() {
           />
         );
         return (
-          <section aria-label={t("home.bannerLabel")} className="container-x pt-32">
+          <section aria-label={t("home.bannerLabel")} className="container-x pt-10 sm:pt-20 lg:pt-32">
             {homepageSettings.banner.href ? (
               <Link href={homepageSettings.banner.href} className="block overflow-hidden rounded-2xl focus-ring">
                 {bannerImage}
@@ -384,8 +392,8 @@ export default async function HomePage() {
       {/* Stay updated — EShopper's own newsletter band between its Trending
           and Just Arrived sections. Same real, shared form as the footer's
           newsletter column (components/layout/NewsletterForm.jsx). */}
-      <section aria-labelledby="newsletter-h" className="container-x pt-32">
-        <div className="flex flex-col items-center gap-5 rounded-3xl border border-line bg-media px-6 py-14 text-center sm:px-14">
+      <section aria-labelledby="newsletter-h" className="container-x pt-10 sm:pt-20 lg:pt-32">
+        <div className="flex flex-col items-center gap-4 rounded-3xl border border-line bg-media px-5 py-8 text-center sm:gap-5 sm:px-14 sm:py-14">
           <h2 id="newsletter-h" className="text-[clamp(26px,2.6vw,34px)] font-semibold tracking-[-0.02em]">
             {t("footer.newsletterHeading")}
           </h2>
@@ -459,20 +467,20 @@ export default async function HomePage() {
       )}
 
       {/* Fabric story */}
-      <section aria-labelledby="fabric-h" className="container-x pt-32">
+      <section aria-labelledby="fabric-h" className="container-x pt-10 sm:pt-20 lg:pt-32">
         <SectionHead
           eyebrow={t("home.fabricStoryEyebrow")}
           title={t("home.fabricStoryTitle")}
           aside={t("home.fabricStoryAside")}
           id="fabric-h"
         />
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-12 sm:gap-5 lg:grid-cols-5">
           {FABRICS.map((f) => (
             <Link
               key={f.value}
               href={`/shop?fabric=${f.value}`}
               data-reveal
-              className="group relative flex min-h-[220px] flex-col justify-end overflow-hidden rounded-2xl bg-media p-6 focus-ring"
+              className="group relative flex min-h-[150px] flex-col justify-end overflow-hidden rounded-2xl bg-media p-4 focus-ring sm:min-h-[220px] sm:p-6"
             >
               {fabricImages[f.value] && homepageFramingFor(imageFraming, "fabric.tile", f.value) ? (
                 <FramedImage
@@ -496,9 +504,9 @@ export default async function HomePage() {
               )}
               <div aria-hidden="true" className="absolute inset-0 scrim" />
               <div className="relative">
-                <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(f.nameKey)}</h3>
-                <p className="mt-2 text-[13.5px] leading-[1.5] text-stone">{t(f.bodyKey)}</p>
-                <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-verm">
+                <h3 className="text-[17px] font-semibold tracking-[-0.02em] sm:text-[22px]">{t(f.nameKey)}</h3>
+                <p className="mt-2 hidden text-[13.5px] leading-[1.5] text-stone">{t(f.bodyKey)}</p>
+                <span className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold text-verm sm:mt-3 sm:text-[13px]">
                   {t("home.shopFabric", { name: t(f.nameKey) })}
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
                 </span>
@@ -509,20 +517,20 @@ export default async function HomePage() {
       </section>
 
       {/* Occasions */}
-      <section aria-labelledby="occ-h" className="container-x pt-32">
+      <section aria-labelledby="occ-h" className="container-x pt-10 sm:pt-20 lg:pt-32">
         <SectionHead
           eyebrow={t("home.occasionsEyebrow")}
           title={t("home.dressedForMoment")}
           aside={t("home.occasionsAside")}
           id="occ-h"
         />
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:mt-12 sm:gap-5 lg:grid-cols-4">
           {OCCASIONS.map((o) => (
             <Link
               key={o.value}
               href={`/shop?occasion=${o.value}`}
               data-reveal
-              className="group relative flex min-h-[200px] flex-col justify-end overflow-hidden rounded-2xl border border-line p-6 transition-colors hover:border-ink focus-ring"
+              className="group relative flex min-h-[130px] flex-col justify-end overflow-hidden rounded-2xl border border-line p-4 transition-colors sm:min-h-[200px] sm:p-6 hover:border-ink focus-ring"
             >
               {occasionImages[o.value] && homepageFramingFor(imageFraming, "occasion.tile", o.value) && (
                 <>
@@ -550,9 +558,9 @@ export default async function HomePage() {
                 </>
               )}
               <div className="relative">
-                <h3 className="text-[22px] font-semibold tracking-[-0.02em]">{t(o.nameKey)}</h3>
-                <p className="mt-2 text-[13.5px] leading-[1.5] text-stone">{t(o.bodyKey)}</p>
-                <span className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-semibold text-verm">
+                <h3 className="text-[17px] font-semibold tracking-[-0.02em] sm:text-[22px]">{t(o.nameKey)}</h3>
+                <p className="mt-2 hidden text-[13.5px] leading-[1.5] text-stone">{t(o.bodyKey)}</p>
+                <span className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold text-verm sm:mt-3 sm:text-[13px]">
                   {t("home.shopOccasion", { name: t(o.nameKey) })}
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
                 </span>
@@ -569,8 +577,8 @@ export default async function HomePage() {
           serif treatment to Leo's plain, restrained panel language (solid
           ink surface, no decorative texture) since Leo has no equivalent
           section of its own to copy directly. */}
-      <section id="campaign" aria-labelledby="camp-h" className="container-x pt-32">
-        <div className="rounded-3xl bg-ink px-8 py-14 text-canvas sm:px-14">
+      <section id="campaign" aria-labelledby="camp-h" className="container-x pt-10 sm:pt-20 lg:pt-32">
+        <div className="rounded-3xl bg-ink px-5 py-8 text-canvas sm:px-14 sm:py-14">
           <div className="max-w-[640px]">
             <div className="eyebrow text-canvas/60">{t("home.ourApproach")}</div>
             <h2 className="font-heading mt-4 text-[clamp(30px,3vw,44px)] font-extrabold leading-[1.05] tracking-[-0.02em] text-balance">

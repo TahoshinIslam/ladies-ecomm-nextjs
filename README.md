@@ -14,7 +14,7 @@ pnpm dev
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3100](http://localhost:3100) with your browser to see the result. The storefront runs on port **3100**; the dashboard (ERP) uses 3000.
 
 You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
 

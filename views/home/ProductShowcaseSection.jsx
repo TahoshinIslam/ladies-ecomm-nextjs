@@ -92,7 +92,7 @@ export default function ProductShowcaseSection({
   );
 
   return (
-    <section id={sectionId} aria-labelledby={headingId} className="container-x pt-32">
+    <section id={sectionId} aria-labelledby={headingId} className="container-x pt-10 sm:pt-20 lg:pt-32">
       <SectionHead eyebrow={eyebrow} title={title} sub={sub} id={headingId} bordered />
 
       <motion.div
@@ -100,7 +100,7 @@ export default function ProductShowcaseSection({
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: "-8% 0px" }}
         transition={{ duration: shouldReduceMotion ? 0 : 0.25, ease: [0.16, 1, 0.3, 1] }}
-        className="mt-9"
+        className="mt-5 sm:mt-9"
       >
         {departments?.length > 0 && (
           <CategoryTabs
@@ -115,12 +115,12 @@ export default function ProductShowcaseSection({
           <EmptyState icon={Icon} title={t("home.nothingHereYet")} message={t("home.noItemsGeneric")} />
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {shown.map((p, i) => (
                 <ProductCard key={p._id} product={p} index={i} />
               ))}
             </div>
-            <div className="mt-9 flex justify-center">
+            <div className="mt-6 flex justify-center sm:mt-9">
               <Link href={viewAllHref}>
                 <Button variant="subtle" size="lg">
                   {viewAllLabel}

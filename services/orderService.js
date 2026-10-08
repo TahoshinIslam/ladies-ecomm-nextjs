@@ -518,10 +518,11 @@ export async function createOrder(
 
   // Fire-and-forget admin notification (don't block the response). Only
   // reached when THIS request is the one that actually created the order.
-  const orderNumber = createdOrder._id.toString().slice(-6);
+  const orderNumber = createdOrder._id.toString().slice(-6).toUpperCase();
   createAdminNotification({
     message: `New order #${orderNumber} received`,
-    url: `/admin/orders`,
+    // The dashboard's own page for this order, so the bell opens the order to handle rather than the list.
+    url: `/dashboard/orders/${createdOrder._id}`,
   }).catch(() => {});
 
   // Low-stock check happens after the transaction commits — this reads the
@@ -632,10 +633,10 @@ export async function cancelOrder(userId, role, orderId) {
     return order;
   });
 
-  const orderNumber = orderId.toString().slice(-6);
+  const orderNumber = orderId.toString().slice(-6).toUpperCase();
   createAdminNotification({
     message: `Order #${orderNumber} was cancelled`,
-    url: "/admin/orders",
+    url: `/dashboard/orders/${orderId}`,
   }).catch(() => {});
 
   return updatedOrder;
@@ -738,11 +739,11 @@ export async function updateOrderStatus(orderId, { status, trackingNumber }) {
 
   if (!changed) return { order, changed: false };
 
-  const orderNumber = orderId.toString().slice(-6);
+  const orderNumber = orderId.toString().slice(-6).toUpperCase();
   if (["cancelled", "refunded"].includes(status)) {
     createAdminNotification({
       message: `Order #${orderNumber} marked as ${status}`,
-      url: "/admin/orders",
+      url: `/dashboard/orders/${orderId}`,
     }).catch(() => {});
   }
 

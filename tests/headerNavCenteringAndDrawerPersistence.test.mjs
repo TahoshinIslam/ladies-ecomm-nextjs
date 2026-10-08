@@ -24,19 +24,27 @@ describe("Header.jsx — HeaderCategoryMenu (\"All Categories\") is rendered sto
   });
 });
 
-describe("Header.jsx — the nav row is a left-anchored flex row (trigger + primary links together), not a 3-column centered grid", () => {
-  test("the nav row uses container-x (the same shared page-width utility as the hero/footer/every other section), not the old grid-cols-[1fr_auto_1fr] centering or a hand-rolled px-5/px-8/px-14 scale", () => {
-    assert.match(headerSrc, /container-x flex items-center gap-6"/);
-    assert.ok(!/grid-cols-\[1fr_auto_1fr\]/.test(headerSrc), "the center-balancing grid is gone now that the nav sits beside the trigger instead of needing to stay mathematically centered");
+describe("Header.jsx — the primary links are centred on the page, the hamburger / All Categories trigger sit in the left column", () => {
+  test("the nav row uses container-x with equal outer columns so the middle column is the page centre, and no hand-rolled px-5/px-8/px-14 scale", () => {
+    assert.match(headerSrc, /container-x grid grid-cols-\[1fr_auto_1fr\] items-center gap-6"/);
     assert.ok(!/px-5 sm:px-8 lg:px-14/.test(headerSrc), "the header's rows must share container-x's own padding, not a separately hand-tuned breakpoint scale that can drift out of sync with it");
   });
 
-  test("the hamburger button and the All Categories trigger share the row's first flex group, immediately followed by the primary nav — no trailing empty spacer column", () => {
-    const navRow = headerSrc.slice(headerSrc.indexOf('container-x flex items-center gap-6"'), headerSrc.indexOf('<nav aria-label="Primary"'));
+  test("the primary nav is placed in the middle column and centred; the hamburger and the All Categories trigger come before it in the left column", () => {
+    const navStart = headerSrc.indexOf('<nav aria-label="Primary"');
+    const navTag = headerSrc.slice(navStart, headerSrc.indexOf(">", navStart));
+    assert.match(navTag, /col-start-2/);
+    assert.match(navTag, /justify-center/);
+    const navRow = headerSrc.slice(headerSrc.indexOf("container-x grid grid-cols-[1fr_auto_1fr]"), navStart);
     assert.match(navRow, /toggleMobileMenu/);
     assert.match(navRow, /HeaderCategoryMenu categories=\{allCategories\}/);
-    const afterNav = headerSrc.slice(headerSrc.indexOf('<nav aria-label="Primary"'));
-    assert.ok(!/<div aria-hidden="true" \/>/.test(afterNav), "the empty spacer column that balanced the old centered grid must be gone");
+  });
+
+  test("the header carries the language and theme switches, no FAQ link and no cart button (the cart is the floating FloatingCart)", () => {
+    assert.match(headerSrc, /<LanguageSwitcher/);
+    assert.match(headerSrc, /toggleTheme/);
+    assert.ok(!/href="\/faq"/.test(headerSrc), "no FAQ link in the header");
+    assert.ok(!/toggleCart/.test(headerSrc), "the header no longer opens the cart; FloatingCart does");
   });
 });
 

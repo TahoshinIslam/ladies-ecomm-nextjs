@@ -9,22 +9,22 @@ export default function SectionHead({ eyebrow, title, sub, aside, id, action, bo
     <div
       data-reveal
       className={cn(
-        "flex flex-wrap items-end justify-between gap-6",
-        bordered && "border-b border-line pb-6",
+        "flex flex-wrap items-end justify-between gap-3 sm:gap-6",
+        bordered && "border-b border-line pb-3 sm:pb-6",
       )}
     >
       <div>
         <div className="eyebrow">{eyebrow}</div>
         <h2
           id={id}
-          className="mt-3.5 text-[clamp(34px,3.4vw,48px)] font-semibold leading-none tracking-[-0.03em]"
+          className="mt-2 text-[26px] font-semibold leading-none sm:mt-3.5 sm:text-[clamp(34px,3.4vw,48px)] tracking-[-0.03em]"
         >
           {title}
         </h2>
-        {sub && <p className="mt-3 text-lg text-stone">{sub}</p>}
+        {sub && <p className="mt-2 text-[14px] text-stone sm:mt-3 sm:text-lg">{sub}</p>}
       </div>
       {aside && (
-        <p className="max-w-[42ch] text-[15.5px] leading-[1.5] text-stone text-pretty">
+        <p className="hidden max-w-[42ch] text-[15.5px] sm:block leading-[1.5] text-stone text-pretty">
           {aside}
         </p>
       )}

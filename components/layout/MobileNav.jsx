@@ -3,20 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
-import { Heart, Home, Search, ShoppingBag, User } from "lucide-react";
+import { Heart, Home, LayoutGrid, ShoppingBag, User } from "lucide-react";
 
-import { toggleSearch } from "../../store/uiSlice.js";
+import { toggleMobileMenu } from "../../store/uiSlice.js";
 import { selectCurrentUser } from "../../store/authSlice.js";
 import { useGetWishlistQuery } from "../../store/shopApi.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { cn } from "../../lib/utils.js";
 
 /**
- * The board's mobile app shell: a fixed 5-tab bar (Home / Shop / Search /
- * Saved / Profile), with Search raised as an accent pill — the one persistent
- * piece of chrome across the whole mobile experience. Discovery (gender,
- * brands, journal) still lives in the header's hamburger drawer; this bar is
- * for the five destinations someone reaches for with a thumb, one-handed.
+ * The mobile app shell: a fixed 5-tab bar (Home / Shop / Categories /
+ * Saved / Profile) — the one persistent piece of chrome across the whole
+ * mobile experience. Search is the full-width field under the header, and the
+ * cart is the floating button at the bottom right, so neither needs a tab;
+ * Categories opens the same drawer as the hamburger.
  *
  * Shown below the `lg` breakpoint (phones AND tablets) — the same breakpoint
  * where the header switches to its hamburger drawer and where the product
@@ -46,14 +46,12 @@ export default function MobileNav() {
 
       <button
         type="button"
-        onClick={() => dispatch(toggleSearch())}
-        aria-label={t("navigation.search")}
-        className="flex flex-1 flex-col items-center justify-start gap-1.5 pt-0.5 text-stone transition-transform active:scale-95"
+        onClick={() => dispatch(toggleMobileMenu())}
+        aria-label={t("navigation.categories")}
+        className="flex h-[66px] flex-1 flex-col items-center justify-center gap-1 text-stone transition-transform active:scale-95"
       >
-        <span className="grid h-[38px] w-[46px] place-items-center rounded-xl bg-verm-contrast text-white shadow-[0_6px_16px_-8px_rgba(255,61,33,0.9)]">
-          <Search className="h-[21px] w-[21px]" strokeWidth={2} />
-        </span>
-        <span className="text-[10.5px] font-medium">{t("navigation.search")}</span>
+        <LayoutGrid className="h-[22px] w-[22px]" strokeWidth={1.6} />
+        <span className="mt-1 text-[10.5px] font-medium">{t("navigation.categories")}</span>
       </button>
 
       <NavTab
@@ -85,8 +83,7 @@ function NavTab({ href, label, icon: Icon, active, badge }) {
     >
       <span className="relative">
         {/* Active pill — a soft rounded chip behind the icon, distinct from
-            Search's permanent accent pill so "current tab" and "search" read
-            as two different signals rather than competing for the same one. */}
+            the other tabs. */}
         <span
           aria-hidden="true"
           className={cn(

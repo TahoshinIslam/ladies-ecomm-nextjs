@@ -247,15 +247,15 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           </div>
 
           {isUnavailable ? (
-            <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-ink/85 px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-canvas">
+            <span className="absolute left-2 top-2 inline-flex items-center rounded-md bg-ink/85 px-2 py-1 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-canvas sm:left-3 sm:top-3 sm:px-2.5 sm:py-1.5">
               {t("product.soldOut")}
             </span>
           ) : availabilityLabel ? (
-            <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-ink/85 px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-canvas">
+            <span className="absolute left-2 top-2 inline-flex items-center rounded-md bg-ink/85 px-2 py-1 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-canvas sm:left-3 sm:top-3 sm:px-2.5 sm:py-1.5">
               {availabilityLabel}
             </span>
           ) : discounted ? (
-            <span className="absolute left-3 top-3 inline-flex items-center rounded-md bg-verm-contrast px-2.5 py-1.5 font-mono text-[10px] uppercase leading-none tracking-[0.1em] text-white">
+            <span className="absolute left-2 top-2 inline-flex items-center rounded-md bg-danger px-2 py-1 font-mono text-[10px] font-bold uppercase leading-none tracking-[0.06em] text-white sm:left-3 sm:top-3 sm:px-2.5 sm:py-1.5">
               {t("product.discountBadge", {
                 percent: Math.round(
                   ((product.basePrice - product.discountPrice) / product.basePrice) * 100,
@@ -266,14 +266,14 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
         </Link>
 
         {/* Save / compare */}
-        <div className="absolute right-2.5 top-2.5 z-10 flex flex-col gap-2">
+        <div className="absolute right-2 top-2 z-10 flex flex-col gap-2 sm:right-2.5 sm:top-2.5">
             <button
               onClick={handleWishlist}
               disabled={wlLoading}
               aria-label={isWished ? t("product.removeSavedProduct", { name: product.name }) : t("product.saveProduct", { name: product.name })}
               aria-pressed={isWished}
               className={cn(
-                "grid h-[38px] w-[38px] place-items-center rounded-lg border border-line bg-elev transition-colors hover:border-ink focus-ring active:scale-95",
+                "grid h-8 w-8 place-items-center rounded-lg border border-line bg-elev transition-colors hover:border-ink focus-ring active:scale-95 sm:h-[38px] sm:w-[38px]",
                 isWished ? "text-verm" : "text-ink",
               )}
             >
@@ -288,7 +288,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
               aria-label={isCompared ? t("product.removeCompareProduct", { name: product.name }) : t("product.compareProduct", { name: product.name })}
               aria-pressed={isCompared}
               className={cn(
-                "grid h-[38px] w-[38px] place-items-center rounded-lg border border-line bg-elev opacity-0 transition-[opacity,color,border-color] hover:border-ink focus-ring focus-visible:opacity-100 group-hover:opacity-100",
+                "hidden h-[38px] w-[38px] place-items-center rounded-lg border border-line bg-elev opacity-0 transition sm:grid-[opacity,color,border-color] hover:border-ink focus-ring focus-visible:opacity-100 group-hover:opacity-100",
                 isCompared && "border-ink text-verm opacity-100",
                 compareFull && "opacity-40",
               )}
@@ -303,7 +303,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             category, rating, fabric, and swatches are real data the
             template has no fields for at all — kept, but folded into this
             centered layout rather than Leo's left-aligned stack. */}
-        <Link href={href} className="block min-w-0 border-b border-line px-3 pb-3 pt-4 text-center focus-ring">
+        <Link href={href} className="block min-w-0 flex-1 border-b border-line px-2 pb-2.5 pt-3 text-center focus-ring sm:px-3 sm:pb-3 sm:pt-4">
           {(categoryName || product.brand?.name) && (
             <div className="text-[11px] uppercase tracking-[0.08em] text-stone">
               {product.brand?.name || categoryName}
@@ -312,7 +312,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           <h3 className="mt-1 truncate text-[14px] font-semibold leading-[1.3] tracking-[-0.01em] text-ink md:text-[15.5px]">
             {product.name}
           </h3>
-          <div className="mt-1 flex items-center justify-center gap-1">
+          <div className={cn("mt-1 items-center justify-center gap-1", product.rating > 0 ? "flex" : "hidden sm:flex")}>
             <span className="flex items-center gap-0.5" aria-hidden="true">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Star
@@ -329,7 +329,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             </span>
           </div>
           <div className="mt-1.5 flex items-baseline justify-center gap-2">
-            <span data-tabular className="text-[15.5px] font-semibold text-ink">
+            <span data-tabular className="text-[15.5px] font-bold text-verm">
               {settings.formatPrice(price, product.priceCurrency)}
             </span>
             {discounted && (
@@ -339,7 +339,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
             )}
           </div>
           {(fabric || colorCount > 1) && (
-            <div className="mt-1 text-[12.5px] text-stone">
+            <div className="mt-1 hidden text-[12.5px] text-stone sm:block">
               {[fabric, colorCount > 1 && t("product.colorsCount", { count: colorCount })]
                 .filter(Boolean)
                 .join(" · ")}
@@ -366,7 +366,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
                 </span>
               )}
               {sizeValues.length > 0 && (
-                <span className="text-[10.5px] uppercase tracking-[0.04em] text-stone">
+                <span className="hidden text-[10.5px] uppercase tracking-[0.04em] text-stone sm:inline">
                   {sizeLabel}: {sizeValues.slice(0, VISIBLE_SIZES).map((v) => attrValue(locale, "size", v)).join(" · ")}
                   {sizeValues.length > VISIBLE_SIZES ? "…" : ""}
                 </span>
@@ -377,15 +377,15 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
 
         {/* Footer — EShopper's own two-link row (View Detail | Add To
             Cart) instead of Leo's single persistent full-width button. */}
-        <div className="flex items-center justify-between bg-wash px-3 py-2.5 text-[13px] font-medium">
-          <Link href={href} className="flex items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring">
+        <div className="flex items-center justify-center bg-wash px-2 py-2 text-[13px] font-medium sm:justify-between sm:px-3 sm:py-2.5">
+          <Link href={href} className="hidden items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring sm:flex">
             <Eye className="h-3.5 w-3.5 text-verm" strokeWidth={1.8} />
             {t("product.viewDetail")}
           </Link>
           {isUnavailable ? (
             <button
               onClick={handleNotify}
-              className="flex items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring"
+              className="flex w-full items-center justify-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring sm:w-auto"
             >
               <BellRing className="h-3.5 w-3.5 text-verm" strokeWidth={1.8} />
               {t("product.notifyIfReturns")}
@@ -393,7 +393,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
           ) : (
             <button
               onClick={handleQuickAdd}
-              className="flex items-center gap-1.5 text-ink transition-colors hover:text-verm focus-ring"
+              className="flex w-full items-center justify-center gap-1.5 font-semibold text-verm transition-colors hover:text-ink focus-ring sm:w-auto sm:font-medium sm:text-ink sm:hover:text-verm"
             >
               <ShoppingCart className="h-3.5 w-3.5 text-verm" strokeWidth={1.8} />
               {product.variants?.length > 1 ? t("quickAddSheet.chooseOptions") : t("product.quickAdd")}
