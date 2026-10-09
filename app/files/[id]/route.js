@@ -29,7 +29,7 @@ export async function GET(_request, { params }) {
   const { id } = await params;
 
   const rows = await query(
-    `SELECT mime_type, size_bytes, data
+    `SELECT id, mime_type, size_bytes, chunked, data
        FROM files
       WHERE id = ?
         AND organization_id = ?
@@ -41,7 +41,14 @@ export async function GET(_request, { params }) {
   const file = rows[0];
   if (!file) return new Response("Not found", { status: 404 });
 
-  return new Response(file.data, {
+  // A picture bigger than half a megabyte is stored as numbered pieces (see the dashboard's migration 117); join them in order.
+  let bytes = file.data;
+  if (Number(file.chunked)) {
+    const pieces = await query("SELECT data FROM file_chunks WHERE file_id = ? ORDER BY seq", [file.id]);
+    bytes = Buffer.concat(pieces.map((p) => p.data));
+  }
+
+  return new Response(bytes, {
     headers: {
       "Content-Type": file.mime_type,
       "Content-Length": String(file.size_bytes),

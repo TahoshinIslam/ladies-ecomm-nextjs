@@ -23,9 +23,6 @@ const VALID_ENV = {
   DB_USER: "tahos_app",
   APP_ORIGIN: "https://tahos.store",
   CLIENT_URL: "https://tahos.store",
-  CLOUDINARY_CLOUD_NAME: "tahos-real-cloud",
-  CLOUDINARY_API_KEY: "123456789012345678901234",
-  CLOUDINARY_API_SECRET: "zK9mQpLwVr72TnHs04ByXeUdCf381Gjq",
   SMTP_HOST: "smtp.sendgrid.net",
   SMTP_PORT: "587",
   SMTP_USER: "apikey",
@@ -93,44 +90,11 @@ describe("validateProductionEnv — rejects localhost/placeholder/example values
   });
 });
 
-describe("validateProductionEnv — CLOUDINARY_API_KEY is a non-secret identifier, not a strength-checked secret", () => {
-  test("a realistic synthetic 15-digit Cloudinary API key passes (previously wrongly failed the >=16-char secret heuristic)", () => {
-    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "123456789012345" };
-    assert.deepEqual(validateProductionEnv(env), []);
-  });
-
-  test("rejects an empty CLOUDINARY_API_KEY", () => {
-    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "" };
-    const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_KEY:")));
-  });
-
-  test("rejects a whitespace-only CLOUDINARY_API_KEY", () => {
-    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "   " };
-    const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_KEY:")));
-  });
-
-  test("rejects a placeholder-shaped CLOUDINARY_API_KEY", () => {
-    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "changeme" };
-    const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_KEY:")));
-  });
-
-  test("a weak/short CLOUDINARY_API_SECRET is still rejected (the real secret keeps strong validation)", () => {
-    const env = { ...VALID_ENV, CLOUDINARY_API_SECRET: "short" };
-    const problems = validateProductionEnv(env);
-    assert.ok(problems.some((p) => p.startsWith("CLOUDINARY_API_SECRET:")));
-  });
-
-  test("every reported problem is a field-name + reason string only, never the offending value", () => {
-    const secretSentinel = "zqx9f2"; // short (triggers looksWeak) and not an English word, so it can't coincidentally appear in a reason string
-    const env = { ...VALID_ENV, CLOUDINARY_API_KEY: "changeme", CLOUDINARY_API_SECRET: secretSentinel, SMTP_PASS: secretSentinel };
-    const problems = validateProductionEnv(env);
-    assert.ok(problems.length >= 3, "expected all three fixtures to actually fail, or this test proves nothing");
-    for (const p of problems) {
-      assert.doesNotMatch(p, new RegExp(secretSentinel), "problem string must never echo back the actual submitted value");
-    }
+describe("validateProductionEnv — uploads live in the database, so no image-host credentials are required", () => {
+  test("a production environment without any Cloudinary variable is valid, and none is checked", () => {
+    const problems = validateProductionEnv(VALID_ENV);
+    assert.deepEqual(problems.filter((p) => /CLOUDINARY/.test(p)), []);
+    assert.ok(!Object.keys(VALID_ENV).some((k) => k.startsWith("CLOUDINARY")));
   });
 });
 

@@ -15,23 +15,28 @@ const pickWritable = (body) => {
   return out;
 };
 
-// Keeps the tree at most 3 levels: division (parent: null, e.g. Clothes) ->
-// department (e.g. Burqa, or a root like Cosmetics that IS a department) ->
-// style/leaf. A category can be used as a parent as long as ITS OWN parent
-// chain is at most 1 deep already — i.e. rejects only a 4th level. A
-// missing `parent` defaults to null (a new root category) — this is what
-// lets the existing, unmodified CategoriesPage.jsx form (which has no
-// parent field) still create valid root categories.
-async function validateParent(parentId) {
+// Categories nest as deep as the shop needs (Food -> Snacks -> Biscuits -> Milk Biscuits -> ...). The only limits are the ones that
+// protect the tree itself: the parent must exist, a category cannot sit under itself or under one of its own descendants (that would cut
+// both off from the root), and a very large depth is refused as a safety bound against a runaway loop, not as a product rule. A missing
+// `parent` defaults to null (a new root category).
+export const MAX_CATEGORY_DEPTH = 32;
+
+async function validateParent(parentId, categoryId = null) {
   if (!parentId) return null;
   if (!isObjectIdFormat(parentId)) throw new HttpError(400, "Invalid parent category id");
   const parent = await Category.findById(parentId);
   if (!parent) throw new HttpError(400, "Parent category not found");
-  if (parent.parent) {
-    const grandparent = await Category.findById(parent.parent);
-    if (grandparent?.parent) {
-      throw new HttpError(400, "Categories can only be nested up to 3 levels deep (division -> department -> style)");
+
+  // Walk up from the proposed parent: meeting the category itself means the move would make it its own ancestor.
+  let cursor = parent;
+  let hops = 0;
+  while (cursor) {
+    if (categoryId && String(cursor._id) === String(categoryId)) {
+      throw new HttpError(400, "A category cannot be moved under itself or one of its own subcategories");
     }
+    hops += 1;
+    if (hops > MAX_CATEGORY_DEPTH) throw new HttpError(400, `Categories can nest ${MAX_CATEGORY_DEPTH} levels deep at most`);
+    cursor = cursor.parent ? await Category.findById(cursor.parent) : null;
   }
   return parent._id;
 }
@@ -68,7 +73,7 @@ export async function updateCategory(id, body) {
     if (String(data.parent) === String(id)) {
       throw new HttpError(400, "A category cannot be its own parent");
     }
-    data.parent = await validateParent(data.parent);
+    data.parent = await validateParent(data.parent, id);
   }
   Object.assign(category, data);
   await category.save();

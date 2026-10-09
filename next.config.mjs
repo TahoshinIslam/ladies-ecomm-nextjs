@@ -62,6 +62,9 @@ securityHeaders.push({ key: "Strict-Transport-Security", value: "max-age=1555200
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Build/dev output folder. Normally `.next`; `npm run dev:org` points a second storefront (another shop's) at its own folder so two dev
+  // servers can run from this one checkout without fighting over the same lock.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // There is a stray package-lock.json in the parent directory, which makes
   // Turbopack infer the workspace root incorrectly. Pin it to this project.
   turbopack: {
@@ -87,10 +90,9 @@ const nextConfig = {
     // Phase 9 — HTTPS-only, minimally scoped to the remote origins this
     // app actually serves images from.
     //
-    // `res.cloudinary.com` is where an admin's own image uploads land
-    // (services/uploadService.js). It can't be narrowed further to a
-    // specific cloud-name path segment here: config/cloudinary.js
-    // resolves the cloud name from CLOUDINARY_URL/CLOUDINARY_CLOUD_NAME
+    // Uploads are stored in the database and served from this app at /files/<id>, so they need no remote host. `res.cloudinary.com` is
+    // kept only so an older image that was pasted in by URL still displays. It can't be narrowed further to a specific cloud-name path
+    // segment here: the cloud name is part of the URL the owner pasted
     // at runtime (it differs between local dev, CI/test, and
     // production), so a hostname-only pattern is the narrowest one that
     // stays correct in every environment without hardcoding an

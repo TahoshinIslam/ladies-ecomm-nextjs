@@ -1,7 +1,8 @@
 "use client";
 
-// The real 3-column hover drill-down (department -> style -> further
-// style) shared by CategorySidebar.jsx (the home page's always-open list
+// The real hover drill-down, one column per level and as many levels as the
+// category tree has (Food -> Snacks -> Biscuits -> Milk Biscuits -> ...),
+// shared by CategorySidebar.jsx (the home page's always-open list
 // beside the hero) and HeaderCategoryMenu.jsx (the header's "All
 // Categories" trigger, shown on every page except the home page) — extracted so every entry
 // point can never drift into two different navigation experiences. Owns
@@ -43,29 +44,26 @@ function effectiveIconFor(category, categories) {
 export default function CategoryDrillMenu({ categories, onNavigate, className }) {
   const { locale } = useLocale();
   const topLevel = categories.filter((c) => !c.parent);
-  const [hoverId, setHoverId] = useState(null);
-  const [activeMidId, setActiveMidId] = useState(null);
+  // The hovered/focused node at each level, from the top-level list down: path[0] is the department, path[1] the subcategory
+  // opened beside it, path[2] the one opened beside that, and so on. A column to the right exists only while the node before it
+  // has subcategories — never an empty panel.
+  const [path, setPath] = useState([]);
 
   const childrenOf = (parentId) => categories.filter((c) => String(c.parent) === String(parentId));
 
-  const midColumn = hoverId ? childrenOf(hoverId) : [];
-  // Deliberately NOT defaulting to midColumn[0] the way CategoryMegaMenu.jsx
-  // does for its own (click-to-open) flyout: this menu opens on a plain
-  // hover of the top-level row, so auto-selecting the first mid item made
-  // the right (3rd) column pop up immediately too — before the shopper had
-  // hovered any subcategory at all. Only an explicit hover/focus on a
-  // mid-column item (setActiveMidId below) reveals column 3.
-  const effectiveMidId =
-    activeMidId && midColumn.some((c) => String(c._id) === String(activeMidId)) ? activeMidId : null;
-  const rightColumn = effectiveMidId ? childrenOf(effectiveMidId) : [];
+  const columns = [];
+  for (let level = 0; level < path.length; level += 1) {
+    const kids = childrenOf(path[level]);
+    if (!kids.length) break;
+    columns.push({ level, parentId: path[level], items: kids });
+  }
 
-  const clearHover = () => {
-    setHoverId(null);
-    setActiveMidId(null);
-  };
+  // Hovering/focusing a node at `level` makes it the open one there and closes everything deeper.
+  const openAt = (level, id) => setPath((p) => (String(p[level]) === String(id) ? p.slice(0, level + 1) : [...p.slice(0, level), id]));
+  const clearHover = () => setPath([]);
 
   // Ref map (category id -> its link element) for the keyboard fixes below.
-  // The mid/right flyouts are DOM SIBLINGS of the scrolling top-level <ul>
+  // The flyout columns are DOM SIBLINGS of the scrolling top-level <ul>
   // (not descendants) — required so the ul's own overflow-y-auto (this list
   // runs to 20 departments) doesn't clip a flyout escaping horizontally via
   // `left-full`. That sibling placement means default Tab order walks
@@ -80,7 +78,48 @@ export default function CategoryDrillMenu({ categories, onNavigate, className })
   };
   const focusItem = (id) => itemRefs.current[id]?.focus();
 
+  // A node with subcategories is browsed by its own id (every product beneath it, at any depth); a node with none is a style of its own.
+  const hrefFor = (node, hasKids) => (hasKids ? `/shop?category=${node._id}` : `/shop?style=${node._id}`);
+
+  const onKeyDown = (e, { level, node, kids, firstInColumn }) => {
+    if (e.key !== "Tab") return;
+    if (!e.shiftKey && kids.length > 0) {
+      e.preventDefault();
+      focusItem(kids[0]._id);
+    } else if (e.shiftKey && firstInColumn && level > 0) {
+      e.preventDefault();
+      focusItem(path[level - 1]);
+    }
+  };
+
   if (topLevel.length === 0) return null;
+
+  const renderRow = (node, level, index, items, extraClass) => {
+    const Icon = effectiveIconFor(node, categories);
+    const kids = childrenOf(node._id);
+    const active = String(node._id) === String(path[level]);
+    return (
+      <Link
+        ref={setItemRef(node._id)}
+        key={node._id}
+        href={hrefFor(node, kids.length > 0)}
+        onMouseEnter={() => openAt(level, node._id)}
+        onFocus={() => openAt(level, node._id)}
+        onClick={onNavigate}
+        onKeyDown={(e) => onKeyDown(e, { level, node, kids, firstInColumn: index === 0 })}
+        // `py-2.5`: the same row padding in every column, so rows line up across them.
+        className={`flex items-center gap-3 px-4 py-2.5 text-[13.5px] transition-colors focus-ring ${extraClass} ${
+          active ? "bg-verm text-accent-foreground" : "text-ink hover:bg-verm hover:text-accent-foreground"
+        }`}
+      >
+        <Icon className="h-4 w-4 flex-none" strokeWidth={1.8} aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate">{departmentName(locale, node.slug, node.name)}</span>
+        {kids.length > 0 && (
+          <ChevronRight className={`h-3.5 w-3.5 flex-none ${active ? "text-accent-foreground/70" : "text-stone"}`} aria-hidden="true" />
+        )}
+      </Link>
+    );
+  };
 
   return (
     <div onMouseLeave={clearHover} className={cn("relative flex", className)}>
@@ -94,147 +133,28 @@ export default function CategoryDrillMenu({ categories, onNavigate, className })
           active row's flush `bg-verm` is a plain rectangle that visibly
           overlaps the parent's rounded corners, since the parent itself
           must stay `overflow-visible` for the flyout columns below to
-          escape horizontally. `overflow-y-auto` already computes to
-          'auto' on the x-axis too per spec when only one axis is set, and
-          'auto' clips to border-radius the same as 'hidden' — no separate
-          `overflow-hidden` needed, and this `<ul>` is a SIBLING of the
-          flyout (never an ancestor), so this clip can never touch it.
-          `py-1`: matches the mid/right flyout columns' own wrapper
-          `py-1` below exactly — this used to be a taller top/bottom
-          inset (six Tailwind spacing units vs. their four), a 2px
-          top-edge mismatch across all three columns since every column's
-          box top is otherwise the same reference point (each has its own
-          1px border, canceling out identically). */}
+          escape horizontally. This `<ul>` is a SIBLING of the flyout
+          (never an ancestor), so its clip can never touch it. */}
       <ul className="min-h-0 flex-1 divide-y divide-line overflow-y-auto rounded-[22px] py-1">
-        {topLevel.map((d) => {
-          const Icon = effectiveIconFor(d, categories);
-          const kids = childrenOf(d._id);
-          const active = String(d._id) === String(hoverId);
-          return (
-            <li key={d._id}>
-              <Link
-                ref={setItemRef(d._id)}
-                href={`/shop?category=${d._id}`}
-                onMouseEnter={() => setHoverId(d._id)}
-                onFocus={() => setHoverId(d._id)}
-                onClick={onNavigate}
-                onKeyDown={(e) => {
-                  if (e.key === "Tab" && !e.shiftKey && kids.length > 0) {
-                    e.preventDefault();
-                    focusItem(kids[0]._id);
-                  }
-                }}
-                // `py-2.5`: matches the mid/right columns' own row padding
-                // exactly (was `py-[11px]`, a 1px-per-row mismatch that
-                // compounded down the list).
-                className={`flex items-center gap-3 px-4 py-2.5 text-[13.5px] font-medium transition-colors focus-ring ${
-                  active ? "bg-verm text-accent-foreground" : "text-ink hover:bg-verm hover:text-accent-foreground"
-                }`}
-              >
-                <Icon className="h-4 w-4 flex-none" strokeWidth={1.8} aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate">{departmentName(locale, d.slug, d.name)}</span>
-                {kids.length > 0 && (
-                  <ChevronRight className={`h-3.5 w-3.5 flex-none ${active ? "text-accent-foreground/70" : "text-stone"}`} aria-hidden="true" />
-                )}
-              </Link>
-            </li>
-          );
-        })}
+        {topLevel.map((d, i) => (
+          <li key={d._id}>{renderRow(d, 0, i, topLevel, "font-medium")}</li>
+        ))}
       </ul>
 
-      {hoverId && midColumn.length > 0 && (
+      {columns.length > 0 && (
         <div
-          // Deliberately NOT a fixed width covering both the mid AND right
-          // columns: that made the right column's own wrapper div always
-          // occupy real space — rendered empty, but still a very visible
-          // blank white panel — every time a department was hovered, even
-          // before any mid-column item had been. The right column's
-          // wrapper is only mounted at all once a mid item with real
-          // children is actually hovered (see below), so with nothing
-          // hovered yet this flyout is just the mid column's own width.
-          className="absolute left-full top-0 z-[95] flex h-full min-h-full overflow-hidden border border-l-0 border-line bg-surface shadow-soft"
+          // One flex row of columns, each opening to the right of the one before. It scrolls sideways if a very deep branch runs out of
+          // room rather than spilling off-screen.
+          className="absolute left-full top-0 z-[95] flex h-full min-h-full max-w-[calc(100vw-340px)] overflow-x-auto overflow-y-hidden border border-l-0 border-line bg-surface shadow-soft"
         >
-          <div className="w-[200px] flex-none divide-y divide-line overflow-y-auto border-r border-line py-1">
-            {midColumn.map((c) => {
-              const Icon = effectiveIconFor(c, categories);
-              const active = String(c._id) === String(effectiveMidId);
-              const grandkids = childrenOf(c._id);
-              // `category=<parent>&style=<self>` only ever matches real
-              // products when `c` is itself a genuine leaf (services/
-              // productService.js maps `style` to a `category` filter and
-              // `category` to `topCategory` — both must hold on the same
-              // product). Once `c` has its own children (a department like
-              // Burqa sitting under a Men/Women division, or a marketplace
-              // mid-tier like Food's "Fruits & Vegetables"), no product's
-              // own `category` is literally `c` — that composite href
-              // silently resolves to zero results. Browsing `c` directly by
-              // its own id (exactly how a top-level department link works)
-              // is the correct target either way.
-              const href = grandkids.length > 0 ? `/shop?category=${c._id}` : `/shop?style=${c._id}`;
-              return (
-                <Link
-                  ref={setItemRef(c._id)}
-                  key={c._id}
-                  href={href}
-                  onMouseEnter={() => setActiveMidId(c._id)}
-                  onFocus={() => setActiveMidId(c._id)}
-                  onClick={onNavigate}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Tab") return;
-                    if (!e.shiftKey && grandkids.length > 0) {
-                      e.preventDefault();
-                      focusItem(grandkids[0]._id);
-                    } else if (e.shiftKey && midColumn[0]?._id === c._id) {
-                      e.preventDefault();
-                      focusItem(hoverId);
-                    }
-                  }}
-                  className={`flex items-center gap-3 px-4 py-2.5 text-[13.5px] transition-colors focus-ring ${
-                    active ? "bg-verm text-accent-foreground" : "text-ink hover:bg-verm hover:text-accent-foreground"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 flex-none" strokeWidth={1.8} aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{departmentName(locale, c.slug, c.name)}</span>
-                  {grandkids.length > 0 && (
-                    <ChevronRight className={`h-3.5 w-3.5 flex-none ${active ? "text-accent-foreground/70" : "text-stone"}`} aria-hidden="true" />
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-          {/* Only mounted when the hovered mid-item actually has further
-              children — never just to show a "nothing further" message. A
-              mid-item with none (the common case: this catalog is mostly a
-              flat 2-level department -> style tree) already has no chevron
-              promising one, so a 3rd column here would be an unexplained
-              blank-ish panel, not useful information. */}
-          {effectiveMidId && rightColumn.length > 0 && (
-            <div className="w-[240px] flex-none divide-y divide-line overflow-y-auto py-1">
-              {rightColumn.map((c) => {
-                const Icon = effectiveIconFor(c, categories);
-                const greatGrandkids = childrenOf(c._id);
-                return (
-                  <Link
-                    ref={setItemRef(c._id)}
-                    key={c._id}
-                    href={`/shop?style=${c._id}`}
-                    onClick={onNavigate}
-                    onKeyDown={(e) => {
-                      if (e.key === "Tab" && e.shiftKey && rightColumn[0]?._id === c._id) {
-                        e.preventDefault();
-                        focusItem(effectiveMidId);
-                      }
-                    }}
-                    className="flex items-center gap-3 px-4 py-2.5 text-[13.5px] text-ink transition-colors focus-ring hover:bg-verm hover:text-accent-foreground"
-                  >
-                    <Icon className="h-4 w-4 flex-none" strokeWidth={1.8} aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{departmentName(locale, c.slug, c.name)}</span>
-                    {greatGrandkids.length > 0 && <ChevronRight className="h-3.5 w-3.5 flex-none text-stone" aria-hidden="true" />}
-                  </Link>
-                );
-              })}
+          {columns.map(({ level, parentId, items }) => (
+            <div
+              key={`${level}-${parentId}`}
+              className="w-[220px] flex-none divide-y divide-line overflow-y-auto border-r border-line py-1 last:border-r-0"
+            >
+              {items.map((c, i) => renderRow(c, level + 1, i, items, ""))}
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>

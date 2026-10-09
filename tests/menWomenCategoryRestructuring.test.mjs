@@ -36,8 +36,8 @@ describe("lib/storefrontDepartments.js — sortDepartmentsForFavourites keeps sh
 });
 
 describe("CategoryDrillMenu.jsx — mid-column links never use the broken category+style composite for a non-leaf item", () => {
-  test("a mid-column item with its own children links to /shop?category=<itself>, not /shop?category=<parent>&style=<itself>", () => {
-    assert.match(drillMenuSrc, /const href = grandkids\.length > 0 \? `\/shop\?category=\$\{c\._id\}` : `\/shop\?style=\$\{c\._id\}`;/);
+  test("an item at any column with its own children links to /shop?category=<itself>, not /shop?category=<parent>&style=<itself>", () => {
+    assert.match(drillMenuSrc, /hasKids \? `\/shop\?category=\$\{node\._id\}` : `\/shop\?style=\$\{node\._id\}`/);
     assert.ok(!/category=\$\{hoverId\}&style=\$\{c\._id\}/.test(drillMenuSrc), "the old composite href (0 results for any non-leaf mid item, e.g. Burqa under Women or Food's Fruits & Vegetables) must be gone");
   });
 });

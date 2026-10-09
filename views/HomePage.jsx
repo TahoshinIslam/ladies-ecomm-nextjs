@@ -29,6 +29,7 @@ import { getT, getServerLocale } from "../lib/i18n/server.js";
 import { localizeProductList, localizeCategoryList } from "../lib/i18n/localize.js";
 import { departmentName } from "../lib/i18n/catalog.js";
 import { resolveImage } from "../lib/utils.js";
+import { departmentImagesBySlug } from "../lib/categoryImages.js";
 import { buildMiniBannerSlots, pickMiniBannerProducts } from "../lib/miniBanners.js";
 import FramedImage from "../components/ui/FramedImage.jsx";
 import { homepageFramingFor } from "../lib/imageFraming.js";
@@ -171,7 +172,7 @@ export default async function HomePage() {
   // Admin-set images (Shop Config → Departments/Fabric Story/Occasions/
   // Guided Discovery) — every key defaults to "" server-side, so a plain
   // object read is always safe without per-field optional chaining below.
-  const departmentImages = homepageSettings.departmentImages || {};
+  const departmentImages = departmentImagesBySlug(homepageSettings, rawCategories);
   const fabricImages = homepageSettings.fabricImages || {};
   const occasionImages = homepageSettings.occasionImages || {};
   const guidedFinderImage = homepageSettings.guidedFinderImage || null;

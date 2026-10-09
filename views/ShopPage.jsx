@@ -1,3 +1,4 @@
+import { departmentImagesBySlug } from "../lib/categoryImages.js";
 import { headers } from "next/headers";
 
 import ShopPageClient from "./shop/ShopPageClient.jsx";
@@ -64,7 +65,7 @@ export default async function ShopPage({ searchParams }) {
   // useGetCategoriesQuery() still fires and takes over for freshness, so
   // this is not a second, competing data source, only a first-paint seed.
   const [categories, publicSettings] = await Promise.all([getCachedCategories(), getCachedPublicSettings()]);
-  const departmentImages = publicSettings?.homepage?.departmentImages || {};
+  const departmentImages = departmentImagesBySlug(publicSettings?.homepage, categories);
   // Saved crops for the category-tile row (Admin → Shop Config → Departments).
   const imageFraming = publicSettings?.homepage?.imageFraming || {};
 
