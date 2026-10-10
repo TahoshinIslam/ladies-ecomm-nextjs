@@ -35,6 +35,10 @@ const wishlistEndpoints = (b) => ({
     query: (productId) => ({ url: `/wishlist/${productId}`, method: "POST" }),
     invalidatesTags: ["Wishlist"],
   }),
+  addToWishlist: b.mutation({
+    query: (productId) => ({ url: `/wishlist/${productId}`, method: "PUT" }),
+    invalidatesTags: ["Wishlist"],
+  }),
   clearWishlist: b.mutation({
     query: () => ({ url: "/wishlist", method: "DELETE" }),
     invalidatesTags: ["Wishlist"],
@@ -275,6 +279,7 @@ export const {
   useClearCartMutation,
   useGetWishlistQuery,
   useToggleWishlistMutation,
+  useAddToWishlistMutation,
   useClearWishlistMutation,
   useCheckCartMutation,
   usePreviewOrderMutation,

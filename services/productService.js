@@ -168,6 +168,10 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
 
     // Storefront URL aliases: ?category= is the department (topCategory),
     // ?style= is the specific subcategory (category).
+    //
+    // listProducts has already expanded each id to itself plus every category beneath it and `?category=` matches the product's OWN
+    // category, so a node at any depth finds every product filed anywhere under it. (The denormalised `top_category_id` is only the
+    // product's immediate parent and cannot answer that for a tree of unlimited depth.)
     const key = rawKey === "category" ? "topCategory" : rawKey === "style" ? "category" : rawKey;
 
     if (key === "basePrice") {
@@ -244,6 +248,12 @@ export const buildFilter = (query, base = {}, scopeIds = null) => {
           clauses.push(`${column} = ?`);
           params.push(isTruthyParam(values[0]) ? 1 : 0);
 
+        } else if (rawKey === "category" && key === "topCategory") {
+          // listProducts passes the whole subtree here, so the product's own category matches at any depth. A caller that passes a bare
+          // department id (no expansion) still matches through the denormalised immediate parent.
+          const marks = values.map(() => "?").join(",");
+          clauses.push(`(category_id IN (${marks}) OR ${column} IN (${marks}))`);
+          params.push(...values, ...values);
         } else {
           clauses.push(`${column} IN (${values.map(() => "?").join(",")})`);
           params.push(...values);
@@ -564,18 +574,30 @@ export async function parseProductListQuery(query) {
   return out;
 }
 
-// If `categoryId` is a division (Clothes) whose children are themselves
-// departments (Burqa, with further leaf children of its own) rather than
-// leaves, no product's `topCategory` is ever the division's own id — it
-// expands to the division's direct children (the real departments)
-// instead. A root department (Cosmetics) or an already-department id
-// (Burqa) is returned unchanged.
+// A category plus every category beneath it, at any depth. One read of the (small) category table, then a walk in memory.
+export async function categorySubtreeIds(rootIds) {
+  const all = await Category.findAll();
+  const childrenOf = new Map();
+  for (const c of all) {
+    if (!c.parent) continue;
+    const list = childrenOf.get(c.parent) || [];
+    list.push(c._id);
+    childrenOf.set(c.parent, list);
+  }
+  const out = new Set();
+  const queue = [...rootIds];
+  while (queue.length) {
+    const id = queue.shift();
+    if (out.has(id)) continue;
+    out.add(id);
+    queue.push(...(childrenOf.get(id) || []));
+  }
+  return [...out];
+}
+
+// Kept for callers that ask "which categories does this one cover?" — itself and everything beneath it.
 export async function expandCategoryScope(categoryId) {
-  const children = await Category.findByParent(categoryId);
-  if (!children.length) return [categoryId];
-  const grandchildRows = await Category.findChildIdsByParents(children.map((c) => c._id));
-  const isDivision = grandchildRows.length > 0;
-  return isDivision ? children.map((c) => c._id) : [categoryId];
+  return categorySubtreeIds([categoryId]);
 }
 
 async function stripInapplicableAttributeFilters(query, deptId) {
@@ -591,20 +613,34 @@ async function stripInapplicableAttributeFilters(query, deptId) {
   return out;
 }
 
+// ?category=<id>[,<id>] and ?style=<id>[,<id>]: each valid id becomes itself plus every descendant, so the product filter works for a
+// category at any depth (Food, Snacks, Biscuits, ... all return the products filed beneath them). Anything that is not a well-formed id
+// is passed through untouched and simply matches nothing.
 async function expandCategoryQueryParam(query) {
-  const raw = query?.category;
-  if (!raw || typeof raw !== "string") return query;
-  const ids = raw.split(",").map((v) => v.trim()).filter(Boolean);
-  if (ids.length !== 1 || !isObjectIdFormat(ids[0])) return query;
-  const expanded = await expandCategoryScope(ids[0]);
-  return expanded.length > 1 ? { ...query, category: expanded.join(",") } : query;
+  const out = { ...query };
+  let changed = false;
+  for (const key of ["category", "style"]) {
+    const raw = query?.[key];
+    if (!raw || typeof raw !== "string") continue;
+    const ids = raw.split(",").map((v) => v.trim()).filter(Boolean);
+    if (!ids.length || !ids.every(isObjectIdFormat)) continue;
+    out[key] = (await categorySubtreeIds(ids)).join(",");
+    changed = true;
+  }
+  return changed ? out : query;
 }
 
-function resolveSingleDepartmentId(query) {
+// The single department id a query names, if it names exactly one — used to drop attribute filters that do not apply to it. Only a
+// department in the old sense (a category whose children are all leaves) has attribute definitions of its own; a higher node does not.
+async function resolveSingleDepartmentId(query) {
   const raw = query?.category;
   if (!raw || typeof raw !== "string") return null;
   const ids = raw.split(",").map((v) => v.trim()).filter(Boolean);
-  return ids.length === 1 && isObjectIdFormat(ids[0]) ? ids[0] : null;
+  if (ids.length !== 1 || !isObjectIdFormat(ids[0])) return null;
+  const children = await Category.findByParent(ids[0]);
+  if (!children.length) return ids[0];
+  const grandchildren = await Category.findChildIdsByParents(children.map((c) => c._id));
+  return grandchildren.length ? null : ids[0];
 }
 
 const SORT_COLUMN = { createdAt: "created_at", basePrice: "base_price", rating: "rating", isFeatured: "is_featured", name: "name" };
@@ -619,8 +655,9 @@ function parseSort(sortStr) {
 }
 
 export async function listProducts(query, { isAdmin = false, includeFacets = true } = {}) {
+  // Decide which attribute filters apply from the category the shopper actually named, then widen the category filters to whole subtrees.
+  query = await stripInapplicableAttributeFilters(query, await resolveSingleDepartmentId(query));
   query = await expandCategoryQueryParam(query);
-  query = await stripInapplicableAttributeFilters(query, resolveSingleDepartmentId(query));
   const baseFilter = isAdmin ? {} : { isActive: true };
   const scopeIds = isAdmin ? null : await getStorefrontDepartmentIds();
   const { where, params } = buildFilter(query, baseFilter, scopeIds);
@@ -669,80 +706,60 @@ export async function listFeatured(limit = 8) {
   return Product.findByFilter(where, params, { sort: [{ column: "rating", dir: "DESC" }], skip: 0, limit });
 }
 
+// The tiles under a category (or the top-level ones when none is named). Each tile's count covers everything filed anywhere beneath it,
+// however deep, so "Snacks" counts its biscuits and noodles too. `isLeaf` says whether the tile has subcategories of its own.
 export async function listGroupings(categoryId) {
   if (categoryId) requireObjectIdFormat(categoryId, "category");
-  const categories = categoryId ? await Category.findByParent(categoryId) : await Category.findByParent(null);
-  if (categories.length === 0) return [];
-
-  const categoryIds = categories.map((c) => c._id);
-
-  if (!categoryId) {
-    const childRows = await Category.findChildIdsByParents(categoryIds);
-    const childToRoot = new Map(childRows.map((ch) => [ch.id, ch.parent_id]));
-    const allScopeIds = [...categoryIds, ...childRows.map((ch) => ch.id)];
-
-    const { where, params } = buildFilter({}, { isActive: true }, null);
-    const scoped = allScopeIds.length
-      ? `${where} AND top_category_id IN (${allScopeIds.map(() => "?").join(",")})`
-      : "1=0";
-    const counted = await Product.groupCountByFilter("top_category_id", scoped, [...params, ...allScopeIds]);
-
-    const countByRoot = new Map();
-    for (const row of counted) {
-      const rootId = childToRoot.get(row.grp) ?? row.grp;
-      countByRoot.set(rootId, (countByRoot.get(rootId) ?? 0) + row.count);
-    }
-
-    return categories
-      .map((c) => ({
-        _id: c._id,
-        name: c.name,
-        nameBn: c.nameBn,
-        slug: c.slug,
-        count: countByRoot.get(c._id) ?? 0,
-        isLeaf: false,
-      }))
-      .filter((g) => g.count > 0);
+  const all = await Category.findAll();
+  const childrenOf = new Map();
+  for (const c of all) {
+    const key = c.parent || null;
+    const list = childrenOf.get(key) || [];
+    list.push(c);
+    childrenOf.set(key, list);
   }
 
-  const grandchildRows = await Category.findChildIdsByParents(categoryIds);
-  const nonLeafIds = new Set(grandchildRows.map((r) => r.parent_id));
-  const leafIds = categoryIds.filter((id) => !nonLeafIds.has(id));
-  const nonLeafIdsArr = categoryIds.filter((id) => nonLeafIds.has(id));
+  const tiles = childrenOf.get(categoryId || null) || [];
+  if (tiles.length === 0) return [];
 
-  const [leafCounts, nonLeafCounts] = await Promise.all([
-    leafIds.length
-      ? Product.groupCountByFilter("category_id", `${PUBLISHED_SQL} AND category_id IN (${leafIds.map(() => "?").join(",")})`, leafIds)
-      : [],
-    nonLeafIdsArr.length
-      ? Product.groupCountByFilter("top_category_id", `${PUBLISHED_SQL} AND top_category_id IN (${nonLeafIdsArr.map(() => "?").join(",")})`, nonLeafIdsArr)
-      : [],
-  ]);
+  const subtreeOf = (id) => {
+    const out = [];
+    const queue = [id];
+    const seen = new Set();
+    while (queue.length) {
+      const next = queue.shift();
+      if (seen.has(next)) continue;
+      seen.add(next);
+      out.push(next);
+      for (const child of childrenOf.get(next) || []) queue.push(child._id);
+    }
+    return out;
+  };
 
-  const countById = new Map();
-  for (const row of [...leafCounts, ...nonLeafCounts]) countById.set(row.grp, row.count);
+  const everyId = [...new Set(tiles.flatMap((t) => subtreeOf(t._id)))];
+  const { where, params } = buildFilter({}, { isActive: true }, null);
+  const counted = await Product.groupCountByFilter("category_id", `${where} AND category_id IN (${everyId.map(() => "?").join(",")})`, [...params, ...everyId]);
+  const countOf = new Map(counted.map((row) => [row.grp, row.count]));
 
-  return categories
-    .map((c) => {
-      const isLeaf = !nonLeafIds.has(c._id);
-      return {
-        _id: c._id,
-        name: c.name,
-        nameBn: c.nameBn,
-        slug: c.slug,
-        count: countById.get(c._id) ?? 0,
-        isLeaf,
-      };
-    })
+  return tiles
+    .map((c) => ({
+      _id: c._id,
+      name: c.name,
+      nameBn: c.nameBn,
+      slug: c.slug,
+      count: subtreeOf(c._id).reduce((sum, id) => sum + (countOf.get(id) ?? 0), 0),
+      // A top-level tile is always something to open (a department), even one with no subcategories of its own.
+      isLeaf: categoryId ? !(childrenOf.get(c._id) || []).length : false,
+    }))
     .filter((g) => g.count > 0);
 }
 
 export async function listBrandsForCategory(categoryId) {
   if (!categoryId) return Brand.findActive();
   requireObjectIdFormat(categoryId, "category");
-  const scopeIds = await expandCategoryScope(categoryId);
+  const scopeIds = await categorySubtreeIds([categoryId]);
   const brandIds = scopeIds.length
-    ? await Product.distinctBrandIds(`${PUBLISHED_SQL} AND top_category_id IN (${scopeIds.map(() => "?").join(",")})`, scopeIds)
+    ? await Product.distinctBrandIds(`${PUBLISHED_SQL} AND category_id IN (${scopeIds.map(() => "?").join(",")})`, scopeIds)
     : [];
   if (!brandIds.length) return [];
   return Brand.findActiveByIds(brandIds);

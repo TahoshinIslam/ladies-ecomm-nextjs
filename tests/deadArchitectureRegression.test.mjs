@@ -188,9 +188,12 @@ describe("Phase 6 — live architecture this phase must NOT touch remains intact
     assert.equal(exists("models/rateLimitModel.js"), true);
   });
 
-  test("live Cloudinary upload services remain", () => {
-    assert.equal(exists("config/cloudinary.js"), true);
-    assert.equal(exists("utlis/cloudinaryUpload.js"), true);
+  test("the Cloudinary upload service is gone: uploads are stored in the database (the dashboard's `files` table), served at /files/<id>", () => {
+    assert.equal(exists("config/cloudinary.js"), false);
+    assert.equal(exists("utlis/cloudinaryUpload.js"), false);
+    assert.equal(exists("services/uploadService.js"), false);
+    assert.equal(exists("app/files/[id]/route.js"), true);
+    assert.ok(!("cloudinary" in (JSON.parse(fs.readFileSync(abs("package.json"), "utf8")).dependencies ?? {})));
   });
 
   test("forgot-password / reset-password remain fully wired", () => {

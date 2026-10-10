@@ -42,6 +42,20 @@ export async function toggleWishlist(userId, productId) {
   return { added, wishlist: await Wishlist.populate(wl) };
 }
 
+// Idempotent add — used when a visitor's device-saved products are merged into their account after sign-in, where "toggle" would remove
+// anything already saved.
+export async function addToWishlist(userId, productId) {
+  requireObjectIdFormat(productId, "productId");
+  const product = await Product.findById(productId);
+  if (!product) throw new HttpError(404, "Product not found");
+  const wl = await getOrCreateWishlist(userId);
+  if (!wl.products.some((p) => String(p) === String(productId))) {
+    wl.products.push(productId);
+    await wl.save();
+  }
+  return { wishlist: await Wishlist.populate(wl) };
+}
+
 export async function clearWishlist(userId) {
   const wl = await getOrCreateWishlist(userId);
   wl.products = [];

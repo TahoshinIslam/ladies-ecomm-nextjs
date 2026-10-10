@@ -28,14 +28,15 @@ describe("CategoryDrillMenu.jsx — all three columns share the same container i
   });
 
   test("every row across all three columns uses the same py-2.5 vertical padding (top-level row was py-[11px])", () => {
+    // One row renderer serves every column, so there is a single padding to check — and none of the old, different ones.
     const rowPaddings = [...src.matchAll(/className=\{?[`"][^"`]*\bpy-(2\.5|\[11px\])\b/g)].map((m) => m[1]);
-    assert.ok(rowPaddings.length >= 3, "expected at least 3 row className occurrences (one per column)");
-    assert.ok(rowPaddings.every((p) => p === "2.5"), `every column's row padding must be py-2.5 — found: ${rowPaddings.join(", ")}`);
+    assert.equal(rowPaddings.length, 1, "expected the single shared row className");
+    assert.equal(rowPaddings[0], "2.5");
   });
 
   test("the mid and right flyout wrappers keep their own py-1 (unchanged reference value the top-level list was brought in line with)", () => {
-    assert.match(src, /className="w-\[200px\] flex-none divide-y divide-line overflow-y-auto border-r border-line py-1"/);
-    assert.match(src, /className="w-\[240px\] flex-none divide-y divide-line overflow-y-auto py-1"/);
+    // Every flyout column is the same box now (one per level), with that same py-1.
+    assert.match(src, /w-\[220px\] flex-none divide-y divide-line overflow-y-auto border-r border-line py-1/);
   });
 });
 
@@ -52,10 +53,8 @@ describe("CategoryDrillMenu.jsx — the active row's background respects the pan
   });
 
   test("the flyout column (a SIBLING of the <ul>, positioned via left-full) still has no ancestor overflow:hidden that would clip it — the caller's outer wrapper and this component's own root both stay overflow-visible/unset", () => {
-    // The flyout's own box legitimately clips ITS OWN two sub-columns
-    // (overflow-hidden here is pre-existing, unrelated to this fix, and
-    // scoped to a box the <ul>'s new rounding never touches).
-    assert.match(src, /className="absolute left-full top-0 z-\[95\] flex h-full min-h-full overflow-hidden border border-l-0 border-line bg-surface shadow-soft"/);
+    // The flyout's own box scrolls ITS OWN columns sideways (overflow here is scoped to a box the <ul>'s rounding never touches).
+    assert.match(src, /absolute left-full top-0 z-\[95\] flex h-full min-h-full max-w-\[calc\(100vw-340px\)\] overflow-x-auto overflow-y-hidden border border-l-0 border-line bg-surface shadow-soft/);
     // The component's own root wrapper (parent of both the <ul> and the
     // flyout) carries no overflow class of its own — it must stay
     // unclipped so the flyout's `left-full` escape is never cut off.

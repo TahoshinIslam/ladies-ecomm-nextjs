@@ -9,12 +9,14 @@ import "./shopApi.js";
 import authReducer from "./authSlice.js";
 import uiReducer from "./uiSlice.js";
 import guestCartReducer from "./guestCartSlice.js";
+import guestWishlistReducer from "./guestWishlistSlice.js";
 
 const store = configureStore({
   reducer: {
     auth: authReducer,
     ui: uiReducer,
     guestCart: guestCartReducer,
+    guestWishlist: guestWishlistReducer,
     [apiSlice.reducerPath]: apiSlice.reducer,
   },
   middleware: (getDefault) =>

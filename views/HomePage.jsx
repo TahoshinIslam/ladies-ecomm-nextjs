@@ -1,9 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Banknote, Gem, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import Button from "../components/ui/Button.jsx";
 import NewsletterForm from "../components/layout/NewsletterForm.jsx";
+import ServiceStrip from "../components/layout/ServiceStrip.jsx";
 import CategorySidebar from "../components/layout/CategorySidebar.jsx";
 import CategoryCard from "../components/product/CategoryCard.jsx";
 import HeroCarousel from "./home/HeroCarousel.jsx";
@@ -28,6 +29,7 @@ import { getT, getServerLocale } from "../lib/i18n/server.js";
 import { localizeProductList, localizeCategoryList } from "../lib/i18n/localize.js";
 import { departmentName } from "../lib/i18n/catalog.js";
 import { resolveImage } from "../lib/utils.js";
+import { departmentImagesBySlug } from "../lib/categoryImages.js";
 import { buildMiniBannerSlots, pickMiniBannerProducts } from "../lib/miniBanners.js";
 import FramedImage from "../components/ui/FramedImage.jsx";
 import { homepageFramingFor } from "../lib/imageFraming.js";
@@ -46,18 +48,6 @@ const OCCASIONS = [
   { nameKey: "home.dailyWear", value: "everyday", bodyKey: "home.occasionEverydayBody" },
   { nameKey: "home.wedding", value: "bridal", bodyKey: "home.occasionBridalBody" },
   { nameKey: "catalog.occasionPrayer", value: "prayer", bodyKey: "home.occasionPrayerBody" },
-];
-
-// EShopper's top-of-page features/trust strip. Previously lived in
-// components/layout/Footer.jsx (a white "service strip" shown on every
-// page) — moved here to match EShopper's own composition (a features row
-// directly under the hero, home page only) instead of repeating it in the
-// footer on every page.
-const FEATURES = [
-  { icon: Banknote, titleKey: "home.trustCod", bodyKey: "home.trustCodBody" },
-  { icon: RefreshCw, titleKey: "home.trustExchange", bodyKey: "home.trustExchangeBody" },
-  { icon: Gem, titleKey: "home.trustFabric", bodyKey: "home.trustFabricBody" },
-  { icon: Sparkles, titleKey: "home.trustCoverage", bodyKey: "home.trustCoverageBody" },
 ];
 
 // Phase 7 — real Server Component: every product/category read below goes
@@ -182,7 +172,7 @@ export default async function HomePage() {
   // Admin-set images (Shop Config → Departments/Fabric Story/Occasions/
   // Guided Discovery) — every key defaults to "" server-side, so a plain
   // object read is always safe without per-field optional chaining below.
-  const departmentImages = homepageSettings.departmentImages || {};
+  const departmentImages = departmentImagesBySlug(homepageSettings, rawCategories);
   const fabricImages = homepageSettings.fabricImages || {};
   const occasionImages = homepageSettings.occasionImages || {};
   const guidedFinderImage = homepageSettings.guidedFinderImage || null;
@@ -273,20 +263,9 @@ export default async function HomePage() {
         </Link>
       </section>
 
-      {/* Features/trust row — a slim, low-shadow strip of real, configured
-          policies (no invented delivery windows or thresholds). */}
+      {/* The shop's promises: free delivery, easy returns, secure payment, customer support (the shop's own settings). */}
       <section aria-label={t("home.serviceBenefits")} className="container-x pt-6 sm:pt-14">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4 rounded-2xl border border-line bg-media px-4 py-4 sm:gap-x-6 sm:gap-y-6 sm:px-6 sm:py-7 sm:grid-cols-2 sm:divide-x sm:divide-line lg:grid-cols-4">
-          {FEATURES.map((item) => (
-            <div key={item.titleKey} className="flex items-start gap-2 sm:gap-3 sm:pl-6 first:sm:pl-0">
-              <item.icon className="h-[20px] w-[20px] flex-none text-verm" strokeWidth={1.6} aria-hidden="true" />
-              <div>
-                <div className="text-[13px] font-semibold leading-snug sm:text-[14px]">{t(item.titleKey)}</div>
-                <div className="mt-0.5 hidden text-[12.5px] text-stone sm:block">{t(item.bodyKey)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ServiceStrip />
       </section>
 
       {/* Departments — the full, every-department browser (kept, further

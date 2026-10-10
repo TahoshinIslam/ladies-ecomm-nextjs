@@ -639,6 +639,7 @@ CREATE TABLE `files` (
   `filename` varchar(255) NOT NULL,
   `mime_type` varchar(127) NOT NULL,
   `size_bytes` int(10) unsigned NOT NULL,
+  `chunked` tinyint(1) NOT NULL DEFAULT 0,
   `data` longblob NOT NULL,
   `uploaded_by_id` varchar(32) DEFAULT NULL,
   `uploaded_by_name` varchar(255) DEFAULT NULL,
@@ -651,6 +652,14 @@ CREATE TABLE `files` (
   CONSTRAINT `fk_files_organization` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `file_chunks`;
+CREATE TABLE `file_chunks` (
+  `file_id` varchar(32) NOT NULL,
+  `seq` int(10) unsigned NOT NULL,
+  `data` longblob NOT NULL,
+  PRIMARY KEY (`file_id`,`seq`),
+  CONSTRAINT `fk_file_chunks_file` FOREIGN KEY (`file_id`) REFERENCES `files` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 DROP TABLE IF EXISTS `guest_module_grants`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
