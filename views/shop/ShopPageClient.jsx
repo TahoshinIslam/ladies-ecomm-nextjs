@@ -474,7 +474,9 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
         departments={favouriteDepartments}
         departmentImages={initialDepartmentImages}
         imageFraming={initialImageFraming}
-        loading={catsLoading && !favouriteDepartments.length}
+        // The server already sent the categories (initialCategories), so the very first paint — server and client alike — never has a
+        // "loading" state to disagree about. Only a caller that sent none waits for the query.
+        loading={catsLoading && initialCategories === undefined && !favouriteDepartments.length}
         selected={selectedDept}
         onSelect={selectDepartment}
         disabled={isPending}
