@@ -31,3 +31,28 @@ describe("departmentImagesBySlug", () => {
     assert.deepEqual(departmentImagesBySlug({}, categories), {});
   });
 });
+
+import { sortDepartmentsForFavourites } from "../lib/storefrontDepartments.js";
+
+describe("sortDepartmentsForFavourites — a shop with its own categories still gets a tile row", () => {
+  test("the built-in department set is used, in its own order, when the shop has it", () => {
+    const out = sortDepartmentsForFavourites([
+      { _id: "1", slug: "hijab" },
+      { _id: "2", slug: "burqa" },
+      { _id: "3", slug: "fruits" },
+    ]);
+    assert.deepEqual(out.map((c) => c.slug), ["burqa", "hijab"]);
+  });
+  test("otherwise the shop's own top-level categories, in the owner's order (nested and hidden ones left out)", () => {
+    const out = sortDepartmentsForFavourites([
+      { _id: "a", slug: "fruits", name: "Fruits", sortOrder: 2 },
+      { _id: "b", slug: "beauty", name: "Beauty & Health", sortOrder: 1 },
+      { _id: "c", slug: "fresh-fruits", name: "Fresh Fruits", parent: "a", sortOrder: 0 },
+      { _id: "d", slug: "hidden", name: "Hidden", sortOrder: 0, isActive: false },
+    ]);
+    assert.deepEqual(out.map((c) => c.slug), ["beauty", "fruits"]);
+  });
+  test("no categories at all is an empty row, not an error", () => {
+    assert.deepEqual(sortDepartmentsForFavourites([]), []);
+  });
+});
