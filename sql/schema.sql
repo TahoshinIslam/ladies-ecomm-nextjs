@@ -357,7 +357,7 @@ CREATE TABLE `cart_items` (
   `cart_id` varchar(32) NOT NULL,
   `product_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
-  `quantity` int(11) NOT NULL DEFAULT 1,
+  `quantity` decimal(14,3) NOT NULL DEFAULT 1.000,
   `snapshot_sku` varchar(255) NOT NULL DEFAULT '',
   `snapshot_attributes` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`snapshot_attributes`)),
   `snapshot_price` decimal(12,2) DEFAULT NULL,
@@ -1041,9 +1041,10 @@ CREATE TABLE `order_items` (
   `product_id` varchar(32) NOT NULL,
   `variant_id` varchar(32) NOT NULL,
   `batch_id` varchar(32) DEFAULT NULL,
-  `quantity` int(11) NOT NULL,
+  `quantity` decimal(14,3) NOT NULL,
   `snapshot_name` varchar(500) NOT NULL,
   `snapshot_sku` varchar(255) NOT NULL DEFAULT '',
+  `snapshot_unit` varchar(16) NOT NULL DEFAULT 'pc',
   `snapshot_attributes` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`snapshot_attributes`)),
   `snapshot_price` decimal(12,2) NOT NULL,
   `snapshot_image` varchar(1024) NOT NULL DEFAULT '',
@@ -2867,9 +2868,14 @@ CREATE TABLE `stock_levels` (
 DELIMITER ;;
 /*!50003 CREATE*/ /*!50017 DEFINER=`root`@`localhost`*/ /*!50003 TRIGGER trg_stock_levels_sync_insert AFTER INSERT ON stock_levels
 FOR EACH ROW
+BEGIN
   UPDATE product_variants pv
      SET pv.stock = online_available(NEW.organization_id, NEW.variant_id)
-   WHERE pv.id = NEW.variant_id AND pv.organization_id = NEW.organization_id */;;
+   WHERE pv.id = NEW.variant_id AND pv.organization_id = NEW.organization_id;
+  UPDATE inventory_settings
+     SET online_assortment_version = online_assortment_version + 1
+   WHERE organization_id = NEW.organization_id AND online_source_location_id = NEW.location_id;
+END */;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
@@ -2965,6 +2971,9 @@ FOR EACH ROW
       JOIN stock_levels sl ON sl.organization_id = pv.organization_id AND sl.variant_id = pv.id
        SET pv.stock = online_available(pv.organization_id, pv.id)
      WHERE sl.location_id = NEW.id;
+    UPDATE inventory_settings
+       SET online_assortment_version = online_assortment_version + 1
+     WHERE organization_id = NEW.organization_id AND online_source_location_id = NEW.id;
   END IF */;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
@@ -4113,6 +4122,30 @@ RETURN COALESCE((
          AND src.status = 'Active' AND src.parent_location_id IS NULL AND src.channel = 'online'
    WHERE s.organization_id = p_org
 ), 0) ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8mb4 */ ;
+/*!50003 SET character_set_results = utf8mb4 */ ;
+/*!50003 SET collation_connection  = utf8mb4_unicode_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'IGNORE_SPACE,STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+/*!50003 DROP FUNCTION IF EXISTS `online_listed` */;
+DELIMITER ;;
+CREATE DEFINER=`root`@`localhost` FUNCTION `online_listed`(p_org VARCHAR(32) COLLATE utf8mb4_unicode_ci, p_variant VARCHAR(32) COLLATE utf8mb4_unicode_ci) RETURNS tinyint(1)
+    READS SQL DATA
+RETURN IF(
+  online_offered(p_org, p_variant) = 1
+  AND EXISTS (
+    SELECT 1 FROM inventory_settings s
+      JOIN stock_levels sl ON sl.organization_id = s.organization_id AND sl.location_id = s.online_source_location_id AND sl.variant_id = p_variant
+     WHERE s.organization_id = p_org),
+  1, 0) ;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;

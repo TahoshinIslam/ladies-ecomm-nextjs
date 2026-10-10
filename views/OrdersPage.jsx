@@ -12,6 +12,7 @@ import { serializeForClient } from "../lib/serialize.js";
 import { formatCurrency } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
+import { formatQuantity } from "../lib/measure.js";
 
 const statusVariant = {
   pending: "warning",
@@ -100,7 +101,7 @@ export default async function OrdersPage() {
                               key={i}
                               className="inline-flex items-center rounded bg-muted px-2 py-0.5 text-xs"
                             >
-                              {it.snapshot?.name} (× {it.quantity})
+                              {it.snapshot?.name} (× {formatQuantity(it.quantity, it.snapshot?.unit)})
                             </span>
                           ))}
                           {o.items.length > 3 && (

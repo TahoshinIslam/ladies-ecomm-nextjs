@@ -40,7 +40,7 @@ export function useCart() {
       isGuest: false,
       isLoading,
       items,
-      count: items.reduce((n, i) => n + i.quantity, 0),
+      count: items.reduce((n, i) => n + Math.ceil(i.quantity), 0),
       addItem: ({ product, variant, quantity }) =>
         addToCartApi({ productId: product._id, variantId: variant._id, quantity }).unwrap(),
       updateItem: ({ productId, variantId, quantity }) =>
@@ -55,7 +55,7 @@ export function useCart() {
     isGuest: true,
     isLoading: false,
     items: guestItems,
-    count: guestItems.reduce((n, i) => n + i.quantity, 0),
+    count: guestItems.reduce((n, i) => n + Math.ceil(i.quantity), 0),
     addItem: async ({ product, variant, quantity }) => {
       dispatch(guestAdd({ product, variant, quantity }));
     },

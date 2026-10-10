@@ -39,7 +39,13 @@ const snapshotVariant = (v) => ({
   price: v.price ?? null,
   discountPrice: v.discountPrice ?? null,
   image: v.images?.[0] || "",
+  // How the item is counted (pieces, or an amount of kg/g/l/ml in steps of its smallest pack) — the bag shows and steps it.
+  unit: v.unit || "pc",
+  step: v.step || 1,
 });
+
+// Amounts are kept to three decimals (0.5 kg + 0.5 kg is 1 kg, never 0.9999999).
+const round3 = (n) => Math.round(Number(n) * 1000) / 1000;
 
 const guestCartSlice = createSlice({
   name: "guestCart",
@@ -56,7 +62,7 @@ const guestCartSlice = createSlice({
         (i) => i.productId === product._id && i.variantId === variant._id,
       );
       if (existing) {
-        existing.quantity += quantity;
+        existing.quantity = round3(existing.quantity + quantity);
       } else {
         s.items.push({
           productId: product._id,
@@ -79,7 +85,7 @@ const guestCartSlice = createSlice({
           (i) => !(i.productId === productId && i.variantId === variantId),
         );
       } else {
-        item.quantity = quantity;
+        item.quantity = round3(quantity);
       }
       save(s.items);
     },
@@ -102,6 +108,6 @@ export const { hydrateGuestCart, guestAdd, guestUpdate, guestRemove, guestClear 
 
 export const selectGuestItems = (state) => state.guestCart.items;
 export const selectGuestCount = (state) =>
-  state.guestCart.items.reduce((n, i) => n + i.quantity, 0);
+  state.guestCart.items.reduce((n, i) => n + Math.ceil(i.quantity), 0);
 
 export default guestCartSlice.reducer;

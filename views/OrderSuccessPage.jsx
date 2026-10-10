@@ -13,6 +13,7 @@ import { useGetOrderQuery } from "../store/shopApi.js";
 import { formatCurrency, resolveImage, formatVariantAttributes } from "../lib/utils.js";
 import { useOrderStatusStream } from "../hooks/useOrderStatusStream.js";
 import { useLocale } from "../context/LocaleProvider.jsx";
+import { formatQuantity } from "../lib/measure.js";
 
 export default function OrderSuccessPage() {
   const { orderId } = useParams();
@@ -132,7 +133,7 @@ export default function OrderSuccessPage() {
                 <p className="text-xs text-muted-foreground">
                   {formatVariantAttributes(it.snapshot?.attributes, locale)}
                   {" · "}{t("checkout.qty")}{" "}
-                  {it.quantity}
+                  {formatQuantity(it.quantity, it.snapshot?.unit)}
                 </p>
               </div>
               <p className="text-sm font-bold">
