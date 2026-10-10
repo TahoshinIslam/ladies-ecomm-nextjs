@@ -17,6 +17,7 @@ import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { useCart } from "../../hooks/useCart.js";
 import { resolveImage, resolveVariantPricing, formatVariantAttributes } from "../../lib/utils.js";
+import { formatQuantity, itemMeasure, roundQuantity } from "../../lib/measure.js";
 
 export default function CartDrawer() {
   const open = useSelector((s) => s.ui.cartOpen);
@@ -183,12 +184,12 @@ export default function CartDrawer() {
                           aria-label={t("product.decreaseQuantity")}
                           onClick={() =>
                             withPending(p._id, variantId, () =>
-                              item.quantity <= 1
+                              item.quantity <= itemMeasure(item).step
                                 ? cart.removeItem({ productId: p._id, variantId })
                                 : cart.updateItem({
                                     productId: p._id,
                                     variantId,
-                                    quantity: item.quantity - 1,
+                                    quantity: roundQuantity(item.quantity - itemMeasure(item).step),
                                   }),
                             )
                           }
@@ -199,9 +200,9 @@ export default function CartDrawer() {
                         <span
                           aria-live="polite"
                           data-tabular
-                          className="min-w-[26px] text-center font-mono text-[13px]"
+                          className="min-w-[26px] px-1 text-center font-mono text-[13px]"
                         >
-                          {item.quantity}
+                          {formatQuantity(item.quantity, itemMeasure(item).unit)}
                         </span>
                         <button
                           type="button"
@@ -212,7 +213,7 @@ export default function CartDrawer() {
                               cart.updateItem({
                                 productId: p._id,
                                 variantId,
-                                quantity: item.quantity + 1,
+                                quantity: roundQuantity(item.quantity + itemMeasure(item).step),
                               }),
                             )
                           }

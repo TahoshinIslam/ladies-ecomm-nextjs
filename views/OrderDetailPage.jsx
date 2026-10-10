@@ -18,6 +18,7 @@ import { isObjectIdFormat } from "../lib/validation.js";
 import { formatCurrency, cn, resolveImage, formatVariantAttributes } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
+import { formatQuantity } from "../lib/measure.js";
 
 const STATUS_KEYS = {
   pending: "orders.statusPending",
@@ -136,7 +137,7 @@ export default async function OrderDetailPage({ params }) {
                       <p className="text-xs text-muted-foreground">
                         {formatVariantAttributes(it.snapshot?.attributes, locale)}
                         {" · "}{t("checkout.qty")}{" "}
-                        {it.quantity}
+                        {formatQuantity(it.quantity, it.snapshot?.unit)}
                       </p>
                       <p className="mt-1 text-sm font-bold">
                         {formatCurrency(it.snapshot?.price * it.quantity, locale)}

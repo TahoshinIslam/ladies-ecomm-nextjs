@@ -107,7 +107,7 @@ export default function QuickAddSheet() {
     if (!selectedVariant || adding) return;
     setAdding(true);
     try {
-      await cart.addItem({ product, variant: selectedVariant, quantity: 1 });
+      await cart.addItem({ product, variant: selectedVariant, quantity: selectedVariant.step || 1 });
       toast.success(t("quickAddSheet.addedToBag", { name: product.name, variant: selectedVariant.variantName }).trim());
       close();
       dispatch(setCartOpen(true));

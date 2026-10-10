@@ -15,6 +15,7 @@ import { useCartCheck } from "@/hooks/useCartCheck.js";
 import { useSettings } from "@/context/SettingsContext.jsx";
 import { useLocale } from "@/context/LocaleProvider.jsx";
 import { resolveImage, resolveVariantPricing, formatVariantAttributes } from "@/lib/utils.js";
+import { formatQuantity, itemMeasure, roundQuantity } from "../lib/measure.js";
 
 export default function CartPage() {
   const settings = useSettings();
@@ -187,18 +188,18 @@ export default function CartPage() {
                       grid columns above (sm+) render these as their own cells. */}
                   <div className="mt-3 flex items-center justify-between gap-3 sm:hidden">
                     <QuantityStepper
-                      quantity={item.quantity}
+                      quantity={formatQuantity(item.quantity, itemMeasure(item).unit)}
                       busy={busy}
                       onDecrease={() =>
                         withPending(id, variantId, () =>
-                          item.quantity <= 1
+                          item.quantity <= itemMeasure(item).step
                             ? cart.removeItem({ productId: id, variantId })
-                            : cart.updateItem({ productId: id, variantId, quantity: item.quantity - 1 }),
+                            : cart.updateItem({ productId: id, variantId, quantity: roundQuantity(item.quantity - itemMeasure(item).step) }),
                         )
                       }
                       onIncrease={() =>
                         withPending(id, variantId, () =>
-                          cart.updateItem({ productId: id, variantId, quantity: item.quantity + 1 }),
+                          cart.updateItem({ productId: id, variantId, quantity: roundQuantity(item.quantity + itemMeasure(item).step) }),
                         )
                       }
                       decreaseLabel={t("product.decreaseQuantity")}
@@ -224,18 +225,18 @@ export default function CartPage() {
                 </div>
                 <div className="hidden justify-self-center sm:block">
                   <QuantityStepper
-                    quantity={item.quantity}
+                    quantity={formatQuantity(item.quantity, itemMeasure(item).unit)}
                     busy={busy}
                     onDecrease={() =>
                       withPending(id, variantId, () =>
-                        item.quantity <= 1
+                        item.quantity <= itemMeasure(item).step
                           ? cart.removeItem({ productId: id, variantId })
-                          : cart.updateItem({ productId: id, variantId, quantity: item.quantity - 1 }),
+                          : cart.updateItem({ productId: id, variantId, quantity: roundQuantity(item.quantity - itemMeasure(item).step) }),
                       )
                     }
                     onIncrease={() =>
                       withPending(id, variantId, () =>
-                        cart.updateItem({ productId: id, variantId, quantity: item.quantity + 1 }),
+                        cart.updateItem({ productId: id, variantId, quantity: roundQuantity(item.quantity + itemMeasure(item).step) }),
                       )
                     }
                     decreaseLabel={t("product.decreaseQuantity")}
@@ -343,7 +344,7 @@ function QuantityStepper({ quantity, busy, onDecrease, onIncrease, decreaseLabel
       >
         <Minus className="h-3.5 w-3.5" />
       </button>
-      <span data-tabular aria-live="polite" className="min-w-[26px] text-center font-mono text-[13px]">
+      <span data-tabular aria-live="polite" className="min-w-[26px] px-1 text-center font-mono text-[13px]">
         {quantity}
       </span>
       <button

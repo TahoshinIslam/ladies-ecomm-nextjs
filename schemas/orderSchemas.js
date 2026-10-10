@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { objectIdSchema, quantitySchema, requiredString, paginationSchema, searchQuerySchema, sortFieldSchema, sortOrderSchema } from "./commonSchemas.js";
+import { objectIdSchema, amountSchema, requiredString, paginationSchema, searchQuerySchema, sortFieldSchema, sortOrderSchema } from "./commonSchemas.js";
 import { shippingAddressFields } from "./addressSchemas.js";
 
 export const ORDER_STATUSES = ["pending", "paid", "processing", "shipped", "delivered", "cancelled", "refunded"];
@@ -42,7 +42,7 @@ export const adminOrderListQuerySchema = z
 const orderItemSchema = z.object({
   productId: objectIdSchema,
   variantId: objectIdSchema,
-  quantity: quantitySchema,
+  quantity: amountSchema,
 });
 
 // A real cart/order has no legitimate reason to carry hundreds of distinct

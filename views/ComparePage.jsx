@@ -61,7 +61,7 @@ export default function ComparePage() {
     const variant = (pickedId && inStockVariants.find((v) => v._id === pickedId)) || inStockVariants[0];
     try {
       setPendingId(product._id);
-      await cart.addItem({ product, variant, quantity: 1 });
+      await cart.addItem({ product, variant, quantity: variant.step || 1 });
       toast.success(t("compare.addedToCart", { name: product.name }));
     } catch (e) {
       toast.error(e?.data?.message || t("compare.addToCartFailed"));

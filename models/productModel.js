@@ -27,13 +27,21 @@ import * as Inventory from "./inventoryModel.js";
 
 // "Published" on the shop: switched on AND with at least one variant offered
 // online (a variant can be point-of-sale only) AND offered by the store that
-// supplies the website. `online_offered()` is the dashboard's own rule (ecom_erp
-// migration 083): always true until a Product Source Store is chosen, then that
-// store's switch for the variant, else its policy. Qualified with `products.` so
+// supplies the website. `online_listed()` (ecom_erp migration 118) is the dashboard's
+// own rule: the website's warehouse offers a variant of it (`online_offered()`: its switch,
+// else its policy) AND holds it (a stock row there, even at zero). A listed product then shows
+// all its offered variants — a size the warehouse has none of reads as sold out. Qualified with `products.` so
 // it works in any query whose FROM is the products table. Duplicated in
 // services/productService.js — keep the two identical.
 const PUBLISHED_SQL =
-  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1 AND online_offered(pov.organization_id, pov.id) = 1)";
+  "is_active = 1 AND EXISTS (SELECT 1 FROM product_variants pov WHERE pov.organization_id = products.organization_id AND pov.product_id = products.id AND pov.sell_online = 1 AND online_listed(pov.organization_id, pov.id) = 1)";
+
+/** The gallery without the photos only unsold variants use — never emptied: with nothing left the whole gallery stays. */
+function galleryWithout(images, hidden) {
+  if (!hidden || !hidden.size) return images;
+  const kept = images.filter((url) => !hidden.has(url));
+  return kept.length ? kept : images;
+}
 
 function jsonArray(value) {
   return typeof value === "string" ? JSON.parse(value) : value || [];
@@ -50,10 +58,33 @@ async function loadVariants(productIds) {
       ORDER BY pv.position ASC`,
     [getOrganizationId(), ...productIds],
   );
+  // The pack sizes of items sold by measure (500 g, 1 kg, 2 kg): what the shopper picks from, and — the smallest of them —
+  // the step an amount is ordered in. A piece is always ordered whole, whatever packagings it carries.
+  const measured = rows.filter((r) => r.base_unit && r.base_unit !== "pc").map((r) => r.id);
+  const packsByVariant = new Map();
+  if (measured.length) {
+    const packRows = await query(
+      `SELECT variant_id, id, code, name, base_quantity FROM variant_packagings
+        WHERE organization_id = ? AND sells = 1 AND variant_id IN (${measured.map(() => "?").join(",")})
+        ORDER BY base_quantity ASC, position ASC`,
+      [getOrganizationId(), ...measured],
+    );
+    for (const p of packRows) {
+      const list = packsByVariant.get(p.variant_id) || [];
+      list.push({ id: p.id, code: p.code, name: p.name, baseQuantity: Number(p.base_quantity) });
+      packsByVariant.set(p.variant_id, list);
+    }
+  }
   const map = new Map();
   for (const r of rows) {
     const list = map.get(r.product_id) || [];
+    const isMeasured = Boolean(r.base_unit) && r.base_unit !== "pc";
+    const packs = isMeasured ? packsByVariant.get(r.id) || [] : [];
     list.push({
+      unit: r.base_unit || "pc",
+      scale: Number(r.quantity_scale || 0),
+      step: isMeasured && packs.length ? packs[0].baseQuantity : 1,
+      packs,
       _id: r.id,
       variantName: r.variant_name,
       sku: r.sku,
@@ -110,7 +141,7 @@ async function loadRefs(rows) {
   };
 }
 
-function rowToProduct(row, { variants, attributes, brand, category } = {}) {
+function rowToProduct(row, { variants, attributes, brand, category, hiddenPhotos } = {}) {
   if (!row) return null;
   const product = {
     _id: row.id,
@@ -130,7 +161,7 @@ function rowToProduct(row, { variants, attributes, brand, category } = {}) {
     // for every not-yet-migrated product; callers computing a charge/
     // display price must check this before applying the exchange rate.
     priceCurrency: row.price_currency || "USD",
-    images: jsonArray(row.images),
+    images: galleryWithout(jsonArray(row.images), hiddenPhotos),
     // [{ url, framing }]; [] = nothing framed (everything renders as it
     // always did). A database without migration 0006 has no such column.
     imageFraming: parseFramingListColumn(row.image_framing),
@@ -173,6 +204,31 @@ function attachInstanceMethods(product) {
   };
 }
 
+/**
+ * Photos that belong only to variants this shop does not sell (a colour that is not on the website): they must not turn up in the
+ * product's gallery, or the page shows a black shirt for a product sold in red. A photo any sold variant also uses stays.
+ * Returns product id -> Set of photo URLs to leave out.
+ */
+async function loadHiddenOnlyPhotos(productIds, variantsMap) {
+  if (!productIds.length) return new Map();
+  const rows = await query(
+    `SELECT pv.product_id, pv.images FROM product_variants pv
+      WHERE pv.organization_id = ? AND pv.product_id IN (${productIds.map(() => "?").join(",")})
+        AND NOT (pv.sell_online = 1 AND online_offered(pv.organization_id, pv.id) = 1)`,
+    [getOrganizationId(), ...productIds],
+  );
+  const hidden = new Map();
+  for (const r of rows) {
+    const set = hidden.get(r.product_id) || new Set();
+    for (const url of jsonArray(r.images)) set.add(url);
+    hidden.set(r.product_id, set);
+  }
+  for (const [productId, set] of hidden) {
+    for (const v of variantsMap.get(productId) || []) for (const url of v.images || []) set.delete(url);
+  }
+  return hidden;
+}
+
 async function hydrate(rows, { populate = true } = {}) {
   const ids = rows.map((r) => r.id);
   const [variantsMap, attributesMap, refs] = await Promise.all([
@@ -180,8 +236,10 @@ async function hydrate(rows, { populate = true } = {}) {
     loadAttributes(ids),
     populate ? loadRefs(rows) : { brands: new Map(), categories: new Map() },
   ]);
+  const hiddenPhotos = await loadHiddenOnlyPhotos(ids, variantsMap);
   return rows.map((row) =>
     rowToProduct(row, {
+      hiddenPhotos: hiddenPhotos.get(row.id),
       variants: variantsMap.get(row.id) || [],
       attributes: attributesMap.get(row.id) || [],
       brand: row.brand_id ? refs.brands.get(row.brand_id) || row.brand_id : null,

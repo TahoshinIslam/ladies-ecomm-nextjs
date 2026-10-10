@@ -104,6 +104,10 @@ export const positiveIntSchema = z.number().int().positive();
 // vector, independent of whatever real stock the product has.
 export const quantitySchema = z.number().int().positive().max(999, "quantity is too large");
 
+// An amount of an item sold by measure (0.5 kg, 2 kg): any positive number here; the service holds it to the item's own step
+// (lib/measure.js) because the step is a fact about the variant, not the request.
+export const amountSchema = z.number().positive().max(99999, "quantity is too large");
+
 export const urlSchema = z
   .string()
   .trim()

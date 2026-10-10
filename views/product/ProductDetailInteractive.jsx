@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSelector, useDispatch } from "react-redux";
 import { motion } from "framer-motion";
 import {
@@ -62,6 +62,7 @@ import { framingForUrl } from "../../lib/imageFraming.js";
 import { useSettings } from "../../context/SettingsContext.jsx";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 import { attrLabel as translateAttrLabel, attrValue as translateAttrValue, departmentName } from "../../lib/i18n/catalog.js";
+import { formatQuantity, itemMeasure, packLabel, roundQuantity } from "../../lib/measure.js";
 
 const AGE_GROUP_KEYS = { kids: "filters.kids", girls: "filters.girls", adult: "filters.adults" };
 
@@ -101,6 +102,7 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   const [stackVisible, setStackVisible] = useState(false);
   const buyStackRef = useRef(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // The mobile sticky purchase bar only appears once the main buttons have scrolled out of view — until then they are the one set of
   // controls on screen.
@@ -122,7 +124,33 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
   // starts blank so the shopper has to actively choose each one, rather
   // than getDefaultVariantSelection() silently picking the first in-stock
   // variant for them (which made every option look already decided).
-  const [selection, setSelection] = useState({});
+  // An axis with only one value to choose (a product sold in a single colour) is chosen for the shopper: there is nothing to decide,
+  // and the page then shows that colour's photos and price straight away. Axes with a real choice stay blank.
+  const [selection, setSelection] = useState(() => {
+    const chosen = {};
+    for (const axis of axes) {
+      const options = getAxisOptions(variants, axis);
+      if (options.length === 1) chosen[axis] = options[0].value;
+    }
+    // The colour is the one choice that decides the photos, so a colour is always showing: the first one that is in stock
+    // (else the first). Without it the gallery mixes every colour's photos until the shopper clicks a swatch. Size and the
+    // rest stay blank — those are for the shopper to choose.
+    const colourAxis = axes.find((a) => attrDefs.find((d) => d.key === a)?.type === "swatch") ?? axes.find((a) => /^colou?r$/i.test(a));
+    if (colourAxis && !chosen[colourAxis]) {
+      const options = getAxisOptions(variants, colourAxis);
+      const inStock = options.find((o) => !o.disabled) ?? options[0];
+      if (inStock) chosen[colourAxis] = inStock.value;
+    }
+    // A link can name the variant — /product/t-shirt?color=black&size=m — so a campaign or a message can send a shopper
+    // straight to the black one. Only values this product really has are taken.
+    for (const axis of axes) {
+      const wanted = searchParams.get(axis);
+      if (!wanted) continue;
+      const match = getAxisOptions(variants, axis).find((o) => String(o.value).toLowerCase() === wanted.toLowerCase());
+      if (match) chosen[axis] = match.value;
+    }
+    return chosen;
+  });
 
   const allAxesSelected = axes.every((a) => selection[a]);
   const selectedVariant = useMemo(
@@ -130,16 +158,44 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
     [variants, selection, axes, allAxesSelected],
   );
   const pricing = resolveVariantPricing(product ?? {}, selectedVariant);
+  // An item sold by measure (kg, g, l, ml) is ordered by amount, in steps of its smallest pack, priced per unit.
+  const measure = itemMeasure({ variant: selectedVariant });
+  const isMeasured = measure.unit !== "pc";
+  const packs = isMeasured ? selectedVariant?.packs ?? [] : [];
+  // A newly chosen variant starts at one step (1 for a piece, 0.5 kg for loose mango sold in 500 g packs). Adjusted while
+  // rendering — the documented way to derive state from a changed input — so there is no render with the old amount.
+  const selectedVariantId = selectedVariant?._id ?? null;
+  const [amountFor, setAmountFor] = useState(null);
+  if (amountFor !== selectedVariantId) {
+    setAmountFor(selectedVariantId);
+    setQuantity(measure.step);
+  }
 
   const setAxisValue = (axis, value) => {
-    setSelection((prev) => repairVariantSelection(variants, { ...prev, [axis]: value }, axes, axis));
+    const next = repairVariantSelection(variants, { ...selection, [axis]: value }, axes, axis);
+    setSelection(next);
+    // Keep the address in step with the choice, so copying the link copies the variant.
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      for (const a of axes) {
+        if (next[a]) url.searchParams.set(a, next[a]);
+        else url.searchParams.delete(a);
+      }
+      window.history.replaceState(window.history.state, "", url);
+    }
     setSelectedImage(0);
     setImageFailed(false);
     setQuantity(1);
   };
 
   const touchStartX = useRef(null);
-  const galleryImages = selectedVariant?.images?.length ? selectedVariant.images : product?.images ?? [];
+  // The photos of what is chosen so far: the exact variant's when all options are picked; with only some picked (a colour but no
+  // size yet) the photos of the variants that match — so choosing Red never shows the black shirt. Nothing picked: the product's.
+  const pickedAxes = axes.filter((a) => selection[a]);
+  const matchingPhotos = pickedAxes.length
+    ? [...new Set(variants.filter((v) => pickedAxes.every((a) => v.attributes?.[a] === selection[a])).flatMap((v) => v.images ?? []))]
+    : [];
+  const galleryImages = selectedVariant?.images?.length ? selectedVariant.images : matchingPhotos.length ? matchingPhotos : product?.images ?? [];
   const hasArtwork = galleryImages.length > 0;
   const onGalleryTouchStart = (e) => {
     touchStartX.current = e.touches[0].clientX;
@@ -478,14 +534,52 @@ export default function ProductDetailInteractive({ product, relatedProducts, att
 
               {selectedVariant && (
                 <p className="mt-2 text-xs text-stone">
-                  {isSelectionUnavailable ? t("product.outOfStock") : t("product.stockCount", { count: pricing.stock })}
+                  {isSelectionUnavailable ? t("product.outOfStock") : t("product.stockCount", { count: formatQuantity(pricing.stock, measure.unit) })}
                   {selectedVariant.sku && <> · SKU {selectedVariant.sku}</>}
                 </p>
               )}
 
-              <div className="mt-6 flex items-center gap-4">
-                <span className="text-[15px] font-semibold text-ink">{t("product.quantity")}</span>
-                <QuantityStepper quantity={quantity} setQuantity={setQuantity} max={pricing.stock || 99} />
+              {isMeasured && packs.length > 0 && (
+                <div className="mt-6">
+                  <span className="text-[15px] font-semibold text-ink">{t("product.quantity")}</span>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {packs.map((pack) => {
+                      const active = Math.abs(quantity - pack.baseQuantity) < 1e-6;
+                      const unavailable = pack.baseQuantity > (pricing.stock || 0);
+                      return (
+                        <button
+                          key={pack.id}
+                          type="button"
+                          disabled={unavailable}
+                          onClick={() => setQuantity(pack.baseQuantity)}
+                          aria-pressed={active}
+                          className={cn(
+                            "rounded-xl border px-4 py-2 text-left transition-colors disabled:opacity-40",
+                            active ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink hover:bg-wash",
+                          )}
+                        >
+                          <span className="block text-[14.5px] font-bold">{packLabel(pack, measure.unit)}</span>
+                          <span data-tabular className={cn("block text-[12.5px]", active ? "text-white/80" : "text-stone")}>
+                            {settings.formatPrice(pricing.displayPrice * pack.baseQuantity, pricing.currency)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 flex flex-wrap items-center gap-4">
+                <span className="text-[15px] font-semibold text-ink">{isMeasured ? t("product.amount") : t("product.quantity")}</span>
+                <QuantityStepper quantity={quantity} setQuantity={setQuantity} max={pricing.stock || 99} step={measure.step} unit={measure.unit} />
+                {isMeasured && (
+                  <span data-tabular className="text-[15px] font-semibold text-ink">
+                    {settings.formatPrice(pricing.displayPrice * quantity, pricing.currency)}
+                    <span className="ml-1.5 text-[12.5px] font-normal text-stone">
+                      ({settings.formatPrice(pricing.displayPrice, pricing.currency)} / {measure.unit})
+                    </span>
+                  </span>
+                )}
               </div>
 
               <div ref={buyStackRef} className="mt-4 space-y-2.5">
@@ -696,15 +790,16 @@ function VariantAxisRow({ label, options, displayOptions, selected, onSelect, sw
               <button
                 key={opt.value}
                 type="button"
-                disabled={opt.disabled}
                 onClick={() => onSelect(opt.value)}
-                title={labelFor(opt.value)}
+                title={opt.disabled ? `${labelFor(opt.value)} — ${t("product.outOfStock")}` : labelFor(opt.value)}
                 aria-label={labelFor(opt.value)}
                 aria-pressed={active}
                 className={cn(
                   "relative grid h-10 w-10 flex-none place-items-center rounded-full transition-all",
                   active ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : "ring-1 ring-border hover:ring-foreground/50",
-                  opt.disabled && "cursor-not-allowed opacity-40"
+                  // Sold out is shown, not forbidden: the shopper can still pick it to see its photos (the button then says
+                  // out of stock).
+                  opt.disabled && "opacity-50"
                 )}
               >
                 <span
@@ -752,23 +847,23 @@ function VariantAxisRow({ label, options, displayOptions, selected, onSelect, sw
   );
 }
 
-function QuantityStepper({ quantity, setQuantity, max }) {
+function QuantityStepper({ quantity, setQuantity, max, step = 1, unit = "pc" }) {
   const { t } = useLocale();
   return (
     <div className="inline-flex items-center overflow-hidden rounded-xl border border-line bg-surface">
       <button
         type="button"
-        onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-        disabled={quantity <= 1}
+        onClick={() => setQuantity((q) => Math.max(step, roundQuantity(q - step)))}
+        disabled={quantity <= step}
         className="grid h-11 w-11 place-items-center text-ink transition-colors hover:bg-wash disabled:opacity-40"
         aria-label={t("product.decreaseQuantity")}
       >
         <Minus className="h-4 w-4" />
       </button>
-      <span aria-live="polite" className="w-12 border-x border-line text-center text-[15px] font-bold leading-[44px]">{quantity}</span>
+      <span aria-live="polite" className="min-w-12 border-x border-line px-2 text-center text-[15px] font-bold leading-[44px]">{formatQuantity(quantity, unit)}</span>
       <button
         type="button"
-        onClick={() => setQuantity((q) => Math.min(max || 99, q + 1))}
+        onClick={() => setQuantity((q) => (roundQuantity(q + step) > (max || 99) ? q : roundQuantity(q + step)))}
         className="grid h-11 w-11 place-items-center text-ink transition-colors hover:bg-wash"
         aria-label={t("product.increaseQuantity")}
       >

@@ -17,6 +17,7 @@ import { emitOrderEvent, emitAdminEvent, emitBestEffort } from "../lib/events.js
 import { hashToken, fingerprintOrderRequest, isDuplicateKeyError } from "../lib/idempotency.js";
 import { groupSegmentsByPrice, publicQuoteLines, quoteHash } from "../lib/batchPricing.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
+import { isOrderableQuantity, orderStep, formatQuantity } from "../lib/measure.js";
 import { enforceRateLimit } from "../lib/rateLimit.js";
 import { ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS } from "../lib/rateLimitConfig.js";
 
@@ -174,6 +175,10 @@ const calcTotals = async (
     // Variants not offered online are not loaded at all (models/productModel.js),
     // so one the shopper names that is missing here is simply not for sale.
     if (!variant) throw new HttpError(400, `${product.name} is not available online`);
+    if (!isOrderableQuantity(variant, it.quantity)) {
+      const step = orderStep(variant);
+      throw new HttpError(400, `${product.name}: order ${step === 1 && (!variant.unit || variant.unit === "pc") ? "a whole number" : `in steps of ${formatQuantity(step, variant.unit)}`}`);
+    }
     if (variant.stock < it.quantity) {
       throw new HttpError(
         400,
@@ -222,6 +227,7 @@ const calcTotals = async (
         snapshot: {
           name: product.name,
           sku: variant.sku || "",
+          unit: variant.unit || "pc",
           attributes: { ...variant.attributes },
           price,
           image: variant.images?.[0] || product.images?.[0] || "",

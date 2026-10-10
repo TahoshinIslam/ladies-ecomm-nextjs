@@ -33,7 +33,7 @@ function rowToCart(row, items) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-  cart.totalItems = cart.items.reduce((sum, i) => sum + i.quantity, 0);
+  cart.totalItems = cart.items.reduce((sum, i) => sum + Math.ceil(i.quantity), 0);
   cart.save = async function save() {
     return saveCart(this);
   };

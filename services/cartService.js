@@ -4,6 +4,15 @@ import * as Inventory from "../models/inventoryModel.js";
 import { HttpError } from "../lib/http.js";
 import { groupSegmentsByPrice } from "../lib/batchPricing.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
+import { formatQuantity, isOrderableQuantity, orderStep, roundQuantity } from "../lib/measure.js";
+
+// What an amount must look like for this variant, in words a shopper can act on.
+function stepMessage(variant) {
+  const step = orderStep(variant);
+  return step === 1 && (!variant.unit || variant.unit === "pc")
+    ? "Quantity must be a whole number"
+    : `Order in steps of ${formatQuantity(step, variant.unit)}`;
+}
 
 function findVariant(product, variantId) {
   return product.variants.find((v) => String(v._id) === String(variantId));
@@ -28,6 +37,11 @@ function sameItem(item, productId, variantId) {
   return String(item.productId) === String(productId) && String(item.variantId) === String(variantId);
 }
 
+function variantMeasure(product, variantId) {
+  const variant = product ? findVariant(product, variantId) : null;
+  return variant ? { unit: variant.unit || "pc", step: orderStep(variant), packs: variant.packs || [] } : null;
+}
+
 // Reshapes a raw Cart into the shape the frontend already consumes
 // (hooks/useCart.js just passes this straight through to CartDrawer.jsx /
 // app/(routes)/cart/page.jsx, which read item.product / item.variantId /
@@ -49,6 +63,8 @@ async function serializeCart(cart) {
           ? { _id: product._id, name: product.name, slug: product.slug, images: product.images, basePrice: product.basePrice, discountPrice: product.discountPrice, priceCurrency: product.priceCurrency, brand: product.brand, isActive: product.isActive }
           : null,
         variant: item.snapshot,
+        // How this item is counted and stepped (items sold by measure), from the live catalog; absent when it is gone.
+        measure: variantMeasure(product, item.variantId),
       };
     }),
   };
@@ -63,8 +79,8 @@ export async function addToCart(userId, productId, variantId, quantity = 1) {
   requireObjectIdFormat(productId, "productId");
   requireObjectIdFormat(variantId, "variantId");
   const qty = Number(quantity);
-  if (!Number.isInteger(qty) || qty < 1) {
-    throw new HttpError(400, "Quantity must be a positive integer");
+  if (!(qty > 0)) {
+    throw new HttpError(400, "Quantity must be a positive number");
   }
 
   const product = await Product.findById(productId);
@@ -72,10 +88,11 @@ export async function addToCart(userId, productId, variantId, quantity = 1) {
 
   const variant = findVariant(product, variantId);
   if (!variant) throw new HttpError(404, "Variant not found");
+  if (!isOrderableQuantity(variant, qty)) throw new HttpError(400, stepMessage(variant));
 
   const cart = await getOrCreateCart(userId);
   const existing = cart.items.find((i) => sameItem(i, productId, variantId));
-  const desiredQty = (existing?.quantity || 0) + qty;
+  const desiredQty = roundQuantity((existing?.quantity || 0) + qty);
 
   if (desiredQty > variant.stock) {
     throw new HttpError(400, `Only ${variant.stock} in stock for this variant`);
@@ -116,8 +133,9 @@ export async function updateCartItem(userId, productId, variantId, quantity) {
     if (!product) throw new HttpError(404, "Product not found");
     const variant = findVariant(product, variantId);
     if (!variant) throw new HttpError(404, "Variant not found");
+    if (!isOrderableQuantity(variant, qty)) throw new HttpError(400, stepMessage(variant));
     if (qty > variant.stock) throw new HttpError(400, `Only ${variant.stock} in stock`);
-    cart.items[idx].quantity = qty;
+    cart.items[idx].quantity = roundQuantity(qty);
     cart.items[idx].snapshot = snapshotVariant(variant);
   }
 

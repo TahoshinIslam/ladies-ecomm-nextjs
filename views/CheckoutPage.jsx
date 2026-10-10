@@ -58,6 +58,7 @@ import {
 // form's field-level messages stay its own) — see
 // schemas/addressSchemas.js's ADDRESS_LABELS.
 import { ADDRESS_LABELS } from "../schemas/addressSchemas.js";
+import { formatQuantity, itemMeasure } from "../lib/measure.js";
 
 const addressSchema = z.object({
   fullName: z.string().min(2, "Required"),
@@ -690,7 +691,7 @@ export default function CheckoutPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate">{p.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {variantLine ? `${variantLine} · ` : ""}{t("checkout.qty")} {it.quantity}
+                          {variantLine ? `${variantLine} · ` : ""}{t("checkout.qty")} {formatQuantity(it.quantity, itemMeasure(it).unit)}
                         </p>
                         {quoted.length > 1 ? (
                           <ul data-price-breakdown aria-label={`Price breakdown for ${p.name}`} className="mt-1 text-xs text-muted-foreground">

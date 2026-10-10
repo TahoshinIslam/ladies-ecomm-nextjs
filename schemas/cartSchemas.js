@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-import { objectIdSchema, quantitySchema } from "./commonSchemas.js";
+import { objectIdSchema, amountSchema } from "./commonSchemas.js";
 
 export const addToCartSchema = z
   .object({
     productId: objectIdSchema,
     variantId: objectIdSchema,
-    quantity: quantitySchema.optional().default(1),
+    quantity: amountSchema.optional().default(1),
   })
   .strict();
 
@@ -19,7 +19,7 @@ export const updateCartItemSchema = z
   .object({
     productId: objectIdSchema,
     variantId: objectIdSchema,
-    quantity: z.number().int().min(0).max(999),
+    quantity: z.number().min(0).max(99999),
   })
   .strict();
 
@@ -33,7 +33,7 @@ export const cartCheckSchema = z
           .object({
             productId: objectIdSchema,
             variantId: objectIdSchema,
-            quantity: z.number().int().min(1).max(999),
+            quantity: amountSchema,
           })
           .strict(),
       )

@@ -11,6 +11,8 @@ function rowToItem(row) {
     snapshot: {
       name: row.snapshot_name,
       sku: row.snapshot_sku,
+      // What the quantity is counted in: "pc", or kg/g/l/ml for an item sold by measure (migration 120).
+      unit: row.snapshot_unit || "pc",
       attributes: typeof row.snapshot_attributes === "string" ? JSON.parse(row.snapshot_attributes) : row.snapshot_attributes || {},
       price: Number(row.snapshot_price),
       image: row.snapshot_image,
@@ -209,8 +211,8 @@ async function create(data, conn) {
     const it = data.items[i];
     await conn.query(
       `INSERT INTO order_items (organization_id, order_id, product_id, variant_id, batch_id, quantity, snapshot_name,
-         snapshot_sku, snapshot_attributes, snapshot_price, snapshot_image, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         snapshot_sku, snapshot_unit, snapshot_attributes, snapshot_price, snapshot_image, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         getOrganizationId(),
         id,
@@ -222,6 +224,7 @@ async function create(data, conn) {
         it.quantity,
         it.snapshot.name,
         it.snapshot.sku || "",
+        it.snapshot.unit || "pc",
         JSON.stringify(it.snapshot.attributes || {}),
         it.snapshot.price,
         it.snapshot.image || "",
