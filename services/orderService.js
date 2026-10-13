@@ -19,7 +19,7 @@ import { groupSegmentsByPrice, publicQuoteLines, quoteHash } from "../lib/batchP
 import { requireObjectIdFormat } from "../lib/validation.js";
 import { isOrderableQuantity, orderStep, formatQuantity } from "../lib/measure.js";
 import { enforceRateLimit } from "../lib/rateLimit.js";
-import { ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS, ORDER_MAX_PENDING_PER_CUSTOMER } from "../lib/rateLimitConfig.js";
+import { ORDER_CREATE_IP_LIMIT, ORDER_CREATE_IP_WINDOW_MS, ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS, ORDER_MAX_PENDING_PER_CUSTOMER } from "../lib/rateLimitConfig.js";
 
 // Matches the "danger" row-highlight threshold ProductsPage.jsx already
 // uses for total stock — reusing the same number so "low stock" means the
@@ -369,6 +369,7 @@ export async function createOrder(
   userId,
   { items, shippingAddress, shippingTier, couponCode, notes, quote },
   idempotencyKey,
+  { clientIp = null } = {},
 ) {
   if (!items?.length) throw new HttpError(400, "Order must contain items");
   if (!shippingAddress) throw new HttpError(400, "Shipping address required");
@@ -404,6 +405,8 @@ export async function createOrder(
   // ORDER_CREATE_USER_LIMIT for the full reasoning.
   await enforceRateLimit([
     { identity: String(userId), action: "order-create:user", limit: ORDER_CREATE_USER_LIMIT, windowMs: ORDER_CREATE_USER_WINDOW_MS },
+    // Only when the address is trustworthy (lib/clientIp.js); without one the per-account limits still apply.
+    ...(clientIp ? [{ identity: clientIp, action: "order-create:ip", limit: ORDER_CREATE_IP_LIMIT, windowMs: ORDER_CREATE_IP_WINDOW_MS }] : []),
   ]);
 
   // A ceiling on orders still waiting for the store — see
@@ -596,7 +599,7 @@ export async function getOrder(userId, role, orderId) {
   const order = await Order.findById(orderId, { populateUser: true });
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user._id.toString() === String(userId);
-  if (!isOwner && role !== "admin") throw new HttpError(403, "Not authorized");
+  if (!isOwner) throw new HttpError(403, "Not authorized");
   return redactIdempotencyFields(order);
 }
 
@@ -631,7 +634,7 @@ export async function cancelOrder(userId, role, orderId) {
   const updatedOrder = await withTransaction(async (conn) => {
     const order = await Order.findByIdForUpdate(conn, orderId);
     if (!order) throw new HttpError(404, "Order not found");
-    if (order.user.toString() !== String(userId) && role !== "admin") {
+    if (order.user.toString() !== String(userId)) {
       throw new HttpError(403, "Not authorized");
     }
     if (!["pending", "paid", "processing"].includes(order.status)) {

@@ -30,6 +30,7 @@ describe("POST /api/orders — at most N orders waiting per customer", { skip: !
     process.env.ORDER_MAX_PENDING_PER_CUSTOMER = "2";
     // The hourly limiter is a different control; keep it out of the way here.
     process.env.RATE_LIMIT_ORDER_CREATE_USER_MAX = "1000";
+    process.env.RATE_LIMIT_ORDER_CREATE_IP_MAX = "3";
     await connectTestDb();
     await truncateAll();
     ({ POST } = await import("../app/api/orders/route.js"));
@@ -45,6 +46,7 @@ describe("POST /api/orders — at most N orders waiting per customer", { skip: !
     await disconnectTestDb();
     delete process.env.ORDER_MAX_PENDING_PER_CUSTOMER;
     delete process.env.RATE_LIMIT_ORDER_CREATE_USER_MAX;
+    delete process.env.RATE_LIMIT_ORDER_CREATE_IP_MAX;
   });
 
   const body = () => ({
@@ -76,6 +78,33 @@ describe("POST /api/orders — at most N orders waiting per customer", { skip: !
     const [first] = await rawQuery("SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at LIMIT 1", [String(buyer._id)]);
     await rawQuery("UPDATE orders SET status = 'processing' WHERE id = ?", [first.id]);
     assert.equal((await place(buyerSession)).status, 201);
+  });
+
+  test("orders from one address are limited across accounts", async () => {
+    await rawQuery("DELETE FROM rate_limit_counters");
+    await rawQuery("UPDATE orders SET status = 'processing'");
+    process.env.TRUST_PROXY_HEADERS = "true";
+    process.env.TRUSTED_PROXY_HOP_COUNT = "1";
+    try {
+      const ip = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
+      const fromIp = (session) => {
+        const req = requestAs({ method: "POST", url: "http://test/api/orders", session, body: body() });
+        req.headers.set("x-forwarded-for", ip);
+        return POST(req);
+      };
+      // RATE_LIMIT_ORDER_CREATE_IP_MAX is 3 for this file: two accounts, one address.
+      assert.equal((await fromIp(buyerSession)).status, 201);
+      assert.equal((await fromIp(otherSession)).status, 201);
+      await rawQuery("UPDATE orders SET status = 'processing'");
+      assert.equal((await fromIp(buyerSession)).status, 201);
+      const fourth = await fromIp(otherSession);
+      assert.equal(fourth.status, 429, "the fourth order from the same address is refused, whichever account places it");
+      assert.match((await fourth.json()).message, /too many requests/i);
+    } finally {
+      delete process.env.TRUST_PROXY_HEADERS;
+      delete process.env.TRUSTED_PROXY_HOP_COUNT;
+      await rawQuery("DELETE FROM rate_limit_counters");
+    }
   });
 
   test("retrying an order already placed is never refused by the ceiling", async () => {

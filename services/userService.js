@@ -108,11 +108,6 @@ export async function resetPassword(token, password) {
   return { message: "Password updated. Please log in." };
 }
 
-// ========== ADMIN ==========
-
-const ADMIN_USER_WRITABLE_FIELDS = ["name", "email", "role", "isVerified", "permissions"];
-const VALID_ROLES = ["customer", "employee", "admin"];
-
 // listUsers, getUserById, updateUser and deleteUser used to live here. They
 // served the user-administration endpoints, which moved to the admin
 // dashboard along with the rest of shop management — and with them the only

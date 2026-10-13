@@ -103,7 +103,7 @@ export async function updateReview(reviewId, actingUser, { rating, title, commen
   if (!review) throw new HttpError(404, "Review not found");
 
   const isOwner = review.user.toString() === actingUser._id.toString();
-  if (!isOwner && actingUser.role !== "admin") throw new HttpError(403, "Not authorized");
+  if (!isOwner) throw new HttpError(403, "Not authorized");
 
   if (rating !== undefined) review.rating = rating;
   if (title !== undefined) review.title = title;
@@ -118,7 +118,7 @@ export async function deleteReview(reviewId, actingUser) {
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 
-  if (review.user.toString() !== actingUser._id.toString() && actingUser.role !== "admin") {
+  if (review.user.toString() !== actingUser._id.toString()) {
     throw new HttpError(403, "Not authorized");
   }
   const productId = review.product.toString();

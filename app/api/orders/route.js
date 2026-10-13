@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireUser } from "../../../lib/auth.js";
+import { requireClientIp } from "../../../lib/clientIp.js";
 import { createOrder } from "../../../services/orderService.js";
 import { withRoute } from "../../../lib/http.js";
 import { readIdempotencyKey } from "../../../lib/idempotency.js";
@@ -26,7 +27,10 @@ export const POST = withRoute(async (request) => {
   // produces a different fingerprint. An invalid body throws here, before
   // any idempotency lookup/creation ever runs.
   const body = await parseJsonBody(request, createOrderSchema);
-  const { order, replayed } = await createOrder(user._id, body, idempotencyKey);
+  // The address counts toward the per-address order limit when it can be
+  // trusted; an order is never refused just because it cannot be.
+  const ip = requireClientIp(request);
+  const { order, replayed } = await createOrder(user._id, body, idempotencyKey, { clientIp: ip.ok ? ip.identity : null });
   // Only a genuinely NEW order actually decremented stock (the sequential-
   // replay fast path inside createOrder() returns before touching stock at
   // all) — invalidate only then, after the real transaction has already
