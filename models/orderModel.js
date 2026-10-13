@@ -118,6 +118,16 @@ async function findByIdempotencyKey(userId, keyHash) {
   return hydrateOne(rows[0]);
 }
 
+/** How many of this customer's orders are still waiting for the store to act on them. */
+async function countPendingByUser(userId) {
+  const rows = await query(
+    `SELECT COUNT(*) AS n FROM orders
+      WHERE organization_id = ? AND customer_id = ? AND status = 'pending' AND deleted_at IS NULL`,
+    [getOrganizationId(), userId],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 async function findMyOrders(userId) {
   const rows = await query(
     `SELECT * FROM orders
@@ -305,6 +315,7 @@ const Order = {
   findDeliveredProductIdsByUser,
   existsDeliveredWithProduct,
   findByIdempotencyKey,
+  countPendingByUser,
   findMyOrders,
   findAdminList,
   create,

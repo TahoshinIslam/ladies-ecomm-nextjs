@@ -55,6 +55,9 @@ describe("Public checkout follows the merchant's plan", { skip: !dbReady && skip
   };
 
   before(async () => {
+    // Many orders from one buyer here; the ceiling on pending orders has its
+    // own test (tests/orderPendingCap.test.mjs) and is lifted for this file.
+    process.env.ORDER_MAX_PENDING_PER_CUSTOMER = "1000";
     await connectTestDb();
     await truncateAll();
     ({ POST: createOrderPOST } = await import("../app/api/orders/route.js"));
@@ -76,6 +79,7 @@ describe("Public checkout follows the merchant's plan", { skip: !dbReady && skip
   });
 
   after(async () => {
+    delete process.env.ORDER_MAX_PENDING_PER_CUSTOMER;
     await setPlan(TEST_PLAN);
     await rawRestoreGrants();
     await deleteRows("orders", "customer_id", buyer._id);

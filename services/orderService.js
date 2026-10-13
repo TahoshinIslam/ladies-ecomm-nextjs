@@ -19,7 +19,7 @@ import { groupSegmentsByPrice, publicQuoteLines, quoteHash } from "../lib/batchP
 import { requireObjectIdFormat } from "../lib/validation.js";
 import { isOrderableQuantity, orderStep, formatQuantity } from "../lib/measure.js";
 import { enforceRateLimit } from "../lib/rateLimit.js";
-import { ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS } from "../lib/rateLimitConfig.js";
+import { ORDER_CREATE_USER_LIMIT, ORDER_CREATE_USER_WINDOW_MS, ORDER_MAX_PENDING_PER_CUSTOMER } from "../lib/rateLimitConfig.js";
 
 // Matches the "danger" row-highlight threshold ProductsPage.jsx already
 // uses for total stock — reusing the same number so "low stock" means the
@@ -405,6 +405,18 @@ export async function createOrder(
   await enforceRateLimit([
     { identity: String(userId), action: "order-create:user", limit: ORDER_CREATE_USER_LIMIT, windowMs: ORDER_CREATE_USER_WINDOW_MS },
   ]);
+
+  // A ceiling on orders still waiting for the store — see
+  // ORDER_MAX_PENDING_PER_CUSTOMER. Counted outside the transaction, so two
+  // simultaneous checkouts can each pass at the limit; that overshoot is one
+  // order, not the unbounded hoarding this exists to stop.
+  if ((await Order.countPendingByUser(userId)) >= ORDER_MAX_PENDING_PER_CUSTOMER) {
+    throw new HttpError(
+      429,
+      "You already have orders waiting for the store to confirm. Please wait until one is confirmed or cancel one before placing another.",
+      { code: "too-many-pending-orders" },
+    );
+  }
 
   let createdOrder;
   try {

@@ -244,6 +244,14 @@ async function main() {
         // what actually keeps this real server instance off the real
         // application database.
         ...testDbEnv(),
+        // Optionally run the SERVER as a different database account than the
+        // fixtures use — the production storefront_app account from
+        // ecom_erp/docs/production/database-users.sql — so the suite proves
+        // the app works with exactly those grants. Fixtures keep the admin
+        // connection above; only the app under test is restricted.
+        ...(process.env.SERVER_DB_USER
+          ? { DB_USER: process.env.SERVER_DB_USER, DB_PASSWORD: process.env.SERVER_DB_PASSWORD ?? "" }
+          : {}),
         PORT: String(port),
         // The port is only known once findFreePort() resolves, so it can't
         // come from a static .env.test value — set it explicitly here so
