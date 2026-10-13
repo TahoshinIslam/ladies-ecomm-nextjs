@@ -78,7 +78,7 @@ export async function getPaymentByOrder(orderId, userId, role) {
   requireObjectIdFormat(orderId, "orderId");
   const payment = await Payment.findByOrder(orderId);
   if (!payment) throw new HttpError(404, "Payment not found");
-  if (payment.user.toString() !== String(userId) && role !== "admin") {
+  if (payment.user.toString() !== String(userId)) {
     throw new HttpError(403, "Not authorized");
   }
   return payment;

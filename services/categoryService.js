@@ -82,33 +82,4 @@ export async function updateCategory(id, body) {
   return category;
 }
 
-export async function deleteCategory(id) {
-  requireObjectIdFormat(id, "id");
-  const category = await Category.findById(id);
-  if (!category) throw new HttpError(404, "Category not found");
 
-  const childCount = await Category.countByParent(id);
-  if (childCount > 0) {
-    throw new HttpError(400, `Cannot delete: ${childCount} subcategor${childCount > 1 ? "ies" : "y"} under this category. Reassign or delete them first.`);
-  }
-  // Only ACTIVE products block deletion. "Delete" on a product
-  // (services/productService.js's deleteProduct) is a soft delete —
-  // isActive: false, the row and its category reference stay put — there
-  // is no way to ever truly remove a product from a category. Without this
-  // isActive filter, a category that ever had a product deactivated in it
-  // could never be deleted at all, even after the admin believed they'd
-  // "removed" that product. A deactivated product is already invisible
-  // everywhere on the storefront, so leaving its category reference intact
-  // after the category is gone (it just won't resolve to a real category
-  // any more) is harmless — the same trade-off orders already make by
-  // keeping historical snapshots after a product is deactivated.
-  const productCount = await Product.countActiveByCategory(id);
-  if (productCount > 0) {
-    throw new HttpError(400, `Cannot delete: ${productCount} product${productCount > 1 ? "s" : ""} use this category. Reassign or deactivate them first.`);
-  }
-  await category.deleteOne();
-  // Attribute assignments/label overrides keyed by this category have no FK
-  // — remove them so they can't dangle (see AttributeDefinition.removeCategoryReferences).
-  await AttributeDefinition.removeCategoryReferences(category._id);
-  resetStorefrontScopeCache();
-}

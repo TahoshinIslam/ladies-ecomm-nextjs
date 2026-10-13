@@ -12,7 +12,6 @@
     "start": "next start -p 3100",
     "lint": "eslint",
     "seed": "node --env-file=.env scripts/seedCatalog.mjs",
-    "migrate:mongo-to-mysql": "node --env-file=.env scripts/migrateMongoToMysql.mjs",
     "pretest": "NODE_ENV=test node --env-file-if-exists=.env.test scripts/assertTestDbSafety.mjs",
     "test": "NODE_ENV=test node --experimental-test-module-mocks --import ./tests/helpers/nextResolveHook.mjs --env-file-if-exists=.env.test --test --test-concurrency=1 tests/*.test.mjs",
     "test:core": "npm run test",
@@ -36,8 +35,8 @@
     "framer-motion": "^13.2.0",
     "lucide-react": "^1.39.0",
     "mysql2": "^3.24.4",
-    "next": "16.3.4",
-    "nodemailer": "^9.1.1",
+    "next": "16.3.8",
+    "nodemailer": "10.1.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "^7.87.0",
@@ -51,8 +50,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
-    "eslint-config-next": "16.3.4",
-    "mongodb": "^7.6.0",
+    "eslint-config-next": "16.3.8",
     "playwright": "^1.63.0",
     "tailwindcss": "^4"
   }

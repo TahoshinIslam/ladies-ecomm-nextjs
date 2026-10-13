@@ -1,4 +1,6 @@
 import { requireUser } from "../../../../../lib/auth.js";
+import { enforceRateLimit } from "../../../../../lib/rateLimit.js";
+import { EVENT_STREAM_USER_LIMIT, EVENT_STREAM_USER_WINDOW_MS } from "../../../../../lib/rateLimitConfig.js";
 import { HttpError, withRoute } from "../../../../../lib/http.js";
 import { orderChannel, readEventsSince, resolveStartCursor } from "../../../../../lib/events.js";
 import Order from "../../../../../models/orderModel.js";
@@ -32,13 +34,17 @@ const STREAM_MAX_MS = 4 * 60 * 1000;
 // cannot work across Vercel's multiple isolated function instances.
 export const GET = withRoute(async (request, { params }) => {
   const user = await requireUser(request);
+  // Opening a stream is metered per shopper — see EVENT_STREAM_USER_LIMIT.
+  await enforceRateLimit([
+    { identity: String(user._id), action: "event-stream:user", limit: EVENT_STREAM_USER_LIMIT, windowMs: EVENT_STREAM_USER_WINDOW_MS },
+  ]);
 
   const { id } = await params;
   requireObjectIdFormat(id, "id");
   const order = await Order.findById(id);
   if (!order) throw new HttpError(404, "Order not found");
   const isOwner = order.user.toString() === String(user._id);
-  if (!isOwner && user.role !== "admin") throw new HttpError(403, "Not authorized");
+  if (!isOwner) throw new HttpError(403, "Not authorized");
 
   const channel = orderChannel(id);
 

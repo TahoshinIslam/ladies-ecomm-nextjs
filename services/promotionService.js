@@ -21,9 +21,6 @@ const CREATIVE_FIELDS = [
 
 // ================================================================ ADMIN
 
-export async function listPromotionsAdmin({ type, status } = {}) {
-  return Promotion.findAll({ type, status });
-}
 
 // `placement` is a 1:1 derivation of `type` — the admin form never submits
 // it directly, so it's computed here rather than required as its own input.
@@ -43,17 +40,6 @@ async function persistFraming(id, desktopFraming, mobileFraming) {
   await Promotion.writeFraming(id, sanitizeFraming(desktopFraming), sanitizeFraming(mobileFraming));
 }
 
-export async function createPromotion(body, userId) {
-  await assertFramingStorage(body.desktopFraming, body.mobileFraming);
-  const created = await Promotion.create({
-    ...body,
-    placement: PLACEMENT_BY_TYPE[body.type],
-    createdBy: userId || null,
-    updatedBy: userId || null,
-  });
-  await persistFraming(created._id, body.desktopFraming, body.mobileFraming);
-  return Promotion.findById(created._id);
-}
 
 export async function updatePromotion(id, body, userId) {
   requireObjectIdFormat(id, "id");
@@ -83,46 +69,8 @@ export async function updatePromotion(id, body, userId) {
   return existing;
 }
 
-export async function duplicatePromotion(id, userId) {
-  requireObjectIdFormat(id, "id");
-  const source = await Promotion.findById(id);
-  if (!source) throw new HttpError(404, "Promotion not found");
-  const { _id, createdAt, updatedAt, save, ...rest } = source;
-  void _id;
-  void createdAt;
-  void updatedAt;
-  void save;
-  const copy = await Promotion.create({
-    ...rest,
-    name: `${source.name} (copy)`,
-    status: "draft",
-    version: 1,
-    createdBy: userId || null,
-    updatedBy: userId || null,
-  });
-  // create() doesn't write framing (see persistFraming) — carry the crops over.
-  await persistFraming(copy._id, source.desktopFraming, source.mobileFraming);
-  return Promotion.findById(copy._id);
-}
 
-export async function deletePromotion(id) {
-  requireObjectIdFormat(id, "id");
-  const deleted = await Promotion.deleteById(id);
-  if (!deleted) throw new HttpError(404, "Promotion not found");
-}
 
-// Reassigns sortOrder to match `order` (an array of every promotion id of
-// `type`, in the admin's intended display order) — scoped to `type` so
-// reordering carousel banners can never touch a popup's sortOrder or vice
-// versa.
-export async function reorderPromotions(type, order) {
-  const existingIds = new Set(await Promotion.findIdsByType(type));
-  for (const id of order) {
-    if (!existingIds.has(id)) throw new HttpError(400, "order lists an id that doesn't belong to this promotion type");
-  }
-  await Promise.all(order.map((id, index) => Promotion.updateSortOrder(id, type, index)));
-  return listPromotionsAdmin({ type });
-}
 
 // ================================================================ TARGET RESOLUTION
 

@@ -103,7 +103,7 @@ export async function updateReview(reviewId, actingUser, { rating, title, commen
   if (!review) throw new HttpError(404, "Review not found");
 
   const isOwner = review.user.toString() === actingUser._id.toString();
-  if (!isOwner && actingUser.role !== "admin") throw new HttpError(403, "Not authorized");
+  if (!isOwner) throw new HttpError(403, "Not authorized");
 
   if (rating !== undefined) review.rating = rating;
   if (title !== undefined) review.title = title;
@@ -118,7 +118,7 @@ export async function deleteReview(reviewId, actingUser) {
   const review = await Review.findById(reviewId);
   if (!review) throw new HttpError(404, "Review not found");
 
-  if (review.user.toString() !== actingUser._id.toString() && actingUser.role !== "admin") {
+  if (review.user.toString() !== actingUser._id.toString()) {
     throw new HttpError(403, "Not authorized");
   }
   const productId = review.product.toString();
@@ -176,14 +176,4 @@ export async function listAllReviews({ page = 1, limit = 20, rating, productId, 
   return { total, page: Number(page), pages: Math.ceil(total / Number(limit)) || 1, count: reviews.length, reviews };
 }
 
-export async function replyToReview(reviewId, adminUserId, text) {
-  requireObjectIdFormat(reviewId, "reviewId");
-  const review = await Review.findById(reviewId);
-  if (!review) throw new HttpError(404, "Review not found");
 
-  const trimmed = String(text || "").trim();
-  review.adminReply = trimmed ? { text: trimmed, repliedBy: adminUserId, repliedAt: new Date() } : { text: "", repliedBy: null, repliedAt: null };
-
-  await review.save();
-  return Review.findById(reviewId);
-}

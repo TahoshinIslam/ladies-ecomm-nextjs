@@ -15,6 +15,22 @@ const cache = (globalThis.__mysqlPoolCache ??= { pool: null });
 // request-time dynamic (see proxy.js) — so a Server Component that still
 // tries to reach the database during `next build` needs its own
 // `force-dynamic`, not a silent build-time connection.
+/**
+ * TLS for the database connection: DB_SSL=true encrypts and verifies the
+ * server certificate; DB_SSL_CA may carry the provider's CA (PEM, newlines
+ * as \n). A managed database is reached across a network this app does not
+ * own, so customer data and this app's own database password must not cross
+ * it readable. The production account (ecom_erp's
+ * docs/production/database-users.sql) is created REQUIRE SSL, so forgetting
+ * DB_SSL fails to connect instead of connecting in the clear. Off by default
+ * only because a local XAMPP server has no certificate.
+ */
+function sslOptions(env = process.env) {
+  if (env.DB_SSL !== "true") return undefined;
+  const ca = env.DB_SSL_CA ? env.DB_SSL_CA.replace(/\\n/g, "\n") : undefined;
+  return { rejectUnauthorized: true, ...(ca ? { ca } : {}) };
+}
+
 function assertNotBuildPhase() {
   if (process.env.NEXT_PHASE === "phase-production-build") {
     throw new Error(
@@ -64,6 +80,7 @@ function buildPool() {
     database,
     user,
     password,
+    ssl: sslOptions(),
     waitForConnections: true,
     connectionLimit,
     // Bounded, not unlimited: a request that can't get a pooled connection

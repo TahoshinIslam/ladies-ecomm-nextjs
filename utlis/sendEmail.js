@@ -18,10 +18,14 @@ const transporter = nodemailer.createTransport({
  * @param {object} opts - { to, subject, html, text }
  */
 export const sendEmail = async ({ to, subject, html, text }) => {
-  // The sender is the store itself unless a deployment sets one.
-  const from = `"${process.env.FROM_NAME || (await getStoreName()) || "Store"}" <${
-    process.env.FROM_EMAIL || "noreply@tahos.store"
-  }>`;
+  // The sender is the store itself unless a deployment sets one. Passed as
+  // { name, address } so nodemailer encodes the name itself — a store name is
+  // shop-owner input, and quoting it into a header string by hand would let a
+  // `"` or a line break reshape the From header.
+  const from = {
+    name: String(process.env.FROM_NAME || (await getStoreName()) || "Store").replace(/[\r\n]+/g, " "),
+    address: process.env.FROM_EMAIL || "noreply@tahos.store",
+  };
 
   const info = await transporter.sendMail({
     from,

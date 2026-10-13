@@ -36,6 +36,10 @@ describe("POST /api/orders — order creation is rate limited (confirmed audit f
     // Deliberately tiny limit for this test run only, so the test doesn't
     // need to fire real production-sized bursts to prove the behavior.
     process.env.RATE_LIMIT_ORDER_CREATE_USER_MAX = "3";
+    // This file is about the hourly limiter; the ceiling on pending orders
+    // (tests/orderPendingCap.test.mjs) is lifted so the orders placed here
+    // do not trip it first.
+    process.env.ORDER_MAX_PENDING_PER_CUSTOMER = "1000";
     await connectTestDb();
     await truncateAll();
     ({ POST } = await import("../app/api/orders/route.js"));
@@ -48,6 +52,7 @@ describe("POST /api/orders — order creation is rate limited (confirmed audit f
     await rawQuery("DELETE FROM rate_limit_counters");
     await disconnectTestDb();
     delete process.env.RATE_LIMIT_ORDER_CREATE_USER_MAX;
+    delete process.env.ORDER_MAX_PENDING_PER_CUSTOMER;
   });
 
   function orderBody() {

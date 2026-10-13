@@ -46,32 +46,6 @@ export async function resolveAttributesForCategory(topCategoryId) {
   });
 }
 
-export async function createAttribute(body) {
-  const data = pickWritable(body);
-  if (!data.key || !data.label || !data.type) {
-    throw new HttpError(400, "key, label, and type are required");
-  }
-  const attribute = await AttributeDefinition.create(data);
-  return attribute;
-}
 
-export async function updateAttribute(id, body) {
-  requireObjectIdFormat(id, "id");
-  const attribute = await AttributeDefinition.findById(id);
-  if (!attribute) throw new HttpError(404, "Attribute not found");
 
-  const data = pickWritable(body);
-  // Key is a stable reference used by Product.attributes[].key — changing
-  // it after products exist would silently orphan their facet data.
-  delete data.key;
-  Object.assign(attribute, data);
-  await attribute.save();
-  return attribute;
-}
 
-export async function deleteAttribute(id) {
-  requireObjectIdFormat(id, "id");
-  const attribute = await AttributeDefinition.findById(id);
-  if (!attribute) throw new HttpError(404, "Attribute not found");
-  await attribute.deleteOne();
-}
