@@ -137,6 +137,9 @@ jobs:
       - name: Prepare the test organization
         run: node scripts/setupTestDb.mjs
 
+      # Fails on a high or critical advisory in anything that ships (dev tools excluded).
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
       - name: Lint
         run: npm run lint
 
@@ -158,6 +161,9 @@ jobs:
       # one `next start` server on a verified-free port pointed ONLY at that
       # database, runs tests/http/*.test.mjs against it, and always stops
       # the server afterward (success, failure, or interruption).
+      # tests/http/shopperJourney drives the built pages in a real browser.
+      - name: Install Chromium for browser tests
+        run: npx playwright install --with-deps chromium
       - name: Test (HTTP integration suites)
         shell: bash
         run: |

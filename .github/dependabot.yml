@@ -1,0 +1,24 @@
+# Weekly dependency updates, as pull requests that run the full CI.
+# Minor and patch bumps arrive grouped in one PR; majors one by one, since
+# those are the ones that need reading. Security fixes come regardless of
+# the schedule once Dependabot alerts are on (repository Settings → Code
+# security).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
