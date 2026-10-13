@@ -74,15 +74,21 @@ describe("POST /api/orders — at most N orders waiting per customer", { skip: !
     assert.equal((await place(otherSession)).status, 201);
   });
 
-  test("once the store moves an order on, the customer can order again", async () => {
+  test("an order confirmed for cash on delivery ('processing') still counts", async () => {
     const [first] = await rawQuery("SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at LIMIT 1", [String(buyer._id)]);
     await rawQuery("UPDATE orders SET status = 'processing' WHERE id = ?", [first.id]);
+    assert.equal((await place(buyerSession)).status, 429, "processing is still open — the slot is not freed");
+  });
+
+  test("once the store ships an order, the customer can order again", async () => {
+    const [first] = await rawQuery("SELECT id FROM orders WHERE customer_id = ? ORDER BY created_at LIMIT 1", [String(buyer._id)]);
+    await rawQuery("UPDATE orders SET status = 'shipped' WHERE id = ?", [first.id]);
     assert.equal((await place(buyerSession)).status, 201);
   });
 
   test("orders from one address are limited across accounts", async () => {
     await rawQuery("DELETE FROM rate_limit_counters");
-    await rawQuery("UPDATE orders SET status = 'processing'");
+    await rawQuery("UPDATE orders SET status = 'shipped'");
     process.env.TRUST_PROXY_HEADERS = "true";
     process.env.TRUSTED_PROXY_HOP_COUNT = "1";
     try {
@@ -95,7 +101,7 @@ describe("POST /api/orders — at most N orders waiting per customer", { skip: !
       // RATE_LIMIT_ORDER_CREATE_IP_MAX is 3 for this file: two accounts, one address.
       assert.equal((await fromIp(buyerSession)).status, 201);
       assert.equal((await fromIp(otherSession)).status, 201);
-      await rawQuery("UPDATE orders SET status = 'processing'");
+      await rawQuery("UPDATE orders SET status = 'shipped'");
       assert.equal((await fromIp(buyerSession)).status, 201);
       const fourth = await fromIp(otherSession);
       assert.equal(fourth.status, 429, "the fourth order from the same address is refused, whichever account places it");
@@ -109,7 +115,7 @@ describe("POST /api/orders — at most N orders waiting per customer", { skip: !
 
   test("retrying an order already placed is never refused by the ceiling", async () => {
     const key = "pending-cap-retry-key-0123456789";
-    await rawQuery("UPDATE orders SET status = 'processing' WHERE customer_id = ?", [String(buyer._id)]);
+    await rawQuery("UPDATE orders SET status = 'shipped' WHERE customer_id = ?", [String(buyer._id)]);
     assert.equal((await place(buyerSession, key)).status, 201);
     assert.equal((await place(buyerSession)).status, 201); // now at the ceiling of 2
     const replay = await place(buyerSession, key);

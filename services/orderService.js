@@ -409,11 +409,11 @@ export async function createOrder(
     ...(clientIp ? [{ identity: clientIp, action: "order-create:ip", limit: ORDER_CREATE_IP_LIMIT, windowMs: ORDER_CREATE_IP_WINDOW_MS }] : []),
   ]);
 
-  // A ceiling on orders still waiting for the store — see
+  // A ceiling on open (unshipped) orders — see
   // ORDER_MAX_PENDING_PER_CUSTOMER. Counted outside the transaction, so two
   // simultaneous checkouts can each pass at the limit; that overshoot is one
   // order, not the unbounded hoarding this exists to stop.
-  if ((await Order.countPendingByUser(userId)) >= ORDER_MAX_PENDING_PER_CUSTOMER) {
+  if ((await Order.countOpenByUser(userId)) >= ORDER_MAX_PENDING_PER_CUSTOMER) {
     throw new HttpError(
       429,
       "You already have orders waiting for the store to confirm. Please wait until one is confirmed or cancel one before placing another.",

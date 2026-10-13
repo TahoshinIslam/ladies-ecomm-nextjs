@@ -118,11 +118,16 @@ async function findByIdempotencyKey(userId, keyHash) {
   return hydrateOne(rows[0]);
 }
 
-/** How many of this customer's orders are still waiting for the store to act on them. */
-async function countPendingByUser(userId) {
+/**
+ * How many of this customer's orders are still open — placed but not yet
+ * shipped or cancelled. Both statuses count: a cash-on-delivery checkout moves
+ * its order from 'pending' to 'processing' at once (paymentService.codCreate),
+ * so counting 'pending' alone would miss every order placed through checkout.
+ */
+async function countOpenByUser(userId) {
   const rows = await query(
     `SELECT COUNT(*) AS n FROM orders
-      WHERE organization_id = ? AND customer_id = ? AND status = 'pending' AND deleted_at IS NULL`,
+      WHERE organization_id = ? AND customer_id = ? AND status IN ('pending', 'processing') AND deleted_at IS NULL`,
     [getOrganizationId(), userId],
   );
   return Number(rows[0]?.n ?? 0);
@@ -315,7 +320,7 @@ const Order = {
   findDeliveredProductIdsByUser,
   existsDeliveredWithProduct,
   findByIdempotencyKey,
-  countPendingByUser,
+  countOpenByUser,
   findMyOrders,
   findAdminList,
   create,
