@@ -176,14 +176,4 @@ export async function listAllReviews({ page = 1, limit = 20, rating, productId, 
   return { total, page: Number(page), pages: Math.ceil(total / Number(limit)) || 1, count: reviews.length, reviews };
 }
 
-export async function replyToReview(reviewId, adminUserId, text) {
-  requireObjectIdFormat(reviewId, "reviewId");
-  const review = await Review.findById(reviewId);
-  if (!review) throw new HttpError(404, "Review not found");
 
-  const trimmed = String(text || "").trim();
-  review.adminReply = trimmed ? { text: trimmed, repliedBy: adminUserId, repliedAt: new Date() } : { text: "", repliedBy: null, repliedAt: null };
-
-  await review.save();
-  return Review.findById(reviewId);
-}

@@ -17,21 +17,7 @@ export async function getPublicSettings() {
   };
 }
 
-// Full document, admin-only — includes nothing the public route omits (this
-// singleton has no admin-only secrets), but kept separate from
-// getPublicSettings() since that one's shape is a deliberate, narrower
-// contract other code already depends on (see comment above).
-export async function getSettings() {
-  return Settings.getSingleton();
-}
 
 const WRITABLE_FIELDS = ["store", "homepage", "currency", "promotions", "taxRules", "shippingZones", "exchangePolicy"];
 
-export async function updateSettings(patch) {
-  const settings = await Settings.getSingleton();
-  for (const field of WRITABLE_FIELDS) {
-    if (patch[field] !== undefined) settings[field] = patch[field];
-  }
-  await settings.save();
-  return settings;
-}
+
