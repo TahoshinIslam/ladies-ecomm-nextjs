@@ -39,6 +39,7 @@ import {
   deleteRows,
   rawQuery,
 } from "./helpers/testDb.mjs";
+import { sourceOf } from "./helpers/sourceOf.mjs";
 
 async function countOrdersForUser(userId) {
   const [{ n }] = await rawQuery("SELECT COUNT(*) AS n FROM orders WHERE customer_id = ?", [userId]);
@@ -372,7 +373,7 @@ describe("POST /api/orders — Idempotency-Key contract (Phase 4)", { skip: !can
   test("the raw Idempotency-Key is never passed to console.* anywhere in the implementation (static source check)", async () => {
     const sources = [
       fs.readFileSync(new URL("../lib/idempotency.js", import.meta.url), "utf8"),
-      fs.readFileSync(new URL("../services/orderService.js", import.meta.url), "utf8"),
+      sourceOf("services/orderService.js"),
       fs.readFileSync(new URL("../app/api/orders/route.js", import.meta.url), "utf8"),
     ].join("\n");
     for (const line of sources.split("\n")) {

@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import { dbReady, skipReason, connectTestDb, disconnectTestDb, rawQuery } from "./helpers/testDb.mjs";
+import { sourceOf } from "./helpers/sourceOf.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -41,7 +42,7 @@ describe("Phase 11 CORRECTION — no production emit call site uses silent fire-
   const files = ["services/orderService.js", "services/paymentService.js", "services/productService.js", "services/reviewService.js"];
   for (const rel of files) {
     test(`${rel} never calls emitOrderEvent/emitAdminEvent with a silent .catch(() => {})`, () => {
-      const content = stripComments(fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8"));
+      const content = stripComments(sourceOf(rel));
       // Bounded lookahead (200 chars) rather than an unbounded [\s\S]*? —
       // an unbounded lazy match can bridge across an emit call all the
       // way to an unrelated LATER `.catch(() => {})` elsewhere in the
@@ -56,7 +57,7 @@ describe("Phase 11 CORRECTION — no production emit call site uses silent fire-
     });
 
     test(`${rel} calls at least one emit function, and every call is either transactional (awaited with { session }, no catch) or wrapped in emitBestEffort(...)`, () => {
-      const content = stripComments(fs.readFileSync(new URL(`../${rel}`, import.meta.url), "utf8"));
+      const content = stripComments(sourceOf(rel));
       const totalEmitCalls = (content.match(/emit(Order|Admin)Event\(/g) || []).length;
       assert.ok(totalEmitCalls > 0, `${rel} should still call an emit function`);
 
@@ -71,7 +72,7 @@ describe("Phase 11 CORRECTION — no production emit call site uses silent fire-
   }
 
   test("services/orderService.js: NEW_ORDER and cancellation events are written INSIDE their transactions", () => {
-    const content = stripComments(fs.readFileSync(new URL("../services/orderService.js", import.meta.url), "utf8"));
+    const content = stripComments(sourceOf("services/orderService.js"));
     assert.match(content, /await emitAdminEvent\(\{ type: "NEW_ORDER"[\s\S]*?\{ session: conn \}\)/);
     assert.match(content, /await emitOrderEvent\(orderId, \{ orderId, status: "cancelled" \}, \{ session: conn \}\)/);
     assert.match(content, /await emitAdminEvent\(\s*\{ type: "ORDER_CANCELLED"[\s\S]*?\{ session: conn \},?\s*\)/);

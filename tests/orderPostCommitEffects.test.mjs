@@ -34,6 +34,7 @@ import {
   createTestProduct,
   deleteRows,
 } from "./helpers/testDb.mjs";
+import { sourceOf } from "./helpers/sourceOf.mjs";
 
 const canRun = dbReady;
 const reason = skipReason;
@@ -355,7 +356,7 @@ describe("Phase 4 exactly-once post-commit effects (real effect boundary, mocked
     });
 
     test("source regression guard: the outer checkLowStock() call site is awaited via emitBestEffort, never a bare un-awaited .catch()", () => {
-      const src = fs.readFileSync(new URL("../services/orderService.js", import.meta.url), "utf8");
+      const src = sourceOf("services/orderService.js");
       assert.match(src, /await emitBestEffort\(checkLowStock\(createdOrder\.items\)\)/, "the outer call must be awaited through emitBestEffort");
       assert.doesNotMatch(src, /checkLowStock\(createdOrder\.items\)\.catch\(\(\) => \{\}\)/, "the old un-awaited fire-and-forget pattern must not reappear");
     });
