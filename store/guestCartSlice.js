@@ -107,7 +107,5 @@ export const { hydrateGuestCart, guestAdd, guestUpdate, guestRemove, guestClear 
   guestCartSlice.actions;
 
 export const selectGuestItems = (state) => state.guestCart.items;
-export const selectGuestCount = (state) =>
-  state.guestCart.items.reduce((n, i) => n + Math.ceil(i.quantity), 0);
 
 export default guestCartSlice.reducer;
