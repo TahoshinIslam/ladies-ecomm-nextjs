@@ -263,10 +263,15 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
       resolveEmit = resolve;
     });
     let emitStarted = false;
+    let markStarted;
+    const started = new Promise((resolve) => {
+      markStarted = resolve;
+    });
     let functionReturnedBeforeEmitResolved = false;
 
     const spy = mock.method(Event, "create", async (...args) => {
       emitStarted = true;
+      markStarted();
       await gate;
       return Event.create.wrappedMethod ? Event.create.wrappedMethod(...args) : [];
     });
@@ -283,9 +288,9 @@ describe("Phase 11 CORRECTION — transactional-outbox atomicity (real DB, force
         variants: [{ variantName: "Default", sku: `AWAIT-${Date.now()}`, stock: 1 }],
       });
 
-      // Give the emit call a moment to actually start before we decide
-      // whether the outer promise resolved too early.
-      await new Promise((r) => setTimeout(r, 20));
+      // Wait for the emit call to actually start (the product writes before
+      // it can take a while on a slow runner) — a fixed delay here was flaky.
+      await Promise.race([started, createPromise, new Promise((r) => setTimeout(r, 5_000))]);
       assert.ok(emitStarted, "the event insert must have started before this check");
 
       let settled = false;
