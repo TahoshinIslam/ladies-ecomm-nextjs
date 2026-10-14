@@ -11,6 +11,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # eslint 10 breaks eslint-config-next's plugins ("scopeManager.addGlobals is not a
+      # function"). Lift this once eslint-config-next supports eslint 10.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         update-types: [minor, patch]

@@ -11,7 +11,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 import { motion } from "framer-motion";
 import { Mail, ArrowLeft } from "lucide-react";
 

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 import { objectIdSchema, amountSchema } from "./commonSchemas.js";
 

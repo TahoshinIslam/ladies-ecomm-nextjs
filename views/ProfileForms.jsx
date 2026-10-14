@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useDispatch } from "react-redux";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 import { MapPin, Trash2, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 

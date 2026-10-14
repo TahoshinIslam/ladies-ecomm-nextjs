@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 import { nonNegativeFiniteNumber, objectIdSchema, requiredString } from "./commonSchemas.js";
 import { orderItemsSchema } from "./orderSchemas.js";
