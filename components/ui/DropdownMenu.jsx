@@ -122,21 +122,3 @@ export default function DropdownMenu({ trigger, triggerLabel = "Open actions men
     </div>
   );
 }
-
-export function DropdownMenuItem({ icon: Icon, danger = false, className, children, ...props }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors focus-ring disabled:cursor-not-allowed disabled:opacity-50",
-        danger ? "text-danger hover:bg-danger/10" : "text-foreground hover:bg-muted",
-        className,
-      )}
-      {...props}
-    >
-      {Icon && <Icon aria-hidden="true" className="h-4 w-4 flex-none" />}
-      {children}
-    </button>
-  );
-}

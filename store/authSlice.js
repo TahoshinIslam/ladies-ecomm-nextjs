@@ -38,10 +38,6 @@ export default authSlice.reducer;
 
 // Selectors
 export const selectAuthStatus = (state) => state.auth.status;
-// Kept for existing consumers (AdminLayout.jsx etc.) — "hydrated" now means
-// "boot has resolved one way or the other," not "localStorage was read."
-export const selectAuthHydrated = (state) => state.auth.status !== "loading";
 export const selectCurrentUser = (state) => state.auth.user;
-export const selectIsAuthenticated = (state) => !!state.auth.user;
 export const selectCanAccessAdmin = (state) =>
   ["admin", "employee"].includes(state.auth.user?.role);
