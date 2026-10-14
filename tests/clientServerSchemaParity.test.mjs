@@ -23,7 +23,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 import { PASSWORD_MIN_LENGTH, registerSchema, updateMeSchema } from "../schemas/authSchemas.js";
 import { ADDRESS_LABELS, createAddressSchema } from "../schemas/addressSchemas.js";

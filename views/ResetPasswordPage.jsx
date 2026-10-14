@@ -13,7 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 import { motion } from "framer-motion";
 import { Lock, ArrowLeft } from "lucide-react";
 

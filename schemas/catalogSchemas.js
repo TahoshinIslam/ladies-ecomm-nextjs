@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 import { objectIdSchema, nonNegativeFiniteNumber, requiredString, urlSchema, paginationSchema, sortFieldSchema, sortOrderSchema, boundedIntParam } from "./commonSchemas.js";
 import { productFramingListSchema } from "./framingSchema.js";

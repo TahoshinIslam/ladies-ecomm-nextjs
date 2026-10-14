@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 import { motion } from "framer-motion";
 import { Mail, Lock, LogIn } from "lucide-react";
 import { toast } from "sonner";

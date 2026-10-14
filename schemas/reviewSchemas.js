@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 import { requiredString, urlSchema, paginationSchema, searchQuerySchema, sortFieldSchema, sortOrderSchema, objectIdSchema } from "./commonSchemas.js";
 

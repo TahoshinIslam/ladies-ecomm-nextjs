@@ -3,7 +3,7 @@
 // import from a Client Component for client-side form validation (see
 // views/CheckoutPage.jsx and friends) — the server (lib/validation.js +
 // each route) is what actually enforces these; client-side use is UX only.
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 // A Mongo ObjectId as it arrives from a URL path segment: exactly 24 hex
 // characters. Deliberately a plain regex, not `mongoose.isValidObjectId`,

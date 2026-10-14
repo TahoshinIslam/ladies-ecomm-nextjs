@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "../lib/zod.js";
 
 import { MAX_BOX, MAX_ZOOM, MIN_ZOOM, sanitizeFraming } from "../lib/imageFraming.js";
 
