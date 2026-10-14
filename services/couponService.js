@@ -1,6 +1,5 @@
 import Coupon from "../models/couponModel.js";
 import { HttpError } from "../lib/http.js";
-import { requireObjectIdFormat } from "../lib/validation.js";
 import { couponDiscount } from "./orderService.js";
 
 /**
@@ -26,10 +25,3 @@ export async function validateCoupon(code, subtotal = 0) {
 
   return { coupon, discount: couponDiscount(coupon, subtotal) };
 }
-
-// ========== ADMIN ==========
-
-
-
-
-

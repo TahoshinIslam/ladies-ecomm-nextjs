@@ -22,8 +22,7 @@ export function useOrderStatusStream(orderId, onUpdate) {
   useEffect(() => {
     if (!orderId || !user) return;
 
-    // Same dedup/resume reasoning as useAdminEventStream.js —
-    // the server emits `id: <mongoId>` per event, which EventSource
+    // Dedup/resume: the server emits `id: <eventId>` per event, which EventSource
     // resends as `Last-Event-ID` on its own automatic reconnect.
     const seenEventIds = new Set();
     const MAX_SEEN = 50;

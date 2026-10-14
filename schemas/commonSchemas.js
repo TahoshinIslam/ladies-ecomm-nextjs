@@ -95,14 +95,6 @@ export const phoneSchema = z
 // `.positive()`.
 export const nonNegativeFiniteNumber = z.number().finite().nonnegative();
 
-export const positiveIntSchema = z.number().int().positive();
-
-// A bounded positive quantity — an order/cart line-item quantity has no
-// legitimate reason to be in the thousands; this bound exists to stop a
-// single line item from being used as a stock-exhaustion or overflow
-// vector, independent of whatever real stock the product has.
-export const quantitySchema = z.number().int().positive().max(999, "quantity is too large");
-
 // An amount of an item sold by measure (0.5 kg, 2 kg): any positive number here; the service holds it to the item's own step
 // (lib/measure.js) because the step is a fact about the variant, not the request.
 export const amountSchema = z.number().positive().max(99999, "quantity is too large");
@@ -112,7 +104,3 @@ export const urlSchema = z
   .trim()
   .url("must be a valid URL")
   .refine((val) => /^https?:\/\//i.test(val), "must use http or https");
-
-// A day count used by analytics range queries — bounded so a client can't
-// request a multi-decade aggregation window.
-export const daysRangeSchema = boundedIntParam({ min: 1, max: 365, defaultValue: 30 });

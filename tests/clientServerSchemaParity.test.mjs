@@ -27,8 +27,6 @@ import { z } from "../lib/zod.js";
 
 import { PASSWORD_MIN_LENGTH, registerSchema, updateMeSchema } from "../schemas/authSchemas.js";
 import { ADDRESS_LABELS, createAddressSchema } from "../schemas/addressSchemas.js";
-import { DISCOUNT_TYPES, createCouponSchema } from "../schemas/couponSchemas.js";
-import { AGE_GROUP_VALUES_LIST, AVAILABILITY_VALUES } from "../schemas/catalogSchemas.js";
 
 function read(relativePath) {
   return fs.readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
@@ -109,29 +107,6 @@ describe("Phase 5C — client and server accept/reject the SAME address label va
     }
     const bogus = createAddressSchema.safeParse({
       fullName: "x", phone: "x", street: "x", city: "x", postalCode: "x", country: "x", label: "not-a-real-label",
-    });
-    assert.equal(bogus.success, false);
-  });
-});
-
-describe("Phase 5D — real client forms actually import the remaining shared enums", () => {
-  // Removed with the admin section: this asserted that the admin coupon form imported its enum rather than copying it, which the admin
-  // dashboard now owns and tests against its own source.
-
-
-  // Removed with the admin section: this asserted that the admin product form imported its enums rather than copying them, which the admin
-  // dashboard now owns and tests against its own source.
-
-
-  test("DISCOUNT_TYPES matches exactly what the real createCouponSchema accepts", () => {
-    for (const discountType of DISCOUNT_TYPES) {
-      const result = createCouponSchema.safeParse({
-        code: "TEST10", discountType, discountValue: 5, expiresAt: new Date(Date.now() + 86400000).toISOString(),
-      });
-      assert.equal(result.success, true, `discountType "${discountType}" must be accepted by the real server schema`);
-    }
-    const bogus = createCouponSchema.safeParse({
-      code: "TEST10", discountType: "not-a-real-type", discountValue: 5, expiresAt: new Date(Date.now() + 86400000).toISOString(),
     });
     assert.equal(bogus.success, false);
   });

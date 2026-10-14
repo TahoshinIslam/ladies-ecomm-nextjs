@@ -2,7 +2,6 @@ import Notification from "../models/notificationModel.js";
 import User from "../models/userModel.js";
 import { HttpError } from "../lib/http.js";
 import { requireObjectIdFormat } from "../lib/validation.js";
-import { emitUserEvent, emitBestEffort } from "../lib/events.js";
 
 // Fans a notification out to every admin/employee — called internally from
 // orderService.js (new order) and reviewService.js (new review).
@@ -12,14 +11,6 @@ export async function createAdminNotification({ message, url }) {
   // "staff": these ids are dashboard accounts in `users`, not shoppers in
   // `customers`, and the notification row has to record which.
   await Notification.insertMany(staffIds.map((id) => ({ recipient: id, message, url })), "staff");
-}
-
-// The customer-facing counterpart to createAdminNotification above — one
-// recipient (an order's owner), not a team broadcast.
-export async function createUserNotification({ recipient, message, url }) {
-  const notification = await Notification.create({ recipient, message, url });
-  await emitBestEffort(emitUserEvent(recipient, { type: "NEW_NOTIFICATION", message, url }));
-  return notification;
 }
 
 export async function getNotifications(userId, { page = 1, limit = 20, unreadOnly } = {}) {

@@ -143,67 +143,6 @@ async function update(id, data) {
   return findById(id);
 }
 
-async function deleteById(id) {
-  // Soft delete, as the dashboard does — a coupon still referenced by an
-  // order's `coupon_id` must remain resolvable after it is withdrawn.
-  const result = await query(
-    "UPDATE coupons SET deleted_at = NOW(3) WHERE organization_id = ? AND id = ? AND deleted_at IS NULL",
-    [getOrganizationId(), id],
-  );
-  return result.affectedRows > 0;
-}
-
-const SORT_COLUMNS = { code: "code", expiresAt: "expires_at", usedCount: "used_count", createdAt: "created_at" };
-
-function buildAdminWhere({ search, status }) {
-  const clauses = [];
-  const params = [];
-  if (search && String(search).trim()) {
-    clauses.push("code LIKE ?");
-    params.push(`%${String(search).trim()}%`);
-  }
-  // A JS-computed cutoff, not SQL's NOW() — same reasoning as
-  // lib/expiryCleanup.js's expiredWhereClause() and
-  // models/sessionModel.js's findActiveIdsByUser(): this server's MySQL
-  // `NOW()` returns local system time while `expires_at` is stored as UTC,
-  // so comparing against NOW() here would misclassify a coupon's
-  // active/expired status by the server's own UTC offset.
-  if (status === "active") {
-    clauses.push("is_active = 1 AND expires_at >= ?");
-    params.push(new Date());
-  } else if (status === "paused") {
-    clauses.push("is_active = 0");
-  } else if (status === "expired") {
-    clauses.push("expires_at < ?");
-    params.push(new Date());
-  }
-  return { where: clauses.length ? clauses.join(" AND ") : "1=1", params };
-}
-
-async function findAdminList({ search, status, sortBy, sortOrder, skip, limit }) {
-  const { where, params } = buildAdminWhere({ search, status });
-  const sortCol = SORT_COLUMNS[sortBy] || "created_at";
-  const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
-  const filters = where === "1=1" ? "" : `AND ${where}`;
-  const rows = await query(
-    `SELECT * FROM coupons
-      WHERE organization_id = ? AND deleted_at IS NULL ${filters}
-      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
-    [getOrganizationId(), ...params, Number(limit), Number(skip)],
-  );
-  return Promise.all(rows.map(async (r) => rowToCoupon(r, await loadCategories(r.id))));
-}
-
-async function countAdminList({ search, status }) {
-  const { where, params } = buildAdminWhere({ search, status });
-  const filters = where === "1=1" ? "" : `AND ${where}`;
-  const rows = await query(
-    `SELECT COUNT(*) AS n FROM coupons WHERE organization_id = ? AND deleted_at IS NULL ${filters}`,
-    [getOrganizationId(), ...params],
-  );
-  return rows[0].n;
-}
-
 /** Atomic, guarded global-usage claim inside an order-creation transaction — mirrors the old guarded $inc with a usageLimit re-check at write time. */
 async function claimGlobalUsage(conn, couponId) {
   const [result] = await conn.query(
@@ -228,9 +167,6 @@ const Coupon = {
   findByCodeActive,
   create,
   update,
-  deleteById,
-  findAdminList,
-  countAdminList,
   claimGlobalUsage,
   restoreGlobalUsage,
 };

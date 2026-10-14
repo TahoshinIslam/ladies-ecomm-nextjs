@@ -350,15 +350,6 @@ async function findSitemapEntries() {
   return rows.map((r) => ({ _id: r.id, slug: r.slug, updatedAt: r.updated_at }));
 }
 
-async function countActiveByCategory(categoryId) {
-  const rows = await query(
-    `SELECT COUNT(*) AS n FROM products
-      WHERE organization_id = ? AND category_id = ? AND is_active = 1 AND deleted_at IS NULL`,
-    [getOrganizationId(), categoryId],
-  );
-  return rows[0].n;
-}
-
 async function findVariantClash(skus, excludeProductId) {
   const ph = skus.map(() => "?").join(",");
   const excludeClause = excludeProductId ? "AND pv.product_id != ?" : "";
@@ -762,7 +753,6 @@ const Product = {
   countByFilter,
   groupCountByFilter,
   distinctBrandIds,
-  countActiveByCategory,
   findSitemapEntries,
   findVariantClash,
   create,

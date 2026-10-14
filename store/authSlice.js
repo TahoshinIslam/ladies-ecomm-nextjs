@@ -43,14 +43,5 @@ export const selectAuthStatus = (state) => state.auth.status;
 export const selectAuthHydrated = (state) => state.auth.status !== "loading";
 export const selectCurrentUser = (state) => state.auth.user;
 export const selectIsAuthenticated = (state) => !!state.auth.user;
-export const selectIsAdmin = (state) => state.auth.user?.role === "admin";
 export const selectCanAccessAdmin = (state) =>
   ["admin", "employee"].includes(state.auth.user?.role);
-export const selectHasPermission = (permission) => (state) => {
-  const user = state.auth.user;
-  if (!user) return false;
-  if (user.role === "admin") return true;
-  if (user.role === "employee" && user.permissions?.includes(permission))
-    return true;
-  return false;
-};

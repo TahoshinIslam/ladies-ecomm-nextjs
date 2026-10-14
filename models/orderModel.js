@@ -144,48 +144,6 @@ async function findMyOrders(userId) {
   return rows.map((r) => rowToOrder(r, itemsByOrder.get(r.id) || []));
 }
 
-const ADMIN_SORT_COLUMNS = { createdAt: "created_at", total: "total", status: "status" };
-
-async function findAdminList({ status, search, sortBy, sortOrder, skip, limit }) {
-  const clauses = [];
-  const params = [];
-  if (status) {
-    clauses.push("o.status = ?");
-    params.push(status);
-  }
-  if (search && String(search).trim()) {
-    const term = String(search).trim();
-    clauses.push("(o.id LIKE ? OR c.name LIKE ? OR c.email LIKE ?)");
-    params.push(`%${term}%`, `%${term}%`, `%${term}%`);
-  }
-  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
-  const sortCol = `o.${ADMIN_SORT_COLUMNS[sortBy] || "created_at"}`;
-  const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
-
-  // The buyer joins from `customers` now, and the join carries the scope
-  // too: matching on id alone would let a shopper of another store supply
-  // the name on this store's order if the ids ever collided.
-  const rows = await query(
-    `SELECT o.*, c.name AS user_name, c.email AS user_email
-     FROM orders o
-     LEFT JOIN customers c ON c.id = o.customer_id AND c.organization_id = o.organization_id
-     WHERE o.organization_id = ? AND o.deleted_at IS NULL ${filters}
-     ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
-    [getOrganizationId(), ...params, Number(limit), Number(skip)],
-  );
-  const totalRows = await query(
-    `SELECT COUNT(*) AS n FROM orders o
-     LEFT JOIN customers c ON c.id = o.customer_id AND c.organization_id = o.organization_id
-     WHERE o.organization_id = ? AND o.deleted_at IS NULL ${filters}`,
-    [getOrganizationId(), ...params],
-  );
-  const itemsByOrder = await loadItems(rows.map((r) => r.id));
-  const orders = rows.map((r) =>
-    rowToOrder(r, itemsByOrder.get(r.id) || [], { _id: r.customer_id, name: r.user_name, email: r.user_email }),
-  );
-  return { orders, total: totalRows[0].n };
-}
-
 async function create(data, conn) {
   const id = generateObjectId();
   await conn.query(
@@ -322,7 +280,6 @@ const Order = {
   findByIdempotencyKey,
   countOpenByUser,
   findMyOrders,
-  findAdminList,
   create,
   saveOrderOnConnection,
 };

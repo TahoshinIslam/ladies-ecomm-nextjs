@@ -1,183 +1,13 @@
 import { z } from "../lib/zod.js";
 
-import { objectIdSchema, nonNegativeFiniteNumber, requiredString, urlSchema, paginationSchema, sortFieldSchema, sortOrderSchema, boundedIntParam } from "./commonSchemas.js";
-import { productFramingListSchema } from "./framingSchema.js";
+import { boundedIntParam } from "./commonSchemas.js";
 
 // ====== Products ======
 
-// Exported standalone (not just inlined below) so both server code
-// (services/productService.js's AGE_GROUP_VALUES/query-facet filtering)
-// and any client form (e.g. views/admin/ProductsPage.jsx's product-editor
-// zod schema) share one source instead of hand-copying these three/three
-// strings and risking drift if a value is ever added or renamed.
+// Exported standalone so server code (services/products/listQuery.js's
+// AGE_GROUP_VALUES/query-facet filtering) and any client form share one
+// source.
 export const AGE_GROUP_VALUES_LIST = ["adult", "kids", "girls"];
-export const AVAILABILITY_VALUES = ["readyStock", "preOrder", "madeToOrder"];
-
-// Variant identity attributes are DATA-DRIVEN: which keys exist (color/size/
-// fabric for clothing, shade/volumeMl for cosmetics, ...) is decided by the
-// AttributeDefinition rows that apply to the product's department — not by
-// this schema. It used to be a hard-coded, strict {color,size,fabric} object
-// that also defaulted every missing key to "": a product saved without those
-// fields (the department had none configured) was stored with
-// {"color":"","size":"","fabric":""} and any other department's attribute was
-// rejected outright. Now: any well-formed key, values trimmed, blanks dropped
-// (a blank isn't a value); the service (productService.js) validates the keys
-// and required-ness against the department's real definitions.
-export const VARIANT_ATTRIBUTE_KEY_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-export const MAX_VARIANT_ATTRIBUTES = 20;
-
-const variantAttributesSchema = z
-  .record(z.string().regex(VARIANT_ATTRIBUTE_KEY_RE, "Invalid attribute key"), z.string().trim().max(100))
-  .refine((attrs) => Object.keys(attrs).length <= MAX_VARIANT_ATTRIBUTES, `At most ${MAX_VARIANT_ATTRIBUTES} variant attributes`)
-  .transform((attrs) => Object.fromEntries(Object.entries(attrs).filter(([, value]) => value !== "")))
-  .optional()
-  .default({});
-
-const variantSchema = z
-  .object({
-    // Present when editing an existing variant: its identity (carts,
-    // wishlists and orders reference it) must survive the edit.
-    _id: objectIdSchema.optional(),
-    variantName: requiredString({ min: 1, max: 150 }),
-    sku: requiredString({ min: 1, max: 60 }),
-    attributes: variantAttributesSchema,
-    price: z.union([z.null(), nonNegativeFiniteNumber]).optional(),
-    discountPrice: z.union([z.null(), nonNegativeFiniteNumber]).optional(),
-    stock: z.number().int().min(0).max(1_000_000),
-    images: z.array(urlSchema).max(10).optional().default([]),
-  })
-  .strict();
-
-const attributeValueSchema = z
-  .object({
-    key: requiredString({ min: 1, max: 100 }),
-    values: z.array(z.string().trim().max(100)).max(50).optional().default([]),
-  })
-  .strict();
-
-const measurementsSchema = z
-  .object({
-    heightRange: z.string().trim().max(50).optional().default(""),
-    chest: z.string().trim().max(50).optional().default(""),
-    sleeveLength: z.string().trim().max(50).optional().default(""),
-  })
-  .strict()
-  .optional()
-  .default({});
-
-const productBaseFields = {
-  name: requiredString({ min: 1, max: 200 }),
-  nameBn: z.string().trim().max(200).optional().default(""),
-  description: requiredString({ min: 1, max: 20000 }),
-  descriptionBn: z.string().trim().max(20000).optional().default(""),
-  category: objectIdSchema,
-  brand: z.union([z.null(), objectIdSchema]).optional(),
-  ageGroup: z.enum(AGE_GROUP_VALUES_LIST).optional().default("adult"),
-  basePrice: nonNegativeFiniteNumber,
-  discountPrice: z.union([z.null(), nonNegativeFiniteNumber]).optional(),
-  images: z.array(urlSchema).min(1, "at least one image is required").max(20),
-  // [{ url, framing }] — per-photo Fit/Fill/zoom/focal point (lib/imageFraming.js).
-  imageFraming: productFramingListSchema.optional(),
-  variants: z.array(variantSchema).min(1, "at least one variant is required").max(100),
-  attributes: z.array(attributeValueSchema).max(100).optional().default([]),
-  measurements: measurementsSchema,
-  includedItems: z.array(z.string().trim().max(200)).max(50).optional().default([]),
-  availability: z.enum(AVAILABILITY_VALUES).optional().default("readyStock"),
-  tags: z.array(z.string().trim().max(50)).max(50).optional().default([]),
-  isFeatured: z.boolean().optional(),
-  isActive: z.boolean().optional(),
-  metaTitle: z.string().trim().max(200).optional().default(""),
-  metaDescription: z.string().trim().max(500).optional().default(""),
-  metaKeywords: z.string().trim().max(300).optional().default(""),
-  ogImage: z.union([z.literal(""), urlSchema]).optional().default(""),
-};
-
-export const createProductSchema = z.object(productBaseFields).strict();
-export const updateProductSchema = z
-  .object(productBaseFields)
-  .partial()
-  .strict()
-  .refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
-
-export const adminProductListQuerySchema = z
-  .object({
-    category: objectIdSchema.optional(),
-    brand: objectIdSchema.optional(),
-    ageGroup: z.enum(AGE_GROUP_VALUES_LIST).optional(),
-    isActive: z.enum(["true", "false"]).optional(),
-    search: z.string().trim().max(200).optional(),
-    sortBy: sortFieldSchema(["createdAt", "name", "basePrice"], "createdAt"),
-    sortOrder: sortOrderSchema,
-  })
-  .extend(paginationSchema().shape)
-  .passthrough(); // storefront filters (color/size/fabric/priceMin/etc.) pass through unvalidated here — buildFilter() already allowlists/escapes/casts them (see services/productService.js)
-
-// ====== Categories ======
-
-export const createCategorySchema = z
-  .object({
-    name: requiredString({ min: 1, max: 150 }),
-    nameBn: z.string().trim().max(150).optional().default(""),
-    parent: z.union([z.null(), objectIdSchema]).optional(),
-    image: z.union([z.literal(""), urlSchema]).optional().default(""),
-    description: z.string().trim().max(2000).optional().default(""),
-    descriptionBn: z.string().trim().max(2000).optional().default(""),
-    sortOrder: z.number().int().min(0).max(100000).optional().default(0),
-    isActive: z.boolean().optional().default(true),
-  })
-  .strict();
-
-export const updateCategorySchema = createCategorySchema
-  .partial()
-  .strict()
-  .refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
-
-// ====== Attributes ======
-
-const attributeOptionSchema = z
-  .object({
-    value: requiredString({ min: 1, max: 100 }),
-    label: requiredString({ min: 1, max: 150 }),
-    labelBn: z.string().trim().max(150).optional().default(""),
-    swatchHex: z.string().trim().max(30).optional().default(""),
-  })
-  .strict();
-
-const labelOverrideSchema = z
-  .object({
-    category: objectIdSchema,
-    label: requiredString({ min: 1, max: 150 }),
-    labelBn: z.string().trim().max(150).optional().default(""),
-  })
-  .strict();
-
-export const createAttributeSchema = z
-  .object({
-    key: requiredString({ min: 1, max: 100 }),
-    label: requiredString({ min: 1, max: 150 }),
-    // The admin Attributes form has always sent labelBn; this strict schema
-    // didn't list it, so EVERY create/edit from that form was rejected with
-    // "Unrecognized key(s): labelBn" — admins couldn't assign Color/Size to a
-    // new department (e.g. Shoes) at all.
-    labelBn: z.string().trim().max(150).optional(),
-    labelOverrides: z.array(labelOverrideSchema).max(50).optional().default([]),
-    type: z.enum(["select", "swatch", "boolean", "text"]).optional().default("select"),
-    options: z.array(attributeOptionSchema).max(200).optional().default([]),
-    appliesToCategories: z.array(objectIdSchema).max(200).optional().default([]),
-    // A flag, not text: true = a shopper-facing variant axis (Color, Size...)
-    // that the product form renders per variant row. Typed as a string before,
-    // which rejected the boolean every caller sends.
-    derivedFromVariant: z.boolean().optional(),
-    filterable: z.boolean().optional(),
-    required: z.boolean().optional().default(false),
-    sortOrder: z.number().int().min(0).max(100000).optional(),
-  })
-  .strict();
-
-export const updateAttributeSchema = createAttributeSchema
-  .partial()
-  .strict()
-  .refine((data) => Object.keys(data).length > 0, { message: "At least one field must be provided" });
 
 // ====== Products batch/compare/related query (path/query, not body) ======
 
@@ -248,9 +78,7 @@ export const relatedQuerySchema = z.object({
 // it — see that function's own contract comment for the full flow.
 
 // Real, sortable/selectable fields — mirrors the sort options actually
-// offered (views/ShopPage.jsx's SORTS, views/admin/ProductsPage.jsx's
-// sortable DataTable columns: name, basePrice; admin's default sortBy is
-// createdAt).
+// offered (views/ShopPage.jsx's SORTS; the default sort is createdAt).
 export const PRODUCT_SORT_FIELDS = ["createdAt", "basePrice", "rating", "isFeatured", "name"];
 
 // Everything ProductCard.jsx/the admin table actually reads plus the

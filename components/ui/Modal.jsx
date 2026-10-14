@@ -88,8 +88,8 @@ export default function Modal({
             // No backdrop-blur here (was `backdrop-blur-[3px]`, removed
             // while chasing the "modal goes blank white" bug reported
             // against ProductFormModal's variant generator). That turned
-            // out to be a red herring — the real cause (found and fixed in
-            // components/admin/ProductFormModal.jsx's VariantGenerator) was
+            // out to be a red herring — the real cause (in the product form's
+            // variant generator, now part of the admin dashboard) was
             // a `sr-only` checkbox `<input>` inside a non-`relative`
             // `<label>`: its `position: absolute` resolved against THIS
             // panel (the nearest positioned ancestor, via its own

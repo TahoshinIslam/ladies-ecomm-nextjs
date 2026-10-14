@@ -263,24 +263,6 @@ async function find(filter = {}, { sort, skip = 0, limit = 1000 } = {}) {
   return rows.map(rowToUser);
 }
 
-async function countDocuments(filter = {}) {
-  if (!roleMatchesCustomers(filter.role)) return 0;
-  const clauses = [];
-  const params = [];
-  if (filter.$or) {
-    const term = filter.$or[0]?.name?.source ?? filter.$or[0]?.name ?? "";
-    const like = `%${String(term).replace(/\\(.)/g, "$1")}%`;
-    clauses.push("(name LIKE ? OR email LIKE ?)");
-    params.push(like, like);
-  }
-  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
-  const rows = await query(
-    `SELECT COUNT(*) AS n FROM customers WHERE organization_id = ? AND deleted_at IS NULL ${filters}`,
-    [getOrganizationId(), ...params],
-  );
-  return rows[0].n;
-}
-
 /**
  * Atomically flips first_order_promo_used from false->true — the SQL
  * equivalent of the old guarded `findOneAndUpdate({_id, firstOrderPromoUsed:
@@ -348,7 +330,6 @@ const User = {
   findOne,
   find,
   create,
-  countDocuments,
   findStaffIds,
   claimFirstOrderPromo,
   hasUnusedFirstOrderPromo,

@@ -13,10 +13,9 @@ import { shopApi } from "../store/shopApi.js";
  * "order updates live, delivery status": an admin marking an order
  * shipped/delivered/cancelled reaches this shopper's own open tab
  * immediately (bell count + toast) instead of waiting for
- * NotificationsDropdown-equivalent's fallback poll. Mirrors
- * useAdminEventStream.js's shape, simplified: a customer's bell has only
- * one event type worth reacting to (NEW_NOTIFICATION, written by
- * services/notificationService.js's createUserNotification) — no
+ * the bell's fallback poll. A customer's bell has only
+ * one event type worth reacting to (NEW_NOTIFICATION, on the shopper's
+ * own channel) — no
  * per-table cache tags to also refresh, since there's no admin-style data
  * table on the storefront listening for these.
  */
@@ -27,8 +26,7 @@ export function useUserEventStream() {
   useEffect(() => {
     if (!user) return;
 
-    // Same dedup/resume reasoning as useAdminEventStream.js — the server
-    // emits `id: <mongoId>` per event, which EventSource resends as
+    // Dedup/resume: the server emits `id: <eventId>` per event, which EventSource resends as
     // `Last-Event-ID` on its own automatic reconnect.
     const seenEventIds = new Set();
     const MAX_SEEN = 100;
