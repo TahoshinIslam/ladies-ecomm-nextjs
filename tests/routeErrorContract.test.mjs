@@ -147,18 +147,10 @@ describe("Route Handler error contract (lib/http.js's withRoute/toResponse)", { 
     }
   });
 
-  test("Mongoose ValidationError (e.g. rating out of range) -> clean 400 with the field-level message", async () => {
+  test("registering the same email twice -> clean 400, not a raw duplicate-key 500", async () => {
     const user = await createTestUser();
     const other = await createTestUser();
-    // Borrow an existing review-update path is awkward without a delivered
-    // order; instead prove the ValidationError mapping directly against
-    // the model, then confirm the SAME mapping is what a route sees by
-    // checking lib/http.js's toResponse() branch is unconditional on error
-    // shape, not on which model raised it — already proven for User/Order
-    // schemas elsewhere in this suite (registration's missing-name test
-    // above is itself a ValidationError instance). This test targets the
-    // duplicate-key branch specifically instead, since that's the one not
-    // otherwise covered in this file.
+    // The duplicate-key path: not otherwise covered in this file.
     try {
       const email = `dup-${Date.now()}@example.invalid`;
       const first = requestAs({ method: "POST", url: "http://test/api/users/register", body: { name: "First", email, password: "Password123!" } });
