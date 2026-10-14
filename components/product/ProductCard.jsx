@@ -149,7 +149,7 @@ export default function ProductCard({ product, className, index = 0, onQuickAdd,
       onFocus={() => prefetchAttributes(undefined)}
       className={cn("group relative flex flex-col overflow-hidden rounded-lg border border-line", className)}
     >
-      {/* Phase 10 — the image area and the action buttons (wishlist/
+      {/* The image area and the action buttons (wishlist/
           compare/quick-add/notify) are siblings, not a <button> nested
           inside this <Link>'s <a>: an anchor cannot validly contain other
           interactive content (WHATWG "transparent content model"

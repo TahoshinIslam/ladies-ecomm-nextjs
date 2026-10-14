@@ -188,8 +188,7 @@ export async function createProduct(body, actorId) {
   await assertRequiredAttributes(data, category.parent);
 
   // assertSkusUnique() above is a read-then-write check with no lock — a
-  // real TOCTOU gap under concurrent admin requests (confirmed audit
-  // finding). The DB-level `uq_product_variants_sku` constraint (see
+  // TOCTOU gap under concurrent admin requests. The DB-level `uq_product_variants_sku` constraint (see
   // sql/schema.sql / scripts/migrations/0002_product_variants_sku_unique.mjs)
   // is the actual guarantee; this catch turns a losing concurrent
   // request's raw ER_DUP_ENTRY into the same clean 400 assertSkusUnique()

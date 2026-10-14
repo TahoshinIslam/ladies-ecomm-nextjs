@@ -25,7 +25,7 @@ const manrope = Manrope({
   display: "swap",
 });
 
-// Phase 10 — `metadataBase` is only set when a real origin is configured
+// `metadataBase` is only set when a real origin is configured
 // (see lib/seo.js's getSiteOrigin() — never throws, unlike
 // lib/appUrl.js's resolveAppOrigin()); every page's `alternates.canonical`
 // and `openGraph.url` resolve against it automatically when present, and

@@ -7,10 +7,9 @@ import { HttpError } from "../../../../../lib/http.js";
 import { logEvent } from "../../../../../lib/logger.js";
 import { getOrganizationId } from "../../../../../lib/tenant.js";
 
-// Confirmed audit gap, closed: scripts/cleanupExpired.mjs's batched,
-// idempotent expiry sweep (sessions/rate_limit_counters/events) existed
-// but nothing ever invoked it automatically — deployed, this table set
-// grows without bound. This is the HTTP entry point a real scheduler
+// Runs scripts/cleanupExpired.mjs's batched, idempotent expiry sweep
+// (sessions/rate_limit_counters/events) so those tables don't grow without
+// bound. This is the HTTP entry point a real scheduler
 // (Vercel Cron, or any external cron caller) hits.
 //
 // Deliberately bypasses lib/http.js's withRoute(): that wrapper enforces

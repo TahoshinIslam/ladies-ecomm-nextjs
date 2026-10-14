@@ -123,7 +123,7 @@ function ThemeController({ initialTheme = "light", children }) {
  * after mount, in one pass, before paint.
  *
  * Auth is different: there's nothing to read from Web Storage for it
- * anymore (Phase 2 — the session lives only in an HttpOnly cookie, invisible
+ * (the session lives only in an HttpOnly cookie, invisible
  * to JS), so useAuthBoot() instead asks the server directly via GET
  * /api/users/me on every mount. This is the one live call site for that
  * hook in the whole app.
@@ -146,7 +146,7 @@ function StorageHydrator() {
  */
 export default function AppProviders({ initialTheme = "light", initialLocale, children }) {
   return (
-    // Phase 10 — `reducedMotion="user"` makes every framer-motion
+    // `reducedMotion="user"` makes every framer-motion
     // animation in the app (hero, drawers, modals, product cards, admin
     // page transitions, ...) automatically respect the OS
     // prefers-reduced-motion setting: framer-motion swaps translate/scale/

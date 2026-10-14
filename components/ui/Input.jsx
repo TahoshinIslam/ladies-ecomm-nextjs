@@ -10,7 +10,7 @@ const Input = forwardRef(
     const isPassword = type === "password";
     const inputType = isPassword && showPassword ? "text" : type;
 
-    // Phase 10 — every field rendered through this shared component
+    // Every field rendered through this shared component
     // previously had NO id/htmlFor association at all (label and input
     // were visually adjacent but programmatically unlinked) and no way
     // to connect a validation error to its field via aria-describedby/

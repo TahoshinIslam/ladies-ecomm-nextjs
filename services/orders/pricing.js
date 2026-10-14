@@ -231,7 +231,7 @@ export const calcTotals = async (
     if (couponDoc.minOrderAmount && subtotal < couponDoc.minOrderAmount) {
       throw new HttpError(400, `Minimum order ${couponDoc.minOrderAmount} required`);
     }
-    // Phase 5: read-only checks for a clear, early error message. These are
+    // Read-only checks for a clear, early error message. These are
     // NOT the atomic guarantee (a concurrent request could still race past
     // a plain read) — the real enforcement is the guarded conditional
     // update at claim time below, inside createOrder()'s transaction.

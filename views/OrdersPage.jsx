@@ -34,7 +34,7 @@ const statusLabelKey = {
   refunded: "orders.statusRefunded",
 };
 
-// Phase 7 — real Server Component: authenticates via the cookie session,
+// Real Server Component: authenticates via the cookie session,
 // queries only the authenticated user's own orders (services/orderService
 // .js's getMyOrders() already scopes by user id), and renders the full
 // list in the initial HTML. No client fetch (RTK Query's useGetMyOrdersQuery

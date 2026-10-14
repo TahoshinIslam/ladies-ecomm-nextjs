@@ -23,7 +23,7 @@ export const POST = withRoute(async (request) => {
 
   // Per trusted client IP only, to prevent bulk account creation — there
   // is no per-account dimension to fall back on here (no account exists
-  // yet), so this is this route's ONLY protection. Phase 3B: in
+  // yet), so this is this route's ONLY protection. In
   // production, if no trustworthy IP is available at all, this route must
   // fail closed (503) rather than silently proceed unprotected — see
   // lib/clientIp.js's requireClientIp() for the full policy (non-

@@ -16,7 +16,7 @@ export const POST = withRoute(async (request, { params }) => {
   // rate-limit identity (it's already single-use and hashed at rest by
   // resetPassword() itself; there is no reason to also hash it into a
   // counter key) — which also means IP is this route's ONLY dimension.
-  // Phase 3B: in production, with no trustworthy IP available, this route
+  // In production, with no trustworthy IP available, this route
   // must fail closed (503) rather than proceed unprotected — see
   // lib/clientIp.js's requireClientIp().
   const { ok, identity: ip } = requireClientIp(request);

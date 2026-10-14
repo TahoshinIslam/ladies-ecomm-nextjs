@@ -60,8 +60,7 @@ export async function createOrder(
     throw new HttpError(403, "Online sales are not available for this store.", { code: "not-in-plan" });
   }
 
-  // Confirmed audit finding, fixed: order creation had no rate limit at
-  // all. Checked ONLY here — after the sequential-replay fast path above
+  // Order-creation rate limit. Checked ONLY here — after the sequential-replay fast path above
   // has already returned for any request reusing an existing Idempotency-
   // Key — so retrying/resubmitting the SAME checkout never consumes a
   // slot or can be blocked by this limiter; only genuinely NEW order
@@ -168,8 +167,7 @@ export async function createOrder(
 
       await Cart.clearByUser(userId, conn);
 
-      // Phase 11 realtime-durability correction (kept from the original):
-      // the admin NEW_ORDER event is written INSIDE this transaction — a
+      // The admin NEW_ORDER event is written INSIDE this transaction — a
       // genuine transactional outbox. If this insert fails, the whole
       // transaction (order/stock/coupon/cart writes included) rolls back
       // with it; if the transaction commits, the event is atomically

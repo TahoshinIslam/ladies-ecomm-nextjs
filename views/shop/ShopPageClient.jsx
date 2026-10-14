@@ -1,9 +1,9 @@
 "use client";
 
-// Phase 7 — the interactive shell around the shop page's server-rendered
+// The interactive shell around the shop page's server-rendered
 // initial product list. `initialProducts`/`total`/`facets` arrive as
 // plain, already-serialized props from the Server Component (views/
-// ShopPage.jsx), which fetched them through the same Phase 5 validated
+// ShopPage.jsx), which fetched them through the same validated
 // services/productService.js contract GET /api/products itself uses — no
 // client fetch is needed to see the first page of results. This
 // component is remounted (via a `key` set by the Server Component, tied
@@ -384,7 +384,7 @@ export default function ShopPageClient({ initialProducts, total, facets, initial
     const priceMin = sp.get("priceMin");
     const priceMax = sp.get("priceMax");
     if (priceMin || priceMax) {
-      // Confirmed audit fix: these are the same raw, already-BDT
+      // These are the same raw, already-BDT
       // basePrice/discountPrice-scale numbers PriceHistogramSlider.jsx
       // produces (every product is price_currency='BDT' now) — formatBdt(),
       // not formatPrice(), which defaults to treating its input as USD.

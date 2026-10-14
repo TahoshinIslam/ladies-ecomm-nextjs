@@ -37,13 +37,9 @@ export async function getOrder(userId, role, orderId) {
 // Shared by cancelOrder() (customer/admin-initiated) and updateOrderStatus()
 // (admin status-machine move to "cancelled") so BOTH entry points that can
 // land an order in "cancelled" restore stock and coupon usage the same way,
-// inside the same transaction as the status write. Before this fix,
-// updateOrderStatus() could move an order straight to "cancelled" (a
-// transition ORDER_STATUS_TRANSITIONS always allowed from pending/paid/
-// processing, and schemas/orderSchemas.js's ORDER_STATUSES always accepted
-// as a valid PUT /status body) without ever restoring the stock or coupon
-// usage cancelOrder() restores — a confirmed correctness gap, not a
-// hypothetical race.
+// inside the same transaction as the status write (ORDER_STATUS_TRANSITIONS
+// allows "cancelled" from pending/paid/processing, so the admin path needs
+// the same restore as the customer one).
 export async function restoreStockAndCoupon(conn, order) {
   // Cancelling before dispatch: the goods never left, so the reservation is
   // released and nothing is "put back". An order placed before inventory

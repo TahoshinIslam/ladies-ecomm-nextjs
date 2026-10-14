@@ -15,10 +15,8 @@ export const updateOrderStatusSchema = z
   })
   .strict();
 
-// GET /api/orders (admin list) — Phase 5 fix for the confirmed
-// `?limit=999999` unbounded-query defect (services/orderService.js's
-// getAllOrders() passed `Number(limit)` straight into Mongoose's
-// `.limit()` with no upper bound at all).
+// GET /api/orders (admin list) — `limit` is clamped so a request such as
+// `?limit=999999` cannot run an unbounded query.
 export const adminOrderListQuerySchema = z
   .object({
     status: z.enum(ORDER_STATUSES).optional(),

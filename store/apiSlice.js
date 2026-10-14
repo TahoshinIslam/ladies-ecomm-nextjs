@@ -31,7 +31,7 @@ const baseUrl = process.env.NEXT_PUBLIC_API_URL
 
 const rawBaseQuery = fetchBaseQuery({
   baseUrl,
-  // Phase 2: cookies carry the session now, not a Redux-held bearer token
+  // Cookies carry the session now, not a Redux-held bearer token
   // — the browser needs to actually send the __Host-tahos_session cookie
   // on every same-origin request.
   credentials: "include",

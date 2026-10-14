@@ -31,7 +31,7 @@ import useDialogFocus from "../../hooks/useDialogFocus.js";
  * opened by any ProductCard via uiSlice's quickAddProduct. Resolves a real
  * selectedVariant (color/size/fabric) the same way ProductDetailPage.jsx
  * does — not a bare size string, which collapsed different-colored variants
- * into indistinguishable buttons (see Phase 4 audit).
+ * into indistinguishable buttons.
  */
 export default function QuickAddSheet() {
   const product = useSelector((s) => s.ui.quickAddProduct);

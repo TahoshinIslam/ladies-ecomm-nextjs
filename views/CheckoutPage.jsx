@@ -193,7 +193,7 @@ export default function CheckoutPage() {
     [addrData, selectedAddressId],
   );
 
-  // Phase 4B: a pure fingerprint of "what this order would actually be" —
+  // A pure fingerprint of "what this order would actually be" —
   // no I/O, safe to compute during render. The decision of whether this
   // means reusing or minting an Idempotency-Key happens synchronously
   // inside handlePlaceOrder itself (lib/checkoutIntent.js's

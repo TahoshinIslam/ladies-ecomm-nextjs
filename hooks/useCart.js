@@ -21,7 +21,7 @@ import {
 // Unified cart interface: server-backed when logged in, localStorage-backed
 // guest cart otherwise. Items are keyed by (productId, variantId) — the
 // variant's own Mongo _id — not a bare size string, which can't tell two
-// different-colored variants apart (see Phase 4 audit). `addItem` takes
+// different-colored variants apart. `addItem` takes
 // the full selected variant object so both cart backends can snapshot its
 // color/size/fabric/price/image without re-fetching the product.
 export function useCart() {

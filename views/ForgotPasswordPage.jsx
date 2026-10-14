@@ -1,8 +1,7 @@
 "use client";
 
-// Phase 11 — closes a real Phase 10 carryover: LoginPage.jsx has always
-// linked to /forgot-password, but no page existed here at all (only the
-// JSON API route app/api/users/forgot-password/route.js). The RTK Query
+// The page LoginPage.jsx links to at /forgot-password (the JSON API is
+// app/api/users/forgot-password/route.js). The RTK Query
 // mutation (useForgotPasswordMutation) and shared Zod schema
 // (schemas/forgotPasswordSchema, reused client-side the same way
 // RegisterPage.jsx reuses PASSWORD_MIN_LENGTH) already existed — only the

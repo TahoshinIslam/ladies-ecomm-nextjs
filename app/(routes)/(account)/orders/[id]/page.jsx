@@ -5,7 +5,7 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-// Phase 7 — deliberately NOT wrapped in <Suspense>: this page's
+// Deliberately NOT wrapped in <Suspense>: this page's
 // authentication/ownership check can call notFound() (see
 // views/OrderDetailPage.jsx), and Next.js can only set the correct HTTP
 // status code for notFound()/redirect() when it happens before any bytes

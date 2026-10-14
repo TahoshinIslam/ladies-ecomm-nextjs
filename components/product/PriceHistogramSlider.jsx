@@ -26,12 +26,12 @@ export default function PriceHistogramSlider({
   // Catalog bounds come from products; bar heights are purely decorative —
   // a fixed mix of short / medium / long bars so the visual is always full
   // regardless of how prices are actually distributed.
-  // Confirmed audit fix: `prices` is the raw discountPrice/basePrice column
+  // `prices` is the raw discountPrice/basePrice column
   // values directly — every product in the catalog is price_currency='BDT'
   // now (see docs/CURRENCY_MIGRATION_PLAN.md), so these numbers ARE already
   // Taka. formatBdt() (no conversion) below, not formatPrice() (which
   // defaults to treating its input as USD and would multiply by the
-  // exchange rate), matches the same fix already applied to
+  // exchange rate), matches
   // ProductFinder.jsx's identical budget-threshold display.
   const { min, max, heights } = useMemo(() => {
     const prices = products

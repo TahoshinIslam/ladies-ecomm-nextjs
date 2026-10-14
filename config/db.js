@@ -86,18 +86,12 @@ function buildPool() {
     // Bounded, not unlimited: a request that can't get a pooled connection
     // within a reasonable wait fails fast with a clear, translatable error
     // (see acquireConnection() below) instead of queuing indefinitely under
-    // sustained pool exhaustion — confirmed audit finding, `queueLimit: 0`
-    // previously meant "unlimited queue depth," not "no queueing."
-    // Confirmed via a real regression while testing this fix: a much
-    // tighter bound (connectionLimit * 4) broke a legitimate bulk-seed
-    // workload (tests/http/seo.integration.test.mjs creating 105 products
-    // for its sitemap-scale test) with mysql2's own hard, un-translated
-    // "Queue limit reached." error — the goal here is to stop genuinely
-    // UNBOUNDED growth (the original `queueLimit: 0` bug), not to
-    // throttle legitimate concurrent bursts below what real admin/seed
-    // operations already need. This is generous enough to absorb that,
-    // while still being a real, finite ceiling (not "unlimited"), and
-    // configurable for deployments with different burst profiles.
+    // sustained pool exhaustion (`queueLimit: 0` would mean "unlimited
+    // queue depth," not "no queueing"). A much tighter bound
+    // (connectionLimit * 4) breaks legitimate bulk work such as
+    // tests/http/seo.integration.test.mjs creating 105 products, so this is
+    // generous enough to absorb real bursts while still being a finite,
+    // configurable ceiling.
     queueLimit: Number(process.env.DB_POOL_QUEUE_LIMIT) || connectionLimit * 50,
     // Fails a query within a few seconds against a genuinely unreachable/
     // misconfigured database instead of hanging until the platform's own
@@ -114,7 +108,7 @@ function buildPool() {
     decimalNumbers: true,
   });
 
-  // Confirmed audit finding: this app's DATETIME(3) columns are meant to
+  // This app's DATETIME(3) columns are meant to
   // hold UTC (every comparison in lib/expiryCleanup.js, models/sessionModel.js,
   // models/couponModel.js deliberately uses a JS-computed cutoff instead of
   // SQL NOW() specifically because "the real server's own session time_zone
@@ -165,13 +159,12 @@ export function getPool() {
   return cache.pool;
 }
 
-// Confirmed audit finding: `connectTimeout` (above) only bounds the TCP/
+// `connectTimeout` (above) only bounds the TCP/
 // handshake step of opening a brand-new physical connection — it does
 // nothing for a caller waiting on `pool.getConnection()` when every
-// physical connection is already checked out and busy. Previously nothing
-// bounded that wait at all beyond the platform's own function-duration
-// limit, so sustained pool exhaustion produced a slow, confusing hang
-// instead of a fast, clear error.
+// physical connection is already checked out and busy. Without this bound,
+// sustained pool exhaustion would produce a slow, confusing hang instead
+// of a fast, clear error.
 const POOL_ACQUIRE_TIMEOUT_MS = Number(process.env.DB_POOL_ACQUIRE_TIMEOUT_MS || 8000);
 
 export class PoolExhaustedError extends Error {

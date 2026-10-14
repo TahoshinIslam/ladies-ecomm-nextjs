@@ -126,11 +126,9 @@ export async function deleteReview(reviewId, actingUser) {
   return { productId };
 }
 
-// Confirmed audit finding, fixed: this previously called
-// Review.incrementHelpful(), an unconditional `helpful_count + 1` with no
-// record of who voted — a single authenticated user (the route already
-// requires requireUser(), so there is no anonymous-vote case to handle
-// here) could call this repeatedly to inflate a review's score. Dedupe is
+// One helpful vote per user per review, so a single authenticated user
+// (the route requires requireUser(), so there is no anonymous case)
+// cannot inflate a review's score by calling this repeatedly. Dedupe is
 // enforced by review_helpful_votes' real (review_id, user_id) PRIMARY KEY
 // (see scripts/migrations/0001_review_helpful_votes.mjs), not just an
 // app-level check — INSERT IGNORE either wins the PK race and increments,

@@ -75,7 +75,7 @@ export default function RegisterPage() {
   const onSubmit = async ({ confirmPassword, ...data }) => {
     try {
       const res = await registerUser(data).unwrap();
-      // Phase 2: no token in the response body — the server already set
+      // No token in the response body — the server already set
       // the session cookie on this same response before the client sees
       // it, so the cart-merge mutation just below authenticates via the
       // cookie automatically.

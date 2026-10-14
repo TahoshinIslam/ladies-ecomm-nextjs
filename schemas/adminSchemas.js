@@ -206,9 +206,8 @@ export const topProductsQuerySchema = z.object({
   limit: boundedIntParam({ min: 1, max: 50, defaultValue: 5 }),
 });
 
-// GET /api/notifications — Phase 5 fix for the confirmed unclamped
-// `limit` (services/notificationService.js's getNotifications() passed
-// `Number(limit)` straight into `.limit()`).
+// GET /api/notifications — `limit` is clamped so the list query is
+// always bounded.
 export const notificationsQuerySchema = z
   .object({
     unreadOnly: z.enum(["true", "false"]).optional(),

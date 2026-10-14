@@ -12,14 +12,14 @@ import { resolveImage } from "../lib/utils.js";
 import { usdToBdt } from "../lib/currency.js";
 import { absoluteUrl, truncateDescription, safeJsonLd } from "../lib/seo.js";
 
-// Phase 7 — real Server Component: loads the product directly through the
+// Real Server Component: loads the product directly through the
 // existing services/productService.js contract (same one GET
 // /api/products/[idOrSlug] uses — same 404-on-missing behavior, same
 // visibility rules, nothing tightened or loosened here), then hands
 // plain, localized, serialized data to the one Client Component that
 // needs it for interaction (views/product/ProductDetailInteractive.jsx).
 //
-// Phase 8 — the underlying reads are now cached (lib/serverDataCache.js).
+// The underlying reads are now cached (lib/serverDataCache.js).
 // Localization is applied AFTER the cache read, on the cached bilingual
 // data — never baked into the cache itself — so one cache entry serves
 // every locale instead of duplicating the same product per language.
@@ -68,7 +68,7 @@ export default async function ProductDetailPage({ params }) {
   );
 }
 
-// Phase 10 — safe Product structured data, built only from real,
+// Safe Product structured data, built only from real,
 // already-fetched fields (no second MongoDB read, no invented values).
 // `product.rating`/`numReviews` are genuinely aggregated by
 // models/reviewModel.js's calcAverageRating on every real review

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import connectDB from "../../../../config/db.js";
 
-// Phase 11, section G — READINESS: proves this instance can actually serve
+// READINESS: proves this instance can actually serve
 // a real request right now (a warm, pingable MySQL connection), distinct
 // from LIVENESS (app/api/health/live/route.js), which proves only that the
 // process itself is running. A load balancer/orchestrator should stop

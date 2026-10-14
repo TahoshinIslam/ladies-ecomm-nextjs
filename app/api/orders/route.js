@@ -18,9 +18,9 @@ export const POST = withRoute(async (request) => {
   // (withRoute) still run first either way, this just fails cheaply on a
   // missing/malformed key before any JSON parsing or DB work happens.
   const idempotencyKey = readIdempotencyKey(request);
-  // Phase 5 idempotency integration (section I): the body is validated and
+  // Idempotency: the body is validated and
   // NORMALIZED here (trimmed strings, coupon code uppercased, defaults
-  // applied) before it ever reaches createOrder() — the Phase 4 request
+  // applied) before it ever reaches createOrder() — the request
   // fingerprint is computed from this same normalized shape, so two
   // semantically-equivalent requests (e.g. differing only in incidental
   // whitespace) hash identically, while a genuinely different order still

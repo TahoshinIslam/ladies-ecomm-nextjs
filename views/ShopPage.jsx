@@ -20,7 +20,7 @@ import { AlertCircle } from "lucide-react";
 
 // Next.js searchParams (a plain `{key: string | string[]}` object) is
 // reconstructed into a real URLSearchParams so this Server Component can
-// reuse the EXACT same Phase 5 validated query contract GET /api/products
+// reuse the EXACT same validated query contract GET /api/products
 // itself uses (assertNoDuplicateQueryKeys/assertNoDangerousQueryKeys/
 // parseQueryParams/parseProductListQuery) — one query contract, two entry
 // points, never two implementations to keep in sync.
@@ -36,7 +36,7 @@ function toURLSearchParams(rawSearchParams) {
   return usp;
 }
 
-// Phase 7 — real, search-parameter-driven Server Component: the initial
+// Real, search-parameter-driven Server Component: the initial
 // product list, total count, and facet counts are all fetched here via
 // services/productService.js directly (no fetch back to this app's own
 // /api). A malformed/invalid query (the same contract GET /api/products
@@ -121,13 +121,12 @@ export default async function ShopPage({ searchParams }) {
     assertNoDangerousQueryKeys(usp);
     const rawQuery = parseQueryParams(usp);
     const query = await parseProductListQuery(rawQuery);
-    // Phase 8 — only a bounded, low-cardinality subset of the (Phase 5)
+    // Only a bounded, low-cardinality subset of the
     // validated query space is cached at all (see lib/shopCacheEligibility
     // .js's own header comment for why: free-text search and dynamic
     // attribute facets are excluded to avoid unbounded cache-key growth).
     // An ineligible query still works correctly — it just calls the same
-    // real, uncached listProducts() this page always called before
-    // Phase 8.
+    // real, uncached listProducts().
     const cacheKey = getShopCacheKey(query, { isAdmin: false });
     result = cacheKey ? await getCachedProductList(query, cacheKey) : await listProducts(query, { isAdmin: false });
   } catch (err) {
@@ -175,14 +174,14 @@ export default async function ShopPage({ searchParams }) {
   );
 }
 
-// Phase 10 — BreadcrumbList structured data mirroring the exact visible
+// BreadcrumbList structured data mirroring the exact visible
 // trail views/shop/ShopPageClient.jsx renders (Home > Shop > [department,
 // whenever `?category=` names one it can resolve] — see its
 // `selectedDeptObj` logic, which — unlike app/(routes)/shop/page.jsx's
 // narrower `getIndexableCategoryId` used only to decide indexability —
 // shows the department for ANY request naming a resolvable category,
 // alongside other filters/search/sort/pagination). Reuses the same
-// Phase 8 cached category read + localization the /api/categories route
+// cached category read + localization the /api/categories route
 // itself uses, so the department name always matches what the client's
 // own useGetCategoriesQuery call would render.
 async function ShopBreadcrumbJsonLd({ rawSearchParams }) {

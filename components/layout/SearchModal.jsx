@@ -67,9 +67,8 @@ export default function SearchModal() {
   }, [term]);
 
   // Moves focus into the search input on open, traps Tab inside the
-  // panel, closes on Escape, and — the fix this consolidation was for —
-  // restores focus to whatever opened the modal when it closes (the
-  // previous three separate effects here never did that last part).
+  // panel, closes on Escape, and restores focus to whatever opened the
+  // modal when it closes.
   useDialogFocus({
     open,
     panelRef,

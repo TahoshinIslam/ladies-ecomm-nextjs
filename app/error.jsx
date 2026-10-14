@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 10 — root segment error boundary. Wraps every route under the
+// Root segment error boundary. Wraps every route under the
 // root layout (everything except the root layout itself — see
 // global-error.jsx for that). Next.js 16.3.4's real contract for this
 // file is `{ error, retry }` (confirmed against the installed
@@ -21,13 +21,13 @@ export default function ErrorBoundary({ error, retry }) {
   const statusId = useId();
 
   useEffect(() => {
-    // Phase 11 — never logs the full Error object (message/stack/props)
+    // Never logs the full Error object (message/stack/props)
     // to the browser console in production; only a fixed event name plus
     // the opaque digest, if one exists. See lib/clientErrorLog.js.
     logClientErrorSafely("route_error_boundary", error);
   }, [error]);
 
-  // Phase 10 checkpoint — explicit policy decision: never show
+  // Explicit policy decision: never show
   // error.digest to the end user. This app has no documented
   // "quote this reference to support" workflow anywhere (its one real
   // support channel, settings.store.supportEmail in the footer, doesn't

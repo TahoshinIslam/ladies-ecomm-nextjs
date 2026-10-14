@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-// Phase 11, section G — LIVENESS: proves only that this function instance
+// LIVENESS: proves only that this function instance
 // itself can execute and respond; deliberately does NOT touch MongoDB or
 // any other dependency. A liveness probe answering "is the process able
 // to run at all" must stay up even while a downstream dependency (Mongo)

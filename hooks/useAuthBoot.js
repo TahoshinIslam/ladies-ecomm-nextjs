@@ -6,7 +6,7 @@ import { useMeQuery } from "../store/userApi.js";
 import { setCredentials, clearCredentials } from "../store/authSlice.js";
 
 // On app boot, ask the server who (if anyone) the session cookie belongs
-// to. Phase 2: called unconditionally, every time — there is no
+// to. Called unconditionally, every time — there is no
 // client-readable trace of the session left in localStorage to check
 // first (the whole point of an HttpOnly cookie), so skipping this call
 // when nothing is cached client-side would incorrectly treat "we don't
