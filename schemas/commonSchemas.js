@@ -1,13 +1,12 @@
-// Shared Zod schemas. Client-safe: no Mongoose, no database
+// Shared Zod schemas. Client-safe: no models, no database
 // calls, no Node-only APIs, no secrets, no circular imports. Safe to
 // import from a Client Component for client-side form validation (see
 // views/CheckoutPage.jsx and friends) — the server (lib/validation.js +
 // each route) is what actually enforces these; client-side use is UX only.
 import { z } from "../lib/zod.js";
 
-// A Mongo ObjectId as it arrives from a URL path segment: exactly 24 hex
-// characters. Deliberately a plain regex, not `mongoose.isValidObjectId`,
-// so this file stays Mongoose-free.
+// A record id (ObjectId-shaped, see lib/objectId.js) as it arrives from a
+// URL path segment: exactly 24 hex characters.
 export const objectIdSchema = z
   .string()
   .trim()

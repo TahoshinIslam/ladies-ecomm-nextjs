@@ -274,7 +274,7 @@ export const MAX_PRICE_BOUND = 100_000_000;
 // A real AttributeDefinition.key is plain letters+digits starting with a
 // letter (see that model's own field comment: byte-for-byte match against
 // Product.attributes[].key, never case-folded). This alone already
-// excludes every Mongo-operator ("$..."), dotted-path, and
+// excludes every operator-style ("$..."), dotted-path, and
 // underscore-prefixed ("__proto__") shape; DANGEROUS_FACET_KEYS below
 // additionally excludes two all-letters words this regex would otherwise
 // accept.
@@ -305,8 +305,7 @@ export function isExplicitBooleanParam(raw) {
 }
 
 // Validates a sort/fields CSV param against an allowlist, each token
-// optionally prefixed with "-" (descending sort / field exclusion — the
-// same convention Mongoose's own `.sort()`/`.select()` string form uses).
+// optionally prefixed with "-" (descending sort / field exclusion).
 export function validateAllowlistedTokenCsv(raw, allowedSet, { maxTokens = 10 } = {}) {
   const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
   if (!parts.length || parts.length > maxTokens) return { error: `must list 1-${maxTokens} fields` };

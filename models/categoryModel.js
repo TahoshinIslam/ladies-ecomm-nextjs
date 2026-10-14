@@ -22,7 +22,7 @@ function rowToCategory(row) {
     updatedAt: row.updated_at,
   };
   // Tracks the name this category had when loaded, so save() can tell
-  // whether `name` actually changed (Mongoose's `isModified("name")`) —
+  // whether `name` actually changed —
   // needed because, unlike products, a category's slug is sometimes a
   // human-curated stable key (see scripts/seedCatalog.mjs's upsert-by-slug
   // seeding, e.g. "burqa-closed-style") that must NOT be silently

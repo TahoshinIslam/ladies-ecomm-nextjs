@@ -62,9 +62,7 @@ export function getNewArrivalCutoff(now = Date.now()) {
 
 // Every product's `topCategory` is denormalized to its category's IMMEDIATE
 // parent (models/productModel.js's resolveDerivedFields — deliberately one
-// level, not a walk-to-root). See the original Mongoose version of this
-// file (git history) for the full department/division reasoning — unchanged
-// here, only the query engine underneath it.
+// level, not a walk-to-root).
 //
 // `slugs` -> those categories plus EVERY descendant (division -> department
 // -> style), however deep the tree goes.
@@ -99,8 +97,7 @@ const isTruthyParam = (v) => v === "true" || v === "1";
 // topCategory ids. When the query already names a topCategory/category,
 // the requested value(s) are *intersected* with scopeIds rather than
 // overwritten. When the query names none, scopeIds becomes the filter
-// outright. Returns a raw SQL WHERE fragment + its params — the SQL analog
-// of the old Mongo filter-object builder.
+// outright. Returns a raw SQL WHERE fragment + its params.
 export const buildFilter = (query, base = {}, scopeIds = null) => {
   const { search } = query;
   const clauses = [];

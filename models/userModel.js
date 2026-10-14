@@ -4,13 +4,12 @@ import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
 import { getOrganizationId } from "../lib/tenant.js";
 
-// SQL-backed replacement for the old Mongoose user model. Keeps the exact
-// same field names the rest of the app already reads/writes (_id, role,
-// permissions, isVerified, firstOrderPromoUsed, ...) so services/routes/
-// views that consume a user object need minimal changes — only the calls
-// that used to chain Mongoose query builders (`.select().lean()`, etc.)
-// change shape. See models/README-migration.md for the general pattern
-// every model in this directory follows.
+// The shopper model. Returns objects with the field names the rest of the
+// app reads/writes (_id, role, permissions, isVerified,
+// firstOrderPromoUsed, ...). Every read returns the WHOLE row, password hash
+// and reset token included — never pass a user object to the browser; pick
+// the fields you need. See models/README-migration.md for the general
+// pattern every model in this directory follows.
 //
 // This model reads `customers`, not `users`. In the shared database `users`
 // is the dashboard's staff table and `customers` is the shoppers' — the
@@ -59,8 +58,7 @@ function rowToUser(row) {
 
 // bcryptjs hashes always look like $2a$12$... / $2b$12$... — used to detect
 // "this.password currently holds a NEW plaintext value that needs hashing"
-// without separate dirty-tracking state, mirroring Mongoose's pre("save")
-// `isModified("password")` hook closely enough: whatever plaintext a
+// without separate dirty-tracking state: whatever plaintext a
 // caller assigns to `.password` gets hashed the next time `.save()` runs,
 // and an already-hashed value (loaded from the DB, or already hashed by an
 // earlier save() in the same request) is left alone.
@@ -163,11 +161,9 @@ function attachInstanceMethods(user) {
 }
 
 function buildSelectClause(select) {
-  // `select` mirrors Mongoose's "+field" convention only in spirit — every
-  // column is always fetched here (there's no real cost-of-selection
-  // difference for a single-row users table the way there was for Mongo's
-  // field-level `select:false` on password/loginAttempts/etc.); callers
-  // that used `.select("+password")` etc. just get the full row back.
+  // Every column is always fetched — including password and reset-token
+  // fields. `select` is accepted for call-site compatibility and ignored,
+  // so it hides nothing.
   void select;
   return "*";
 }

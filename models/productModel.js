@@ -11,16 +11,14 @@ import AttributeDefinition from "./attributeDefinitionModel.js";
 import Brand from "./brandModel.js";
 import * as Inventory from "./inventoryModel.js";
 
-// SQL-backed replacement for the old Mongoose product model. See
-// models/README-migration.md for the general per-model pattern. This one
-// additionally owns the child tables that used to be Mongo subdocuments/
-// denormalized arrays: product_variants, product_attributes (the
+// The product model. See models/README-migration.md for the general
+// per-model pattern. This one additionally owns the child tables:
+// product_variants, product_attributes (the
 // denormalized facet table), plus JSON columns for images/tags/included_items.
 //
 // Unlike most other models, `find()`/`count()`/`groupCount()` here take a
-// raw SQL WHERE fragment + params (built by services/productService.js's
-// buildFilter(), which mirrors the old Mongo-filter-object builder but
-// emits SQL instead) rather than a Mongo-shaped filter object — the filter
+// raw SQL WHERE fragment + params (built by services/products/listQuery.js's
+// buildFilter()) rather than a filter object — the filter
 // DSL products support (structural fields, dynamic attribute facets, price
 // expressions, full-text search) is too open-ended to usefully re-express
 // as a small fixed set of supported filter keys the way simpler models do.
@@ -324,7 +322,7 @@ async function countByFilter(whereSql, params) {
   return rows[0].n;
 }
 
-/** GROUP BY helper for facet counts (replaces Mongo $group aggregations). */
+/** GROUP BY helper for facet counts. */
 async function groupCountByFilter(column, whereSql, params) {
   return query(
     `SELECT ${column} AS grp, COUNT(*) AS count FROM products

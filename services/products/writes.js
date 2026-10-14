@@ -244,12 +244,10 @@ export async function updateProduct(id, body, actorId) {
     }
     throw err;
   }
-  // Product.findById() (unlike findByIdOrSlug(), which the storefront PDP
-  // needs populated) is meant to mirror the original bare Mongoose
-  // `Model.findById()` this route used before the migration — no
-  // populate(), so `category`/`brand` came back as raw ids. hydrate()
-  // populates both unconditionally, so re-flatten them to ids here to
-  // keep this route's response contract unchanged for its callers.
+  // This route's response contract returns `category`/`brand` as raw ids
+  // (unlike findByIdOrSlug(), which the storefront PDP needs populated).
+  // hydrate() populates both unconditionally, so re-flatten them to ids
+  // here.
   product.category = typeof product.category === "object" ? product.category._id : product.category;
   product.brand = typeof product.brand === "object" && product.brand ? product.brand._id : product.brand;
   await emitBestEffort(

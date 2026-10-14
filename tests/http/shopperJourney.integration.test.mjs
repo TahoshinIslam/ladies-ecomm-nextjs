@@ -77,8 +77,12 @@ describe("a shopper's first order, in a real browser", { skip }, () => {
 
   test("adds the product to the cart from its page", async () => {
     await page.goto(`${BASE_URL}/product/${product._id}`);
-    await page.getByRole("button", { name: "Add to Cart" }).first().click();
-    await page.waitForResponse((res) => res.url().includes("/api/cart") && res.request().method() === "POST" && res.ok(), { timeout: 15_000 });
+    // Listen before clicking: a fast response can otherwise arrive before
+    // the wait starts, and the wait then times out on a cart that worked.
+    await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/api/cart") && res.request().method() === "POST" && res.ok(), { timeout: 15_000 }),
+      page.getByRole("button", { name: "Add to Cart" }).first().click(),
+    ]);
   });
 
   test("checks out with cash on delivery and lands on the order", async () => {

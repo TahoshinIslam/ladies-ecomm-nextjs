@@ -6,7 +6,7 @@ import { storage } from "../lib/utils.js";
 // Deliberately its own key — never shares storage with the guest cart or
 // any wishlist-adjacent key. Stores only {id, viewedAt} pairs, never full
 // product snapshots: Recently Viewed always resolves fresh data from
-// MongoDB (see services/productService.js's getProductsByIds), so a
+// the database (see services/products/catalog.js's getProductsByIds), so a
 // since-changed price/image/name, or a since-deleted/unpublished product,
 // is never displayed stale — the id list is just "what to look up and in
 // what order," nothing more.

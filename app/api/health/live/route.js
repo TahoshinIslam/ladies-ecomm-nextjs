@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
 // LIVENESS: proves only that this function instance
-// itself can execute and respond; deliberately does NOT touch MongoDB or
+// itself can execute and respond; deliberately does NOT touch the database or
 // any other dependency. A liveness probe answering "is the process able
-// to run at all" must stay up even while a downstream dependency (Mongo)
-// is degraded — that distinction is what READINESS (route.js in
+// to run at all" must stay up even while a downstream dependency (the
+// database) is degraded — that distinction is what READINESS (route.js in
 // app/api/health/ready/) is for. Mixing the two would make an unrelated
 // database outage look like "this instance is dead," which is exactly
 // the false signal a liveness check must not produce.

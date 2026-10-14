@@ -14,8 +14,8 @@ function rowToReview(row, user, repliedBy) {
     // "" and "not provided" are indistinguishable in the DB (title is
     // NOT NULL DEFAULT '', and the create()/schema layer reject an explicit
     // empty string — see schemas/reviewSchemas.js), so an empty value here
-    // always means omitted; surface it as undefined to match the old
-    // Mongoose-level optional-field representation the frontend expects.
+    // always means omitted; surface it as undefined, the optional-field
+    // representation the frontend expects.
     title: row.title || undefined,
     comment: row.comment,
     isVerifiedPurchase: !!row.is_verified_purchase,
@@ -144,11 +144,9 @@ async function findByUserAndProducts(userId, productIds) {
 }
 
 // Lets a genuine ER_DUP_ENTRY (from the reviews.uq_reviews_user_product
-// unique index) propagate as-is instead of translating it into a
-// MongoDB-shaped `{code: 11000}` error — that translation was Mongo-era
-// compatibility scaffolding for reviewService.js, which now checks the
-// real MySQL error directly via lib/idempotency.js's isDuplicateKeyError(),
-// the same helper every other duplicate-key path in this codebase uses.
+// unique index) propagate as-is — reviewService.js checks it via
+// lib/idempotency.js's isDuplicateKeyError(), the same helper every other
+// duplicate-key path in this codebase uses.
 async function create({ user, product, rating, title, comment, images, isVerifiedPurchase }) {
   const id = generateObjectId();
   await query(

@@ -1,15 +1,10 @@
 import { withConnection } from "../config/db.js";
 import { getOrganizationId } from "../lib/tenant.js";
 
-// See models/README-migration.md. MySQL's `INSERT ... ON DUPLICATE KEY
-// UPDATE` is the direct equivalent of the old Mongo
-// `findOneAndUpdate({...}, {$inc}, {upsert:true})` this replaces — both are
-// a single atomic statement, so the "two concurrent requests racing to
-// create the same brand-new window" case lib/rateLimit.js's own comment
-// describes is handled by MySQL itself the same way MongoDB handled it,
-// just via ON DUPLICATE KEY UPDATE instead of a caught E11000 retry (no
-// separate retry branch is needed here — unlike a plain INSERT, ON
-// DUPLICATE KEY UPDATE never raises a duplicate-key error to catch).
+// `INSERT ... ON DUPLICATE KEY UPDATE` is a single atomic statement, so
+// two concurrent requests racing to create the same brand-new window are
+// handled by MySQL itself — unlike a plain INSERT, it never raises a
+// duplicate-key error to catch and retry.
 export async function upsertAndIncrement({ keyHash, action, windowStart, expiresAt }) {
   // `LAST_INSERT_ID(expr)` is a documented MySQL idiom: evaluating it sets
   // the CONNECTION's session-level last-insert-id to `expr` (as a side
