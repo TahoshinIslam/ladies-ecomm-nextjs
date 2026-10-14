@@ -29,7 +29,7 @@ export const createReviewSchema = z
     // sends `title: undefined` when left blank) would be rejected with
     // "must be at least 1 character", defeating the "optional" label.
     // Plain `.optional()` leaves an absent title as `undefined`, which
-    // models/reviewModel.js stores as its '' default.
+    // the review model stores as its '' default.
     title: requiredString({ min: 1, max: 120 }).optional(),
     comment: requiredString({ min: 1, max: 2000 }),
     images: z.array(urlSchema).max(6, "at most 6 images").optional().default([]),
