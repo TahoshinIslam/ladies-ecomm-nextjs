@@ -3,7 +3,6 @@ import { Home, User as UserIcon, MapPin, Lock } from "lucide-react";
 import Breadcrumb from "../components/ui/Breadcrumb.jsx";
 import { requireServerUser } from "../lib/serverPageAuth.js";
 import { getT } from "../lib/i18n/server.js";
-import { serializeForClient } from "../lib/serialize.js";
 import { InfoTab, PasswordTab, AddressesTab } from "./ProfileForms.jsx";
 
 // Real Server Component, same pattern as views/DashboardPage.jsx: each of
@@ -46,7 +45,10 @@ export default async function ProfilePage() {
       title={t("account.navProfile")}
       subtitle={t("account.subtitle")}
     >
-      <InfoTab user={serializeForClient(user)} />
+      {/* Only the fields the form shows. The session user is the full
+          customers row (password hash, reset token, lockout state), and
+          every prop here is sent to the browser. */}
+      <InfoTab user={{ name: user.name, email: user.email, phone: user.phone }} />
     </AccountSection>
   );
 }
