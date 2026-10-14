@@ -142,6 +142,9 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
       - name: Lint
         run: npm run lint
+      # Strict type-check of every file that opts in with // @ts-check (the security core first).
+      - name: Type-check
+        run: npm run typecheck
 
       # Captures output to a file (not just stdout) so the critical-skip
       # check below can inspect it — `set -o pipefail` is required so a
