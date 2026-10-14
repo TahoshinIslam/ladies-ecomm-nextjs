@@ -3718,7 +3718,7 @@ DROP TABLE IF EXISTS `theme_settings`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `theme_settings` (
   `id` varchar(32) NOT NULL,
-  `brand_name` varchar(128) NOT NULL DEFAULT 'Scoobee',
+  `brand_name` varchar(128) NOT NULL DEFAULT 'Leo E-commerce',
   `product_name` varchar(128) NOT NULL DEFAULT 'ERP Platform',
   `preset` varchar(32) NOT NULL DEFAULT 'indigo',
   `primary_color` varchar(16) NOT NULL DEFAULT '#5850ec',
