@@ -29,7 +29,7 @@ import { useLocale } from "../context/LocaleProvider.jsx";
 // keep their own plain-English messages) so this client form can never
 // drift out of sync with what services/userService.js's updateMe() and
 // createAddress()/updateAddress() actually enforce server-side. No
-// Mongoose/server-only code is pulled in by importing from schemas/*.js —
+// server-only code is pulled in by importing from schemas/*.js —
 // see tests/clientSchemaImportability.test.mjs.
 import { PASSWORD_MIN_LENGTH } from "../schemas/authSchemas.js";
 import { ADDRESS_LABELS } from "../schemas/addressSchemas.js";

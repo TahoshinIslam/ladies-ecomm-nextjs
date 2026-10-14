@@ -13,10 +13,9 @@ import { redactIdempotencyFields } from "./checkout.js";
 export async function getMyOrders(userId) {
   const orders = await Order.findMyOrders(userId);
   // See redactIdempotencyFields()'s own comment: models/orderModel.js's
-  // rowToOrder() has no equivalent of the old Mongoose schema's
-  // `select: false` on these two columns (a plain `SELECT *` has no
-  // concept of a field that's hidden by default), so every SQL-backed
-  // order-model read includes them unless a caller strips them again here
+  // rowToOrder() hides nothing (a plain `SELECT *` has no concept of a
+  // field that's hidden by default), so every order-model read includes
+  // these two columns unless a caller strips them again here
   // — every externally-facing read (this list, getOrder() below, and
   // createOrder()'s own response) must, since these are for internal
   // replay-detection use only and were never meant to reach a client.

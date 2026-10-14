@@ -9,7 +9,7 @@ import { getCachedRelatedProducts } from "../../../../../lib/serverDataCache.js"
 
 // Route params are async in Next.js 16 and must be awaited. `idOrSlug`
 // itself is validated inside listRelated() -> getProductByIdOrSlug(), which
-// already branches on mongoose.isValidObjectId() vs. a slug lookup — no
+// already branches on isObjectIdFormat() vs. a slug lookup — no
 // separate schema needed for that half of the path param.
 export const GET = withRoute(async (request, { params }) => {
   const { idOrSlug } = await params;

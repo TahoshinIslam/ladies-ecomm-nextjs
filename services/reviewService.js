@@ -81,7 +81,7 @@ export async function createReview(userId, productId, { rating, title, comment, 
   } catch (err) {
     // Unique index reviews.uq_reviews_user_product throws ER_DUP_ENTRY on
     // duplicate — checked via the shared MySQL duplicate-key helper (see
-    // lib/idempotency.js), not a leftover MongoDB `code: 11000` check.
+    // lib/idempotency.js).
     if (isDuplicateKeyError(err, "uq_reviews_user_product")) {
       throw new HttpError(400, "You've already reviewed this product");
     }

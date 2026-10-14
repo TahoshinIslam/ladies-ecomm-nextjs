@@ -14,10 +14,8 @@ import { localizeCategoryList } from "../../../lib/i18n/localize.js";
 export const GET = withRoute(async () => {
   // Cached (900s TTL, invalidated on any category create/update/delete
   // below and in [id]/route.js) — this is the storefront's own nav/filter
-  // read, fired on every single page load, previously hitting MongoDB
-  // fresh every time despite being public, rarely-changing data with the
-  // exact same cache infrastructure the home page's server render already
-  // uses for this identical read.
+  // read, fired on every page load — public, rarely-changing data, so it
+  // shares the cache the home page's server render uses for the same read.
   const [categories, locale] = await Promise.all([getCachedCategories(), getServerLocale()]);
   return NextResponse.json({
     categories: localizeCategoryList(categories, locale),

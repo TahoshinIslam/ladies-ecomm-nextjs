@@ -3,12 +3,11 @@ import mysql from "mysql2/promise";
 import { checkLocalDevHost } from "../lib/localDevSafety.js";
 
 // Cached on `global` so Next.js dev's module hot-reloading reuses the same
-// pool instead of opening a new one on every file save — same reasoning the
-// old Mongoose connectDB() documented (`globalThis` survives module
-// reloads; a plain module-level variable would not).
+// pool instead of opening a new one on every file save (`globalThis`
+// survives module reloads; a plain module-level variable would not).
 const cache = (globalThis.__mysqlPoolCache ??= { pool: null });
 
-// Same NEXT_PHASE guard the old MongoDB connectDB() had: `next build`'s
+// NEXT_PHASE guard: `next build`'s
 // static-generation workers can execute Server Component trees (probing
 // whether a route COULD be static) before any request-time code runs. This
 // app has no legitimate build-time database access — every route is
@@ -43,7 +42,7 @@ function assertNotBuildPhase() {
   }
 }
 
-// Mirrors the old Mongoose pool's Fluid Compute sizing rationale: a warm
+// Fluid Compute sizing: a warm
 // Vercel Function instance reuses this same pool across concurrent
 // requests, so the pool needs to absorb one instance's own concurrent
 // in-flight queries, not the whole app's total traffic — see the git
@@ -95,8 +94,7 @@ function buildPool() {
     queueLimit: Number(process.env.DB_POOL_QUEUE_LIMIT) || connectionLimit * 50,
     // Fails a query within a few seconds against a genuinely unreachable/
     // misconfigured database instead of hanging until the platform's own
-    // function-duration limit kills it — same intent as the old Mongoose
-    // serverSelectionTimeoutMS/connectTimeoutMS. Note this only bounds the
+    // function-duration limit kills it. Note this only bounds the
     // TCP/handshake step of opening a brand-new physical connection — it
     // does NOT bound how long a caller waits for an already-open pooled
     // connection to free up under load; see acquireConnection()'s own
@@ -218,9 +216,8 @@ async function acquireConnection(pool) {
  * Runs `fn` with a single dedicated connection checked out from the pool,
  * for callers that need several statements to share one session (a
  * transaction, or a sequence of statements that must run on the same
- * connection) — see lib/db/tx.js's withTransaction(), the SQL equivalent of
- * the old `mongoose.startSession()` + `session.withTransaction()` pattern
- * used by order creation/cancellation. Always releases the connection back
+ * connection) — see lib/db/tx.js's withTransaction(), used by order
+ * creation/cancellation. Always releases the connection back
  * to the pool, even on error — never closes the pool itself.
  */
 export async function withConnection(fn) {
@@ -272,7 +269,7 @@ export async function closePool() {
 }
 
 /**
- * Compatibility entry point for the old Mongoose `connectDB()` call sites
+ * Entry point for the `connectDB()` call sites
  * (lib/http.js's withRoute(), lib/serverPageAuth.js, lib/serverDataCache.js,
  * the health/ready route) — every one of them just does `await connectDB()`
  * once before doing real work and never touches its return value, except

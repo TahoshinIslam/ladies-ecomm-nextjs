@@ -24,7 +24,7 @@ import { useLocale } from "../context/LocaleProvider.jsx";
 // own translated messages) so the client can never silently drift out of
 // sync with what services/authService.js's register() actually enforces
 // server-side (schemas/authSchemas.js's registerSchema). Importing a
-// number from schemas/*.js pulls in no Mongoose/server-only code — see
+// number from schemas/*.js pulls in no server-only code — see
 // tests/clientSchemaImportability.test.mjs.
 import { PASSWORD_MIN_LENGTH, NAME_MAX_LENGTH } from "../schemas/authSchemas.js";
 

@@ -8,9 +8,9 @@ import { useGetProductsByIdsQuery } from "../../store/productApi.js";
 import { useLocale } from "../../context/LocaleProvider.jsx";
 
 /**
- * Resolves the visitor's stored id list against real MongoDB data (never
+ * Resolves the visitor's stored id list against real database rows (never
  * displays the stale localStorage snapshot) and re-applies the visitor's
- * own most-recent-first order afterward — a Mongo $in query does not
+ * own most-recent-first order afterward — an SQL `IN (...)` query does not
  * preserve input order, and this is the one place that matters: the whole
  * point of the section is "most recent first."
  */

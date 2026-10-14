@@ -69,7 +69,7 @@ export default async function ProductDetailPage({ params }) {
 }
 
 // Safe Product structured data, built only from real,
-// already-fetched fields (no second MongoDB read, no invented values).
+// already-fetched fields (no second database read, no invented values).
 // `product.rating`/`numReviews` are genuinely aggregated by
 // models/reviewModel.js's calcAverageRating on every real review
 // save/delete (never a placeholder), so aggregateRating is included only

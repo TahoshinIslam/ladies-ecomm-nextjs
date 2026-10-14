@@ -28,7 +28,7 @@ const STREAM_MAX_MS = 4 * 60 * 1000;
 // Authenticates via the same-origin session cookie. Ownership is
 // still checked below before the stream opens.
 //
-// Reads from the MongoDB-backed durable event outbox
+// Reads from the database-backed durable event outbox
 // (lib/events.js) via bounded polling instead of a process-local
 // EventEmitter — see that file's own comment for why an in-memory bus
 // cannot work across Vercel's multiple isolated function instances.

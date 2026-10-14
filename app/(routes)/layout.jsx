@@ -8,8 +8,8 @@ import { localizeCategoryList } from "@/lib/i18n/localize.js";
 // this changes no runtime behavior — but WITHOUT it, `next build`'s
 // static-generation workers execute this layout to probe whether the
 // route COULD be static, which really did call getCachedCategories() (a
-// real connectDB() against MONGO_URI, this project's Production
-// database) during every single `npm run build`. Same fix, same reason,
+// real connectDB() against the configured database, Production in a
+// production build) during every single `npm run build`. Same fix, same reason,
 // as app/sitemap.js's own `force-dynamic` export.
 export const dynamic = "force-dynamic";
 
