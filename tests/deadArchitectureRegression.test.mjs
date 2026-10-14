@@ -56,6 +56,10 @@ describe("Phase 6 — dead Express-era cluster stays deleted", () => {
     assert.equal(exists("utlis/logger.js"), false);
   });
 
+  test("utlis/apiFeatures.js (the Mongoose query-chain helper) does not exist", () => {
+    assert.equal(exists("utlis/apiFeatures.js"), false);
+  });
+
   test("no production file imports the deleted middleware/controller/redis/cache/logger paths", () => {
     const forbiddenImportPatterns = [
       /from ["']\.{1,2}\/(\.{2}\/)*middleware\//,
