@@ -19,10 +19,10 @@ const couponCodeSchema = z
 
 // Admin create/update — `.strict()` is a deliberate mass-assignment guard.
 // Critically, this schema does NOT include `usedCount` at all: that field
-// must only ever change via services/orderService.js's atomic, guarded
+// must only ever change via services/orders/pricing.js's atomic, guarded
 // $inc at claim time (and its guarded rollback on cancel) — never via a
-// direct admin PUT, which today (pre-Phase-5) could set it to anything,
-// including a value that desynchronizes it from real order history.
+// direct admin PUT, which could otherwise set it to a value that
+// desynchronizes it from real order history.
 export const createCouponSchema = z
   .object({
     code: couponCodeSchema,

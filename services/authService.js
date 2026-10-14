@@ -28,7 +28,7 @@ const publicUser = (user) => ({
 // `presentedSessionToken` — the raw session token the caller presented, if
 // any (e.g. an anonymous visitor who happened to be carrying a stale/guest
 // session cookie when they submit the register form). Revoked before
-// issuing a new one, per the Phase 2 spec: authenticating must never let a
+// issuing a new one: authenticating must never let a
 // pre-existing cookie value continue to be valid afterward (session
 // fixation) — either it becomes the new session (never, here — a fresh
 // session is always minted) or it's dead.

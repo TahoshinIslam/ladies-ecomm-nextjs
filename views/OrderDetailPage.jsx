@@ -30,7 +30,7 @@ const STATUS_KEYS = {
   refunded: "orders.statusRefunded",
 };
 
-// Phase 7 — real Server Component: authenticates via the cookie session,
+// Real Server Component: authenticates via the cookie session,
 // enforces ownership through the existing services/orderService.js
 // getOrder() rule (owner or admin, otherwise a 403 — both a malformed id
 // and an unauthorized/missing order resolve to the SAME notFound() here,

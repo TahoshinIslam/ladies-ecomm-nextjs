@@ -10,7 +10,7 @@ import { requireObjectIdFormat } from "../lib/validation.js";
 // is a conflict, not a silent transition.
 const COD_CREATABLE_STATUS = "pending";
 
-// Phase 4: the orderId is this operation's natural idempotency identity.
+// The orderId is this operation's natural idempotency identity.
 // Payment creation and the order status transition happen inside one
 // transaction, and payments' unique `order_id` index is the database-level
 // backstop against a concurrent duplicate producing two Payment rows.
@@ -47,8 +47,7 @@ export async function codCreate(orderId, userId) {
       order.paymentMethod = "cod";
       await Order.saveOrderOnConnection(conn, order);
 
-      // Phase 11 realtime-durability correction (kept from the original):
-      // written INSIDE this same transaction — a genuine transactional
+      // The event is written INSIDE this same transaction — a genuine transactional
       // outbox for COD payment creation.
       await emitOrderEvent(orderId, { orderId, status: order.status }, { session: conn });
 

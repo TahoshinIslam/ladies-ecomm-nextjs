@@ -6,7 +6,7 @@ import { HttpError } from "@/lib/http.js";
 import { resolveImage } from "@/lib/utils.js";
 import { absoluteUrl, truncateDescription } from "@/lib/seo.js";
 
-// Phase 10 — reuses the SAME Phase 8 cached read the page body itself
+// Reuses the SAME cached read the page body itself
 // calls (lib/serverDataCache.js's getCachedProductByIdOrSlug) — same
 // unstable_cache entry, so this never adds a duplicate uncached database
 // read alongside the page's own fetch. `params` is a Promise in this

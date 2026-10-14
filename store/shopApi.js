@@ -55,7 +55,7 @@ const orderEndpoints = (b) => ({
   previewOrder: b.mutation({
     query: (body) => ({ url: "/orders/preview", method: "POST", body }),
   }),
-  // Phase 4: `idempotencyKey` is pulled out of the payload and sent as the
+  // `idempotencyKey` is pulled out of the payload and sent as the
   // Idempotency-Key header (never in the body/query string) — the rest of
   // `body` is exactly what CheckoutPage.jsx already sent. The header
   // itself is generated/persisted client-side; see views/CheckoutPage.jsx.
@@ -84,10 +84,9 @@ const orderEndpoints = (b) => ({
   // Admin
   getAllOrders: b.query({
     query: (params = {}) => `/orders?${buildQueryString(params)}`,
-    // Performance audit fix: per-row tags + a LIST tag, replacing the old
-    // bare "Order" collection-wide tag every row shared. A mutation on one
+    // Per-row tags + a LIST tag, not one collection-wide tag. A mutation on one
     // order (updateOrderStatus/cancelOrder below, or the SSE handler in
-    // hooks/useAdminEventStream.js) can now invalidate just that row's
+    // hooks/useAdminEventStream.js) can invalidate just that row's
     // tag — which only refetches THIS query if the currently-displayed
     // page/filter actually contains that row — instead of forcing every
     // open admin session's every orders-list page/filter to refetch on any
@@ -194,7 +193,7 @@ const paymentEndpoints = (b) => ({
 });
 
 // Analytics — no RTK Query endpoints here: the one consumer
-// (views/admin/OverviewPage.jsx) became a Server Component in Phase 7 and
+// (views/admin/OverviewPage.jsx) is a Server Component and
 // now calls services/analyticsService.js directly. Kept as real, tested
 // Route Handlers (app/api/analytics/*) independent of this client — this
 // only removes the now-zero-consumer client-side wrapper.

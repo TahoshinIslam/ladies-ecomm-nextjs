@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 7 — the guided-finder card is almost entirely static copy; the
+// The guided-finder card is almost entirely static copy; the
 // ONE thing it needs is a Redux dispatch to open the finder modal, which
 // requires a client boundary. Kept as its own small island rather than
 // pulling the rest of the (static) home page along with it.

@@ -24,8 +24,7 @@ export const PUT = withRoute(async (request) => {
 
   // Password change: revoke every session for this user (including the
   // one making this request) and clear the cookie on this response —
-  // "require the user to sign in again" is the preferred behavior per the
-  // Phase 2 spec, rather than silently leaving other sessions (or this
+  // "require the user to sign in again" is the preferred behavior, rather than silently leaving other sessions (or this
   // one, past this response) valid.
   if (body?.newPassword) {
     await revokeAllSessionsForUser(sessionUser._id);

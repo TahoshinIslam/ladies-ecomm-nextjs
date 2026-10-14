@@ -21,7 +21,7 @@ export const POST = withRoute(async (request) => {
     raw = {};
   }
 
-  // Two independent dimensions, per Phase 3 section E — this does not
+  // Two independent dimensions — this does not
   // replace or interact with userModel.js's own failed-attempt lockout
   // (a separate, per-account mechanism that persists across windows);
   // both must pass. The IP check only runs when the deployment has

@@ -25,10 +25,10 @@ const STREAM_MAX_MS = 4 * 60 * 1000;
 // and order-detail pages subscribe here so a status change made in admin
 // reaches them immediately instead of waiting for a manual refresh.
 //
-// Phase 2: authenticates via the same-origin session cookie. Ownership is
+// Authenticates via the same-origin session cookie. Ownership is
 // still checked below before the stream opens.
 //
-// Phase 11 (mandatory): reads from the MongoDB-backed durable event outbox
+// Reads from the MongoDB-backed durable event outbox
 // (lib/events.js) via bounded polling instead of a process-local
 // EventEmitter — see that file's own comment for why an in-memory bus
 // cannot work across Vercel's multiple isolated function instances.
@@ -48,7 +48,7 @@ export const GET = withRoute(async (request, { params }) => {
 
   const channel = orderChannel(id);
 
-  // Phase 12 remediation: the starting cursor is now resolved BEFORE the
+  // The starting cursor is now resolved BEFORE the
   // stream/Response is ever constructed — a genuine DB failure here
   // (never "not found", which resolveStartCursor already handles safely)
   // must fail the request closed with a sanitized error, not silently

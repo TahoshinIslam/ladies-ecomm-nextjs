@@ -231,17 +231,14 @@ export const relatedQuerySchema = z.object({
   limit: boundedIntParam({ min: 1, max: 24, defaultValue: 8 }),
 });
 
-// GET /api/products (storefront + admin) query contract — Phase 5D.
+// GET /api/products (storefront + admin) query contract.
 //
-// Phase 5C left this route with NO schema at all, reasoning that
 // buildFilter()'s data-driven attribute-facet system (any query key not in
 // a small structural set is treated as a filter keyed by a live
-// AttributeDefinition.key) couldn't be expressed as a single static
-// `.strict()` schema without breaking real, tested CSV multi-value
-// behavior (`ageGroup=kids,girls` — tests/http/productFilters.integration
-// .test.mjs). That reasoning about `.strict()` was correct, but the
-// conclusion ("so validate nothing") wasn't: a HYBRID contract is what was
-// missing, not the absence of one. This module owns the browser-safe,
+// AttributeDefinition.key) can't be expressed as a single static
+// `.strict()` schema without breaking CSV multi-value behavior
+// (`ageGroup=kids,girls` — tests/http/productFilters.integration
+// .test.mjs), so the contract is a HYBRID. This module owns the browser-safe,
 // dependency-free half of that hybrid — fixed-field bounds and the
 // low-level CSV/token safety rules — while services/productService.js's
 // parseProductListQuery() owns the DB-aware half (checking a dynamic facet

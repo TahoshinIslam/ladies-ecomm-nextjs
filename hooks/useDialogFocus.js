@@ -6,7 +6,7 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Phase 10 — one reusable focus-management hook for every modal-style
+ * One reusable focus-management hook for every modal-style
  * overlay (dialog/sheet/menu), replacing several independent, partially
  * correct implementations (components/ui/Drawer.jsx had the full
  * pattern; components/layout/SearchModal.jsx never restored focus on

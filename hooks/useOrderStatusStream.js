@@ -13,7 +13,7 @@ import { selectCurrentUser } from "../store/authSlice.js";
  * reconnection on drop is handled by EventSource itself (it retries
  * automatically).
  *
- * Phase 2: authenticates via the same-origin session cookie, sent
+ * Authenticates via the same-origin session cookie, sent
  * automatically by EventSource — no token in the URL.
  */
 export function useOrderStatusStream(orderId, onUpdate) {
@@ -22,7 +22,7 @@ export function useOrderStatusStream(orderId, onUpdate) {
   useEffect(() => {
     if (!orderId || !user) return;
 
-    // Phase 11: same dedup/resume reasoning as useAdminEventStream.js —
+    // Same dedup/resume reasoning as useAdminEventStream.js —
     // the server emits `id: <mongoId>` per event, which EventSource
     // resends as `Last-Event-ID` on its own automatic reconnect.
     const seenEventIds = new Set();

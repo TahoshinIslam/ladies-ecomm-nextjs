@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 10 — root-layout error boundary. Only fires when the ROOT LAYOUT
+// Root-layout error boundary. Only fires when the ROOT LAYOUT
 // ITSELF throws (a normal segment error never reaches here — see
 // error.jsx). Per Next.js 16.3.4's own docs (node_modules/next/dist/docs
 // /01-app/03-api-reference/03-file-conventions/error.md): this file

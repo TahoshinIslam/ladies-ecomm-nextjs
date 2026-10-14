@@ -39,7 +39,7 @@ export default function ComparePage() {
   const [pendingId, setPendingId] = useState(null);
   // Which variant is picked per compared product — a variant id, not a bare
   // size string, so two variants sharing a size (e.g. Black/M and Navy/M)
-  // stay distinguishable (see Phase 4 audit).
+  // stay distinguishable.
   const [variantBy, setVariantBy] = useState({});
 
   const { data, isLoading, isFetching } = useGetCompareProductsQuery(

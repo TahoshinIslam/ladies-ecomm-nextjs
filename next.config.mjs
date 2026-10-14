@@ -1,13 +1,13 @@
 import path from "node:path";
 
-// Phase 3: global security headers that don't need a per-request nonce
+// Global security headers that don't need a per-request nonce
 // (the Content-Security-Policy header — which DOES need one, since
 // real, unavoidable inline <script> tags exist in every page's HTML; see
 // proxy.js's own header comment for the built-output evidence — lives
 // there instead, not here, so the two mechanisms never both try to set
 // the same header on the same response).
 //
-// Phase 11 CI-verification fix: this file (unlike proxy.js's runtime
+// This file (unlike proxy.js's runtime
 // middleware) is evaluated once, at `next build` time — its `headers()`
 // config is baked into the build's routes manifest and never
 // re-evaluated by `next start`. Previously this gated the HSTS header on
@@ -87,7 +87,7 @@ const nextConfig = {
   // from 192.168.68.x to 192.168.0.x), and a blocked address looks exactly like "the store shows no products".
   allowedDevOrigins: ["192.168.*.*", "10.*.*.*", "172.*.*.*"],
   images: {
-    // Phase 9 — HTTPS-only, minimally scoped to the remote origins this
+    // HTTPS-only, minimally scoped to the remote origins this
     // app actually serves images from.
     //
     // Uploads are stored in the database and served from this app at /files/<id>, so they need no remote host. `res.cloudinary.com` is

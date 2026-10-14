@@ -1,12 +1,11 @@
-// Phase 10 — App Router metadata sitemap (Next.js 16.3.4's `sitemap.js`
-// file convention). Reads the real database (via the Phase 8-cached,
+// App Router metadata sitemap (Next.js 16.3.4's `sitemap.js`
+// file convention). Reads the real database (via the cached,
 // narrowly-projected lib/serverDataCache.js's getCachedSitemapProducts()
 // — active products only, `slug`+`updatedAt` fields only, invalidated by
 // the same CATALOG tag every product mutation already fires) rather than
 // an HTTP round trip to this app's own API. Includes only genuinely
 // public, canonical pages backed by real repository evidence — no
-// account/cart/checkout/orders/admin/auth/search-facet permutations, per
-// this phase's explicit exclusion list.
+// account/cart/checkout/orders/admin/auth/search-facet permutations.
 import { getCachedSitemapProducts, getCachedCategories } from "@/lib/serverDataCache.js";
 import { absoluteUrl } from "@/lib/seo.js";
 import { isDepartmentCategory } from "@/lib/utils.js";

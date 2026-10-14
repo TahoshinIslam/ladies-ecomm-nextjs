@@ -1,9 +1,7 @@
 "use client";
 
-// Phase 11 — closes the other half of the same Phase 10 carryover: the
-// password-reset EMAIL (services/userService.js's forgotPassword(),
-// via buildAppUrl("reset-password", rawToken)) has always linked here,
-// but no page existed. The raw token stays in the URL PATH only (never
+// The page the password-reset EMAIL links to (services/userService.js's
+// forgotPassword(), via buildAppUrl("reset-password", rawToken)). The raw token stays in the URL PATH only (never
 // copied into component state, localStorage, or sessionStorage) — it's
 // read once from the route param and forwarded directly to the existing
 // useResetPasswordMutation, which posts it in the request body per

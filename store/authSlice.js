@@ -1,6 +1,6 @@
 import { createSlice } from "@reduxjs/toolkit";
 
-// Phase 2: no token, ever — the session lives entirely in the HttpOnly
+// No token, ever — the session lives entirely in the HttpOnly
 // __Host-tahos_session cookie (server-only, never readable from JS). Redux
 // holds only sanitized user info and a boot-resolution status; nothing
 // here is a credential, so nothing here needs to survive in localStorage

@@ -1,4 +1,4 @@
-// Phase 5 — shared Zod schemas. Client-safe: no Mongoose, no database
+// Shared Zod schemas. Client-safe: no Mongoose, no database
 // calls, no Node-only APIs, no secrets, no circular imports. Safe to
 // import from a Client Component for client-side form validation (see
 // views/CheckoutPage.jsx and friends) — the server (lib/validation.js +

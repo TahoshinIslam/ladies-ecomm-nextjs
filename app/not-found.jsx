@@ -1,4 +1,4 @@
-// Phase 10 — the root not-found boundary: renders for any URL that
+// The root not-found boundary: renders for any URL that
 // doesn't match a route, AND for any segment that calls notFound() and
 // doesn't have its own closer not-found.jsx (product/order detail don't
 // define their own — this file backs those too, which is why its

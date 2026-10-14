@@ -50,7 +50,7 @@ const OCCASIONS = [
   { nameKey: "catalog.occasionPrayer", value: "prayer", bodyKey: "home.occasionPrayerBody" },
 ];
 
-// Phase 7 — real Server Component: every product/category read below goes
+// Real Server Component: every product/category read below goes
 // straight through services/productService.js and services/categoryService.js
 // (no fetch to this app's own /api), fetched in parallel via Promise.all.
 // Bangla localization is applied server-side (lib/i18n/localize.js) before
@@ -102,7 +102,7 @@ export default async function HomePage() {
   const jewelry = categories.find((c) => c.slug === "jewelry");
   const homeDecor = categories.find((c) => c.slug === "home-decor");
 
-  // Phase 8 — every one of this page's product queries below is a fixed,
+  // Every one of this page's product queries below is a fixed,
   // low-cardinality shape (limit + sort, or limit + category + collection)
   // that always passes lib/shopCacheEligibility.js's policy — cached
   // accordingly, same as the shop page.
@@ -200,8 +200,7 @@ export default async function HomePage() {
 
   return (
     <>
-      {/* Confirmed audit fix: the page had zero <h1> elements — every
-          section heading here is intentionally h2/h3 to match the visual
+      {/* Every section heading here is intentionally h2/h3 to match the visual
           hierarchy, so a visually-hidden h1 (reusing the same string
           already used for <title>/meta description) gives screen readers
           and search engines the one page-level heading WCAG/SEO expect,

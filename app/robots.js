@@ -1,4 +1,4 @@
-// Phase 10 — App Router robots.txt (Next.js 16.3.4's `robots.js` file
+// App Router robots.txt (Next.js 16.3.4's `robots.js` file
 // convention). A crawl-directive hint only — never a security boundary
 // (every path listed here is already independently protected by real
 // server-side authentication/authorization checks: lib/serverPageAuth.js

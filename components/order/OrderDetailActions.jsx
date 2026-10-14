@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 7 — the one interactive island on an otherwise server-rendered
+// The one interactive island on an otherwise server-rendered
 // order-detail page: live SSE status refresh, the receipt
 // download/auto-download-on-arrival behavior, and the cancel
 // confirmation flow. Everything else on the page (items, address,

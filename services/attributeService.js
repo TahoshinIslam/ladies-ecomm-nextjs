@@ -32,7 +32,7 @@ export async function listAttributes() {
 }
 
 // The one resolver shared by the admin product form (now) and the
-// storefront filter panel (Phase 3): which attributes apply to a given
+// storefront filter panel: which attributes apply to a given
 // top-level category, with each one's display label already resolved via
 // labelOverrides — e.g. "size" reads as "Length" for Burqa/Khimar.
 export async function resolveAttributesForCategory(topCategoryId) {

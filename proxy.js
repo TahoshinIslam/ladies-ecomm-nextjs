@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 
-// Phase 3: Content-Security-Policy. Next.js 16 renamed `middleware.js` to
+// Content-Security-Policy. Next.js 16 renamed `middleware.js` to
 // `proxy.js` (confirmed via node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md
 // — the old name still works but is deprecated). This file replaces the
 // nonexistent middleware.js this project never had.
@@ -27,7 +27,7 @@ import crypto from "node:crypto";
 // costs NOTHING extra here: `npm run build`'s own route table already
 // marks every single page in this app — not just the API routes — as
 // "ƒ (Dynamic)", because the whole app already reads the session cookie
-// (Phase 2) on effectively every route. There is no static/ISR page in
+// on effectively every route. There is no static/ISR page in
 // this codebase today to lose.
 //
 // API routes get a separate, simpler, non-nonce CSP below — their

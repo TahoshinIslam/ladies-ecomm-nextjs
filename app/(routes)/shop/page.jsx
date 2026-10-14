@@ -25,8 +25,7 @@ function getIndexableCategoryId(rawParams) {
   return typeof value === "string" && isObjectIdFormat(value) ? value : null;
 }
 
-// Phase 10's original shop query-string indexing policy (kept, just no
-// longer the ONLY case): the bare `/shop` (no query at all) is one stable,
+// The shop query-string indexing policy: the bare `/shop` (no query at all) is one stable,
 // indexable landing page. A single clean `?category=<id>` is now a SECOND
 // indexable landing page per department (see getIndexableCategoryId above
 // and the incident-response SEO audit that added this — Google could
