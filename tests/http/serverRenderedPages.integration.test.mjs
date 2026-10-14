@@ -271,11 +271,21 @@ describe("Phase 7 — real server-rendered pages (real MongoDB, via HTTP)", { sk
 
 
 
-  test("no page response leaks a password hash, raw session token, or CSRF secret", async () => {
-    const cookie = await cookieHeaderFor(customer._id);
-    const res = await fetch(`${BASE_URL}/orders`, { headers: { cookie } });
-    const html = await res.text();
-    assert.ok(!/"password":"\$2[aby]\$/.test(html));
-    assert.ok(!html.includes(cookie.split("=")[1]));
-  });
+  // Every signed-in page, checked against the raw HTML — including the RSC
+  // payload, where props appear JSON-escaped (`\"password\":...`), so the
+  // checks look for the hash itself and the secret field names, not one
+  // exact quoting.
+  for (const rel of ["/profile", "/profile/addresses", "/profile/password", "/dashboard", "/orders"]) {
+    test(`${rel} never sends the password hash, reset token, lockout state, or session token to the browser`, async () => {
+      const cookie = await cookieHeaderFor(customer._id);
+      const res = await fetch(`${BASE_URL}${rel}`, { headers: { cookie } });
+      assert.equal(res.status, 200);
+      const html = await res.text();
+      assert.ok(!/\$2[aby]\$\d\d\$/.test(html), "a bcrypt hash is in the page");
+      for (const field of ["password", "resetPasswordToken", "resetPasswordExpires", "loginAttempts", "lockUntil"]) {
+        assert.ok(!new RegExp(`\\\\?"${field}\\\\?"\\s*:`).test(html), `the "${field}" field is in the page`);
+      }
+      assert.ok(!html.includes(cookie.split("=")[1]));
+    });
+  }
 });
