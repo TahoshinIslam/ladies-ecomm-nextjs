@@ -1,31 +1,7 @@
 import { z } from "../lib/zod.js";
 
-import { objectIdSchema, amountSchema, requiredString, paginationSchema, searchQuerySchema, sortFieldSchema, sortOrderSchema } from "./commonSchemas.js";
+import { objectIdSchema, amountSchema, requiredString } from "./commonSchemas.js";
 import { shippingAddressFields } from "./addressSchemas.js";
-
-export const ORDER_STATUSES = ["pending", "paid", "processing", "shipped", "delivered", "cancelled", "refunded"];
-
-// PUT /api/orders/[id]/status (admin) — `.strict()` since this directly
-// writes model fields; an admin should only ever be able to set exactly
-// these two.
-export const updateOrderStatusSchema = z
-  .object({
-    status: z.enum(ORDER_STATUSES),
-    trackingNumber: z.string().trim().max(100).optional(),
-  })
-  .strict();
-
-// GET /api/orders (admin list) — `limit` is clamped so a request such as
-// `?limit=999999` cannot run an unbounded query.
-export const adminOrderListQuerySchema = z
-  .object({
-    status: z.enum(ORDER_STATUSES).optional(),
-    search: searchQuerySchema,
-    sortBy: sortFieldSchema(["createdAt", "total", "status"], "createdAt"),
-    sortOrder: sortOrderSchema,
-  })
-  .extend(paginationSchema().shape)
-  .strict();
 
 // Deliberately NOT `.strict()` anywhere in this file (unlike most other
 // schemas/*.js files): a client-submitted `price`/`total`/`subtotal`/

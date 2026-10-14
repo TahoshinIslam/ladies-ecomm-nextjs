@@ -28,9 +28,6 @@ export const framingSchema = z
   )
   .transform((value) => sanitizeFraming(value));
 
-/** For optional per-slot framing fields: omitted = leave as is, null = clear. */
-export const optionalFramingSchema = framingSchema.nullable().optional();
-
 // Homepage slots are keyed "<placement>" or "<placement>:<slug>" with the
 // placement's "." written as "_" — e.g. "banner_home", "department_tile:burqa"
 // (lib/imageFraming.js homepageFramingKey). Object KEYS may never contain "."

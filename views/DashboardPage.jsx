@@ -22,10 +22,7 @@ import { cn, formatCurrency } from "../lib/utils.js";
 import { formatDhakaDateTime } from "../lib/date.js";
 import { getT, getServerLocale } from "../lib/i18n/server.js";
 
-// Same "real spend" definition services/analyticsService.js's getOverview()
-// uses for the admin dashboard (a locally-duplicated, not shared, constant
-// — that file's own REVENUE_STATUSES isn't exported, and this page's only
-// use of it is this one sum) — pending/cancelled/refunded orders were never
+// "Real spend": pending/cancelled/refunded orders were never
 // actually paid for, so they don't count as spend.
 const REVENUE_STATUSES = new Set(["paid", "processing", "shipped", "delivered"]);
 const ACTIVE_STATUSES = new Set(["pending", "paid", "processing", "shipped"]);
@@ -50,8 +47,7 @@ const statusLabelKey = {
   refunded: "orders.statusRefunded",
 };
 
-// Same tone treatment as views/admin/OverviewCharts.jsx's KpiCard. A first
-// pass here used an 8%-opacity tint fading to plain background — too
+// A first pass here used an 8%-opacity tint fading to plain background — too
 // subtle to read as anything but white at a glance. This version commits
 // harder: a solid-colored icon chip, a real gradient wash, and a colored
 // top accent bar, so each card has an actual, unmistakable identity.

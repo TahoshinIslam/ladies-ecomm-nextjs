@@ -81,21 +81,7 @@ const orderEndpoints = (b) => ({
     // move this row out of a status-filtered list view).
     invalidatesTags: (r, e, a) => [{ type: "Order", id: a }, { type: "Order", id: "LIST" }],
   }),
-  // Admin
-  getAllOrders: b.query({
-    query: (params = {}) => `/orders?${buildQueryString(params)}`,
-    // Per-row tags + a LIST tag, not one collection-wide tag. A mutation on one
-    // order (updateOrderStatus/cancelOrder below, or the SSE handler in
-    // hooks/useAdminEventStream.js) can invalidate just that row's
-    // tag — which only refetches THIS query if the currently-displayed
-    // page/filter actually contains that row — instead of forcing every
-    // open admin session's every orders-list page/filter to refetch on any
-    // single order change anywhere.
-    providesTags: (result) =>
-      result?.orders
-        ? [...result.orders.map((o) => ({ type: "Order", id: o._id })), { type: "Order", id: "LIST" }]
-        : [{ type: "Order", id: "LIST" }],
-  }),
+
 });
 
 // ====== Reviews ======
@@ -192,25 +178,14 @@ const paymentEndpoints = (b) => ({
   }),
 });
 
-// Analytics — no RTK Query endpoints here: the one consumer
-// (views/admin/OverviewPage.jsx) is a Server Component and
-// now calls services/analyticsService.js directly. Kept as real, tested
-// Route Handlers (app/api/analytics/*) independent of this client — this
-// only removes the now-zero-consumer client-side wrapper.
-
 // ====== Upload ======
 const uploadEndpoints = (b) => ({
 });
 
 // ====== Notifications ======
 // GET /api/notifications (and the two mutations below) are keyed by
-// requireUser() server-side, not requirePermission()/requireStaff() — any
-// signed-in user's own notifications, never just admin/employee's. Used
-// by both components/admin/NotificationsDropdown.jsx (admin/employee
-// broadcasts — new orders, low stock, ...) and the storefront's own
-// customer-facing notification bell (order-status/delivery updates, see
-// services/notificationService.js's createUserNotification) — one
-// endpoint, scoped to whichever user is currently logged in.
+// requireUser() server-side: the signed-in shopper's own notifications
+// (order-status/delivery updates, written by the admin dashboard).
 const notificationEndpoints = (b) => ({
   getNotifications: b.query({
     query: ({ page = 1, limit = 20, unreadOnly = false } = {}) => {
@@ -286,7 +261,6 @@ export const {
   useGetOrderQuery,
   useLazyGetOrderQuery,
   useCancelOrderMutation,
-  useGetAllOrdersQuery,
   useGetProductReviewsQuery,
   useGetMyReviewProductsQuery,
   useCreateReviewMutation,

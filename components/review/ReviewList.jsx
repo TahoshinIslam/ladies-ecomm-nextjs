@@ -239,7 +239,7 @@ export function ReviewItem({ review, isOwn }) {
                   className="object-cover"
                 />
               ) : (
-                // Same reasoning as views/admin/UsersPage.jsx — a reviewer's
+                // A reviewer's
                 // `avatar` is an arbitrary, unrestricted-origin URL that
                 // proxy.js's production CSP already blocks the browser from
                 // loading directly unless it's res.cloudinary.com/placehold.co;

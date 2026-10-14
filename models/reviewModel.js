@@ -2,7 +2,6 @@ import { query } from "../config/db.js";
 import { generateObjectId } from "../lib/objectId.js";
 import { getOrganizationId } from "../lib/tenant.js";
 import User from "./userModel.js";
-import Product from "./productModel.js";
 
 function rowToReview(row, user, repliedBy) {
   if (!row) return null;
@@ -178,54 +177,6 @@ async function saveReview(review) {
   return review;
 }
 
-const REVIEW_SORT_COLUMNS = { createdAt: "created_at", rating: "rating", helpfulCount: "helpful_count" };
-
-async function findAdminList({ rating, productId, search, sortBy, sortOrder, skip, limit }) {
-  const clauses = [];
-  const params = [];
-  if (rating) {
-    clauses.push("rating = ?");
-    params.push(Number(rating));
-  }
-  if (productId) {
-    clauses.push("product_id = ?");
-    params.push(productId);
-  }
-  if (search) {
-    clauses.push("(comment LIKE ? OR title LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
-  }
-  const filters = clauses.length ? `AND ${clauses.join(" AND ")}` : "";
-  const sortCol = REVIEW_SORT_COLUMNS[sortBy] || "created_at";
-  const sortDir = sortOrder === "asc" ? "ASC" : "DESC";
-
-  const rows = await query(
-    `SELECT * FROM reviews
-      WHERE organization_id = ? AND deleted_at IS NULL ${filters}
-      ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
-    [getOrganizationId(), ...params, Number(limit), Number(skip)],
-  );
-  const totalRows = await query(
-    `SELECT COUNT(*) AS n FROM reviews WHERE organization_id = ? AND deleted_at IS NULL ${filters}`,
-    [getOrganizationId(), ...params],
-  );
-
-  const productIds = [...new Set(rows.map((r) => r.product_id))];
-  const products = productIds.length ? await Product.findByIds(productIds) : [];
-  const productById = new Map(products.map((p) => [p._id, { _id: p._id, name: p.name, images: p.images, slug: p.slug }]));
-
-  const reviews = await Promise.all(
-    rows.map(async (r) => {
-      const review = await populateOne(r, { populateUser: true, populateReplier: true });
-      review.user = await userSummary(r.customer_id, ["name", "email", "avatar"]);
-      review.product = productById.get(r.product_id) || r.product_id;
-      return review;
-    }),
-  );
-
-  return { reviews, total: totalRows[0].n };
-}
-
 const Review = {
   findById,
   findByProduct,
@@ -233,7 +184,6 @@ const Review = {
   ratingBreakdown,
   findByUserAndProducts,
   create,
-  findAdminList,
 };
 
 export default Review;

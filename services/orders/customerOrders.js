@@ -33,12 +33,8 @@ export async function getOrder(userId, role, orderId) {
 }
 
 
-// Shared by cancelOrder() (customer/admin-initiated) and updateOrderStatus()
-// (admin status-machine move to "cancelled") so BOTH entry points that can
-// land an order in "cancelled" restore stock and coupon usage the same way,
-// inside the same transaction as the status write (ORDER_STATUS_TRANSITIONS
-// allows "cancelled" from pending/paid/processing, so the admin path needs
-// the same restore as the customer one).
+// Used by cancelOrder() to restore stock and coupon usage inside the same
+// transaction as the status write.
 export async function restoreStockAndCoupon(conn, order) {
   // Cancelling before dispatch: the goods never left, so the reservation is
   // released and nothing is "put back". An order placed before inventory

@@ -182,14 +182,6 @@ async function create(data) {
   return findById(id);
 }
 
-async function countByParent(parentId) {
-  const rows = await query(
-    "SELECT COUNT(*) AS n FROM categories WHERE organization_id = ? AND parent_id = ? AND deleted_at IS NULL",
-    [getOrganizationId(), parentId],
-  );
-  return rows[0].n;
-}
-
 async function existsWithParent(parentId) {
   const rows = await query(
     "SELECT 1 FROM categories WHERE organization_id = ? AND parent_id = ? AND deleted_at IS NULL LIMIT 1",
@@ -207,7 +199,6 @@ const Category = {
   findByParent,
   findChildIdsByParents,
   create,
-  countByParent,
   existsWithParent,
   buildSlug,
 };

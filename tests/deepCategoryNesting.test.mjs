@@ -10,7 +10,7 @@ import { dbReady, skipReason, connectTestDb, disconnectTestDb, deleteRows } from
 const unique = () => crypto.randomBytes(5).toString("hex");
 
 describe("unlimited category nesting", { skip: !dbReady && skipReason }, () => {
-  let categoryService, Category, Product, listProducts, listGroupings;
+  let Category, Product, listProducts, listGroupings;
   const categoryIds = [];
   const productIds = [];
   const chain = []; // root ... deepest
@@ -20,7 +20,6 @@ describe("unlimited category nesting", { skip: !dbReady && skipReason }, () => {
 
   before(async () => {
     await connectTestDb();
-    categoryService = await import("../services/categoryService.js");
     ({ default: Category } = await import("../models/categoryModel.js"));
     ({ default: Product } = await import("../models/productModel.js"));
     ({ listProducts, listGroupings } = await import("../services/productService.js"));
@@ -28,13 +27,16 @@ describe("unlimited category nesting", { skip: !dbReady && skipReason }, () => {
     // Eight levels deep: far past the old three-level limit.
     let parent = null;
     for (let depth = 0; depth < 8; depth += 1) {
-      const c = await categoryService.createCategory({ name: `Deep ${depth} ${unique()}`, parent });
+      const c = await Category.create({ name: `Deep ${depth} ${unique()}`, parent });
       chain.push(c);
       categoryIds.push(c._id);
       parent = c._id;
     }
-    sibling = await categoryService.createCategory({ name: `Deep sibling ${unique()}`, parent: chain[0]._id });
+    sibling = await Category.create({ name: `Deep sibling ${unique()}`, parent: chain[0]._id });
     categoryIds.push(sibling._id);
+    // New categories are visible on the storefront only after the cached
+    // visibility set is dropped.
+    (await import("../services/storefrontScopeService.js")).resetStorefrontScopeCache();
 
     const make = async (category) => {
       const s = unique();
@@ -97,12 +99,5 @@ describe("unlimited category nesting", { skip: !dbReady && skipReason }, () => {
     assert.equal(siblingTile.isLeaf, true);
     const lower = await listGroupings(String(chain[5]._id));
     assert.equal(lower.find((g) => String(g._id) === String(chain[6]._id)).count, 1);
-  });
-
-  test("moving a category under its own descendant is refused (it would cut both off from the root)", async () => {
-    await assert.rejects(() => categoryService.updateCategory(String(chain[1]._id), { parent: String(chain[5]._id) }), /under itself|own subcategor/);
-    await assert.rejects(() => categoryService.updateCategory(String(chain[1]._id), { parent: String(chain[1]._id) }), /its own parent/);
-    const unchanged = await Category.findById(chain[1]._id);
-    assert.equal(String(unchanged.parent), String(chain[0]._id));
   });
 });

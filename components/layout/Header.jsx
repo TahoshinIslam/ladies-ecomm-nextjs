@@ -65,8 +65,7 @@ export default function Header({ initialDepartments = [] }) {
   const user = useSelector(selectCurrentUser);
   // Mounted once here — Header renders on every storefront page — so a
   // signed-in shopper's order-status/delivery notifications reach their
-  // bell live, matching how useAdminEventStream is mounted once in
-  // AdminLayout for the same reason on the admin side.
+  // bell live.
   useUserEventStream();
   const isAdmin = useSelector(selectCanAccessAdmin);
   const mobileMenuOpen = useSelector((s) => s.ui.mobileMenuOpen);
@@ -510,9 +509,7 @@ const notificationTimeAgo = (iso) => {
   return new Date(iso).toLocaleDateString();
 };
 
-// Customer-facing counterpart to components/admin/NotificationsDropdown.jsx
-// — same underlying endpoint (GET/PATCH /api/notifications), same
-// interaction shape. Real-time delivery is useUserEventStream (mounted
+// The shopper's notification bell (GET/PATCH /api/notifications). Real-time delivery is useUserEventStream (mounted
 // once in Header() above); this poll is just the fallback for a dropped
 // SSE connection.
 function NotificationBell() {

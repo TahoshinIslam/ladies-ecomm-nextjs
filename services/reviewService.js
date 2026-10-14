@@ -166,12 +166,3 @@ export async function markHelpful(reviewId, userId) {
   });
 }
 
-// ========== ADMIN ==========
-
-export async function listAllReviews({ page = 1, limit = 20, rating, productId, search, sortBy, sortOrder } = {}) {
-  const skip = (Number(page) - 1) * Number(limit);
-  const { reviews, total } = await Review.findAdminList({ rating, productId, search, sortBy, sortOrder, skip, limit: Number(limit) });
-  return { total, page: Number(page), pages: Math.ceil(total / Number(limit)) || 1, count: reviews.length, reviews };
-}
-
-

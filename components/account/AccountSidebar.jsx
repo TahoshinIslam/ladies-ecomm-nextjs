@@ -24,8 +24,7 @@ const ITEMS = [
  * just its own 3 tabs, with Dashboard sitting outside it entirely).
  *
  * Styled as a real sidebar panel from `lg` up — bordered card, sticky, a
- * small section header — mirroring components/admin/AdminSidebar.jsx's
- * visual language instead of reading as a bare row of links floating in the
+ * small section header — instead of reading as a bare row of links floating in the
  * page. Below `lg` there's no room for a fixed-width column, so it falls
  * back to a horizontal scrollable pill bar (same links, same active state).
  */

@@ -1,76 +1,8 @@
 import Promotion from "../models/promotionModel.js";
 import Product from "../models/productModel.js";
 import Category from "../models/categoryModel.js";
-import { HttpError } from "../lib/http.js";
-import { requireObjectIdFormat, isObjectIdFormat } from "../lib/validation.js";
+import { isObjectIdFormat } from "../lib/validation.js";
 import { isSafeInternalPath } from "../schemas/promotionSchemas.js";
-import { sanitizeFraming } from "../lib/imageFraming.js";
-
-// One shared model backs two storefront surfaces (the homepage hero
-// carousel and visitor campaign popups) rather than two competing schemas.
-
-// Fields that change what a visitor actually SEES or is sent to — bumping
-// `version` on any of these (see updatePromotion() below) intentionally
-// resets a popup visitor's stored "already dismissed/shown" eligibility
-// (CampaignPopup.jsx compares its stored version against the live one).
-const CREATIVE_FIELDS = [
-  "title", "titleBn", "subtitle", "subtitleBn", "ctaLabel", "ctaLabelBn",
-  "desktopImage", "mobileImage", "desktopFraming", "mobileFraming", "imageAlt", "imageAltBn",
-  "targetType", "targetProduct", "targetCategory", "targetCollection", "targetShopFilter", "targetUrl",
-];
-
-// ================================================================ ADMIN
-
-
-// `placement` is a 1:1 derivation of `type` — the admin form never submits
-// it directly, so it's computed here rather than required as its own input.
-const PLACEMENT_BY_TYPE = { carousel: "home_hero", popup: "storefront_popup" };
-
-// Framing is stored via its own statement (models/promotionModel.js), and on
-// a database without migration 0006 there is nowhere to put it — refuse
-// loudly BEFORE writing anything rather than silently dropping the crop.
-async function assertFramingStorage(...framings) {
-  if (framings.some(Boolean) && !(await Promotion.framingInstalled())) {
-    throw new HttpError(409, "Image framing storage is not installed on this database — run scripts/runMigrations.mjs (migration 0006_image_framing) first.");
-  }
-}
-
-async function persistFraming(id, desktopFraming, mobileFraming) {
-  if (!(await Promotion.framingInstalled())) return;
-  await Promotion.writeFraming(id, sanitizeFraming(desktopFraming), sanitizeFraming(mobileFraming));
-}
-
-
-export async function updatePromotion(id, body, userId) {
-  requireObjectIdFormat(id, "id");
-  const existing = await Promotion.findById(id);
-  if (!existing) throw new HttpError(404, "Promotion not found");
-
-  const creativeChanged = CREATIVE_FIELDS.some(
-    (field) => field in body && JSON.stringify(body[field] ?? null) !== JSON.stringify(existing[field] ?? null),
-  );
-
-  // A crop describes one specific image: replacing the image without also
-  // sending a new crop must not leave the old crop applied to the new picture.
-  const staleFraming = {};
-  if ("desktopImage" in body && body.desktopImage !== existing.desktopImage && !("desktopFraming" in body)) staleFraming.desktopFraming = null;
-  if ("mobileImage" in body && body.mobileImage !== existing.mobileImage && !("mobileFraming" in body)) staleFraming.mobileFraming = null;
-  await assertFramingStorage(body.desktopFraming, body.mobileFraming);
-
-  Object.assign(existing, body, staleFraming, { updatedBy: userId || null });
-  // Defense in depth to match createPromotion() above — the admin form
-  // never changes `type` on an existing promotion (disabled in the editor
-  // once created), but a direct API call that did must not leave
-  // `placement` stale.
-  if (body.type) existing.placement = PLACEMENT_BY_TYPE[body.type];
-  if (creativeChanged) existing.version += 1;
-  await existing.save();
-  await persistFraming(existing._id, existing.desktopFraming, existing.mobileFraming);
-  return existing;
-}
-
-
-
 
 // ================================================================ TARGET RESOLUTION
 

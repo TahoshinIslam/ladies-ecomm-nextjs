@@ -200,9 +200,6 @@ async function run() {
 
   check("order by id is scoped", (await Order.findById(decoy.orderId)) === null);
   check("orders by user are scoped", (await Order.findMyOrders(decoy.customerId)).length === 0);
-  const adminOrders = await Order.findAdminList({ skip: 0, limit: 200 });
-  check("admin order list excludes the decoy", !adminOrders.orders.some((o) => o._id === decoy.orderId),
-    `${adminOrders.total} orders`);
   check("delivered-product lookup is scoped",
     (await Order.findDeliveredProductIdsByUser(decoy.customerId)).length === 0);
   check("delivered-with-product is scoped",
@@ -218,14 +215,10 @@ async function run() {
   check("rating breakdown is scoped",
     Object.values(await Review.ratingBreakdown(decoy.productId)).every((v) => Number(v) === 0));
   check("review count by product is scoped", Number(await Review.countByProduct(decoy.productId)) === 0);
-  const adminReviews = await Review.findAdminList({ skip: 0, limit: 200 });
-  check("admin review list excludes the decoy", !adminReviews.reviews.some((r) => r._id === decoy.reviewId));
 
   check("coupon by code is scoped", (await Coupon.findByCode("DECOYCODE")) === null);
   check("active coupon by code is scoped", (await Coupon.findByCodeActive("DECOYCODE")) === null);
   check("coupon by id is scoped", (await Coupon.findById(decoy.couponId)) === null);
-  const adminCoupons = await Coupon.findAdminList({ skip: 0, limit: 200 });
-  check("admin coupon list excludes the decoy", !adminCoupons.some((c) => c._id === decoy.couponId));
 
   const themes = await Theme.findAll();
   check("themes exclude the decoy", !themes.some((t) => t._id === decoy.themeId), `${themes.length} themes`);
@@ -239,36 +232,6 @@ async function run() {
   check("attribute definitions exclude the decoy", !attrs.some((a) => a._id === decoy.attrId),
     `${attrs.length} definitions`);
   check("attribute by key is scoped", (await AttributeDefinition.findByKeys(["decoyattr"])).length === 0);
-
-  /* ── Aggregates must count only this store ──────────────────────────── */
-
-  const analytics = await import("../services/analyticsService.js");
-  const overview = await analytics.getOverview();
-  const [{ n: realOrders }] = await query(
-    `SELECT COUNT(*) AS n FROM orders
-      WHERE organization_id = ? AND deleted_at IS NULL AND status NOT IN ('cancelled', 'refunded')`,
-    [org],
-  );
-  const [{ n: realCustomers }] = await query(
-    "SELECT COUNT(*) AS n FROM customers WHERE organization_id = ? AND deleted_at IS NULL",
-    [org],
-  );
-  check("order count excludes the decoy", Number(overview.totalOrders) === Number(realOrders),
-    `${overview.totalOrders} orders`);
-  check("customer count excludes the decoy", Number(overview.totalUsers) === Number(realCustomers),
-    `${overview.totalUsers} customers`);
-  check("revenue excludes the decoy's 999", overview.totalRevenue < 999 || !String(overview.totalRevenue).includes("999"),
-    `revenue ${overview.totalRevenue}`);
-
-  const top = await analytics.getTopProducts(50);
-  check("top products exclude the decoy", !top.some((t) => t._id === decoy.productId));
-  const byMethod = await analytics.getRevenueByMethod();
-  check("revenue by method excludes the decoy",
-    byMethod.reduce((sum, r) => sum + r.revenue, 0) < Number(overview.totalRevenue) + 1);
-  const breakdown = await analytics.getStatusBreakdown();
-  check("status breakdown counts only this store",
-    breakdown.reduce((sum, r) => sum + Number(r.count), 0) ===
-      Number((await query("SELECT COUNT(*) AS n FROM orders WHERE organization_id = ? AND deleted_at IS NULL", [org]))[0].n));
 
   /* ── Uploaded media ─────────────────────────────────────────────────── */
 
